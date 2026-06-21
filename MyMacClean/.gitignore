@@ -1,0 +1,10 @@
+.superpowers/
+.worktrees/
+.DS_Store
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+.build/
+dist/
+.swiftpm/

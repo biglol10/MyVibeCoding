@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "FlowPilot Browser Bridge",
+  "version": "0.1.0",
+  "permissions": ["tabs", "activeTab"],
+  "host_permissions": ["http://127.0.0.1:17321/*"],
+  "background": {
+    "service_worker": "dist/background.js",
+    "type": "module"
+  }
+}

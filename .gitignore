@@ -1,0 +1,23 @@
+.DS_Store
+*.log
+*.tmp
+.env
+.env.*
+
+# Swift Package Manager
+.build/
+DerivedData/
+*.xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# Node / Vite / Tauri
+node_modules/
+dist/
+dist-windows/
+release/
+src-tauri/target/
+
+# Local Superpowers/Codex scratch files
+.superpowers/
+.worktrees/
+docs/superpowers/
