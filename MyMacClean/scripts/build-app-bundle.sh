@@ -16,5 +16,7 @@ cp "$ROOT_DIR/.build/release/MyMacCleanApp" "$MACOS_DIR/MyMacCleanApp"
 cp "$ROOT_DIR/Sources/MyMacCleanApp/Resources/MyMacCleanInfo.plist" "$CONTENTS_DIR/Info.plist"
 cp "$ROOT_DIR/Sources/MyMacCleanApp/Resources/MyMacCleanIcon.icns" "$RESOURCES_DIR/MyMacCleanIcon.icns"
 chmod +x "$MACOS_DIR/MyMacCleanApp"
+codesign --force --deep --sign - "$APP_DIR"
+codesign --verify --deep --strict "$APP_DIR"
 
 echo "$APP_DIR"
