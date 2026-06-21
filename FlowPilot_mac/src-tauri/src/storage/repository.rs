@@ -1,12 +1,11 @@
 use chrono::{DateTime, Utc};
 use rusqlite::types::Type;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::io;
 use std::path::Path;
 use uuid::Uuid;
 
 use crate::browser_bridge::BrowserEventDraft;
-use crate::collector::snapshot::WindowObservation;
 use crate::domain::activity::{ActivitySession, ActivitySource};
 use crate::domain::presets::default_rules;
 use crate::domain::rules::{ClassificationRule, ProductivityCategory, RuleType};
@@ -19,6 +18,40 @@ pub struct BrowserEvent {
     pub domain: String,
     pub url: Option<String>,
     pub title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivityGroup {
+    pub id: String,
+    pub name: String,
+    pub color: String,
+    pub matchers: Vec<ActivityGroupMatcher>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivityGroupMatcher {
+    pub id: String,
+    pub group_id: String,
+    pub rule_type: RuleType,
+    pub pattern: String,
+    pub priority: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionOverride {
+    pub session_id: String,
+    pub category_override: Option<ProductivityCategory>,
+    pub display_name_override: Option<String>,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DisplayNameOverride {
+    pub id: String,
+    pub rule_type: RuleType,
+    pub pattern: String,
+    pub display_name: String,
+    pub priority: i64,
 }
 
 pub struct Repository {
@@ -131,6 +164,7 @@ impl Repository {
     }
 
     pub fn save_browser_event(&self, draft: BrowserEventDraft) -> rusqlite::Result<()> {
+        let observed_at = Utc::now();
         self.conn.execute(
             r#"
             INSERT INTO browser_events (id, occurred_at, domain, url, title)
@@ -138,48 +172,91 @@ impl Repository {
             "#,
             params![
                 Uuid::new_v4().to_string(),
-                Utc::now().to_rfc3339(),
-                draft.domain,
-                draft.url,
-                draft.title,
+                observed_at.to_rfc3339(),
+                &draft.domain,
+                draft.url.as_deref(),
+                &draft.title,
             ],
         )?;
+        self.save_browser_tab_observation(&draft, observed_at)?;
         Ok(())
     }
 
-    pub fn save_window_observations(
+    fn save_browser_tab_observation(
         &self,
-        session_id: &str,
-        observations: &[WindowObservation],
+        draft: &BrowserEventDraft,
+        observed_at: DateTime<Utc>,
     ) -> rusqlite::Result<()> {
-        let now = Utc::now().to_rfc3339();
+        let Some(tab_id) = draft.tab_id else {
+            return Ok(());
+        };
+        let process_name = format!("browser-tab:{tab_id}");
+        let latest = self.latest_browser_tab_session(&process_name)?;
+        if let Some(mut session) = latest {
+            let should_extend = session.domain.as_deref() == Some(draft.domain.as_str())
+                && session.window_title == draft.title;
+            session.ended_at = observed_at.max(session.started_at);
+            session.duration_seconds = (session.ended_at - session.started_at)
+                .num_seconds()
+                .max(1);
+            self.save_session(&session)?;
 
-        for observation in observations {
-            self.conn.execute(
-                r#"
-                INSERT INTO window_observations (
-                  id, session_id, observed_at, app_name, process_name, pid, bundle_identifier,
-                  window_title, is_visible, is_frontmost, is_primary, created_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-                "#,
-                params![
-                    Uuid::new_v4().to_string(),
-                    session_id,
-                    observation.observed_at.to_rfc3339(),
-                    &observation.app_name,
-                    &observation.process_name,
-                    observation.pid.map(i64::from),
-                    observation.bundle_identifier.as_deref(),
-                    observation.window_title.as_deref(),
-                    bool_to_db(observation.is_visible),
-                    bool_to_db(observation.is_frontmost),
-                    bool_to_db(observation.is_primary),
-                    &now,
-                ],
-            )?;
+            if should_extend {
+                return Ok(());
+            }
         }
 
-        Ok(())
+        let session = ActivitySession {
+            id: format!("browser-tab:{}", Uuid::new_v4()),
+            started_at: observed_at,
+            ended_at: observed_at,
+            duration_seconds: 1,
+            source: ActivitySource::BrowserExtension,
+            app_name: "Chrome".into(),
+            process_name,
+            window_title: draft.title.clone(),
+            domain: Some(draft.domain.clone()),
+            url: draft.url.clone(),
+            is_idle: false,
+        };
+        self.save_session(&session)
+    }
+
+    fn latest_browser_tab_session(
+        &self,
+        process_name: &str,
+    ) -> rusqlite::Result<Option<ActivitySession>> {
+        self.conn
+            .query_row(
+                r#"
+                SELECT id, started_at, ended_at, duration_seconds, source, app_name, process_name,
+                       window_title, domain, url, is_idle
+                FROM activity_sessions
+                WHERE source='browserExtension' AND process_name=?1
+                ORDER BY ended_at DESC
+                LIMIT 1
+                "#,
+                [process_name],
+                |row| {
+                    let started_at: String = row.get(1)?;
+                    let ended_at: String = row.get(2)?;
+                    let source: String = row.get(4)?;
+                    Ok(ActivitySession {
+                        id: row.get(0)?,
+                        started_at: parse_utc_rfc3339(1, &started_at)?,
+                        ended_at: parse_utc_rfc3339(2, &ended_at)?,
+                        duration_seconds: row.get(3)?,
+                        source: activity_source_from_db(4, &source)?,
+                        app_name: row.get(5)?,
+                        process_name: row.get(6)?,
+                        window_title: row.get(7)?,
+                        domain: row.get(8)?,
+                        url: row.get(9)?,
+                        is_idle: row.get::<_, i64>(10)? == 1,
+                    })
+                },
+            )
+            .optional()
     }
 
     pub fn list_recent_browser_events(&self, limit: i64) -> rusqlite::Result<Vec<BrowserEvent>> {
@@ -262,6 +339,223 @@ impl Repository {
                 priority: row.get(5)?,
                 is_builtin: row.get::<_, i64>(6)? == 1,
                 is_enabled: row.get::<_, i64>(7)? == 1,
+            })
+        })?;
+
+        rows.collect()
+    }
+
+    pub fn save_group(&self, group: &ActivityGroup) -> rusqlite::Result<()> {
+        let now = Utc::now().to_rfc3339();
+
+        self.conn.execute(
+            r#"
+            INSERT INTO activity_groups (id, name, color, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(id) DO UPDATE SET
+              name = excluded.name,
+              color = excluded.color,
+              updated_at = excluded.updated_at
+            "#,
+            params![&group.id, &group.name, &group.color, &now, &now],
+        )?;
+
+        self.conn.execute(
+            "DELETE FROM activity_group_matchers WHERE group_id=?1",
+            [&group.id],
+        )?;
+
+        for matcher in &group.matchers {
+            self.conn.execute(
+                r#"
+                INSERT INTO activity_group_matchers (
+                  id, group_id, rule_type, pattern, priority, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                "#,
+                params![
+                    &matcher.id,
+                    &group.id,
+                    rule_type_to_db(&matcher.rule_type),
+                    &matcher.pattern,
+                    matcher.priority,
+                    &now,
+                    &now,
+                ],
+            )?;
+        }
+
+        Ok(())
+    }
+
+    pub fn list_groups(&self) -> rusqlite::Result<Vec<ActivityGroup>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT id, name, color
+            FROM activity_groups
+            ORDER BY updated_at DESC, name ASC
+            "#,
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            let id: String = row.get(0)?;
+            Ok(ActivityGroup {
+                matchers: self.list_group_matchers(&id)?,
+                id,
+                name: row.get(1)?,
+                color: row.get(2)?,
+            })
+        })?;
+
+        rows.collect()
+    }
+
+    pub fn delete_group(&self, group_id: &str) -> rusqlite::Result<()> {
+        self.conn
+            .execute("DELETE FROM activity_groups WHERE id=?1", [group_id])?;
+        Ok(())
+    }
+
+    pub fn upsert_session_override(&self, override_row: &SessionOverride) -> rusqlite::Result<()> {
+        let now = Utc::now().to_rfc3339();
+        let category = override_row
+            .category_override
+            .as_ref()
+            .map(productivity_category_to_db);
+
+        self.conn.execute(
+            r#"
+            INSERT INTO session_overrides (
+              session_id, category_override, display_name_override, note, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(session_id) DO UPDATE SET
+              category_override = excluded.category_override,
+              display_name_override = excluded.display_name_override,
+              note = excluded.note,
+              updated_at = excluded.updated_at
+            "#,
+            params![
+                &override_row.session_id,
+                category,
+                override_row.display_name_override.as_deref(),
+                override_row.note.as_deref(),
+                &now,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_session_override(
+        &self,
+        session_id: &str,
+    ) -> rusqlite::Result<Option<SessionOverride>> {
+        self.conn
+            .query_row(
+                r#"
+                SELECT session_id, category_override, display_name_override, note
+                FROM session_overrides
+                WHERE session_id=?1
+                "#,
+                [session_id],
+                |row| {
+                    let category: Option<String> = row.get(1)?;
+                    Ok(SessionOverride {
+                        session_id: row.get(0)?,
+                        category_override: category
+                            .as_deref()
+                            .map(|value| productivity_category_from_db(1, value))
+                            .transpose()?,
+                        display_name_override: row.get(2)?,
+                        note: row.get(3)?,
+                    })
+                },
+            )
+            .optional()
+    }
+
+    pub fn delete_session_override(&self, session_id: &str) -> rusqlite::Result<()> {
+        self.conn
+            .execute("DELETE FROM session_overrides WHERE session_id=?1", [session_id])?;
+        Ok(())
+    }
+
+    pub fn save_display_name_override(
+        &self,
+        override_row: &DisplayNameOverride,
+    ) -> rusqlite::Result<()> {
+        let now = Utc::now().to_rfc3339();
+
+        self.conn.execute(
+            r#"
+            INSERT INTO display_name_overrides (
+              id, rule_type, pattern, display_name, priority, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ON CONFLICT(id) DO UPDATE SET
+              rule_type = excluded.rule_type,
+              pattern = excluded.pattern,
+              display_name = excluded.display_name,
+              priority = excluded.priority,
+              updated_at = excluded.updated_at
+            "#,
+            params![
+                &override_row.id,
+                rule_type_to_db(&override_row.rule_type),
+                &override_row.pattern,
+                &override_row.display_name,
+                override_row.priority,
+                &now,
+                &now,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_display_name_overrides(&self) -> rusqlite::Result<Vec<DisplayNameOverride>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT id, rule_type, pattern, display_name, priority
+            FROM display_name_overrides
+            ORDER BY priority DESC, updated_at DESC, id ASC
+            "#,
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            let rule_type: String = row.get(1)?;
+            Ok(DisplayNameOverride {
+                id: row.get(0)?,
+                rule_type: rule_type_from_db(1, &rule_type)?,
+                pattern: row.get(2)?,
+                display_name: row.get(3)?,
+                priority: row.get(4)?,
+            })
+        })?;
+
+        rows.collect()
+    }
+
+    pub fn delete_display_name_override(&self, override_id: &str) -> rusqlite::Result<()> {
+        self.conn
+            .execute("DELETE FROM display_name_overrides WHERE id=?1", [override_id])?;
+        Ok(())
+    }
+
+    fn list_group_matchers(&self, group_id: &str) -> rusqlite::Result<Vec<ActivityGroupMatcher>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT id, group_id, rule_type, pattern, priority
+            FROM activity_group_matchers
+            WHERE group_id=?1
+            ORDER BY priority DESC, updated_at DESC, id ASC
+            "#,
+        )?;
+
+        let rows = stmt.query_map([group_id], |row| {
+            let rule_type: String = row.get(2)?;
+            Ok(ActivityGroupMatcher {
+                id: row.get(0)?,
+                group_id: row.get(1)?,
+                rule_type: rule_type_from_db(2, &rule_type)?,
+                pattern: row.get(3)?,
+                priority: row.get(4)?,
             })
         })?;
 
@@ -437,67 +731,6 @@ mod tests {
         assert_eq!(rows[0].domain.as_deref(), Some("chatgpt.com"));
         assert_eq!(rows[0].url, None);
         assert!(rows[0].is_idle);
-    }
-
-    #[test]
-    fn saves_window_observations_without_changing_activity_sessions() {
-        let repo = Repository::in_memory_for_test().expect("repo");
-        let started_at = Utc::now();
-        let session = test_session("session-with-windows", started_at);
-        repo.save_session(&session).expect("session saved");
-
-        let observations = vec![
-            WindowObservation {
-                observed_at: started_at,
-                app_name: "Safari".into(),
-                process_name: "Safari".into(),
-                pid: Some(100),
-                bundle_identifier: Some("com.apple.Safari".into()),
-                window_title: Some("Developer Documentation".into()),
-                is_visible: true,
-                is_frontmost: true,
-                is_primary: true,
-            },
-            WindowObservation {
-                observed_at: started_at,
-                app_name: "Notes".into(),
-                process_name: "Notes".into(),
-                pid: Some(101),
-                bundle_identifier: Some("com.apple.Notes".into()),
-                window_title: Some("Meeting notes".into()),
-                is_visible: true,
-                is_frontmost: false,
-                is_primary: false,
-            },
-        ];
-
-        repo.save_window_observations(&session.id, &observations)
-            .expect("observations saved");
-
-        let observation_count: i64 = repo
-            .conn
-            .query_row("SELECT COUNT(*) FROM window_observations", [], |row| {
-                row.get(0)
-            })
-            .expect("observation count");
-        let session_count: i64 = repo
-            .conn
-            .query_row("SELECT COUNT(*) FROM activity_sessions", [], |row| {
-                row.get(0)
-            })
-            .expect("session count");
-        let primary_count: i64 = repo
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM window_observations WHERE is_primary=1 AND session_id=?1",
-                [&session.id],
-                |row| row.get(0),
-            )
-            .expect("primary count");
-
-        assert_eq!(observation_count, 2);
-        assert_eq!(session_count, 1);
-        assert_eq!(primary_count, 1);
     }
 
     #[test]
@@ -688,6 +921,7 @@ mod tests {
         let repo = Repository::in_memory_for_test().expect("repo");
         repo.save_browser_event(BrowserEventDraft {
             domain: "youtube.com".into(),
+            tab_id: None,
             url: None,
             title: "YouTube".into(),
         })
@@ -697,5 +931,79 @@ mod tests {
 
         assert_eq!(events[0].domain, "youtube.com");
         assert_eq!(events[0].url, None);
+    }
+
+    #[test]
+    fn browser_tab_observations_extend_activity_sessions_by_domain() {
+        let repo = Repository::in_memory_for_test().expect("repo");
+        let start = Utc::now();
+
+        repo.save_browser_tab_observation(
+            &BrowserEventDraft {
+                domain: "youtube.com".into(),
+                tab_id: Some(7),
+                url: None,
+                title: "YouTube".into(),
+            },
+            start,
+        )
+        .expect("first observation");
+        repo.save_browser_tab_observation(
+            &BrowserEventDraft {
+                domain: "youtube.com".into(),
+                tab_id: Some(7),
+                url: None,
+                title: "YouTube".into(),
+            },
+            start + chrono::Duration::seconds(65),
+        )
+        .expect("second observation");
+
+        let rows = repo
+            .list_sessions_between(start - chrono::Duration::seconds(1), start + chrono::Duration::minutes(2))
+            .expect("sessions");
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].source, ActivitySource::BrowserExtension);
+        assert_eq!(rows[0].domain.as_deref(), Some("youtube.com"));
+        assert_eq!(rows[0].process_name, "browser-tab:7");
+        assert_eq!(rows[0].duration_seconds, 65);
+    }
+
+    #[test]
+    fn browser_tab_navigation_starts_a_new_domain_session() {
+        let repo = Repository::in_memory_for_test().expect("repo");
+        let start = Utc::now();
+
+        repo.save_browser_tab_observation(
+            &BrowserEventDraft {
+                domain: "youtube.com".into(),
+                tab_id: Some(7),
+                url: None,
+                title: "YouTube".into(),
+            },
+            start,
+        )
+        .expect("youtube observation");
+        repo.save_browser_tab_observation(
+            &BrowserEventDraft {
+                domain: "naver.com".into(),
+                tab_id: Some(7),
+                url: None,
+                title: "Naver".into(),
+            },
+            start + chrono::Duration::seconds(30),
+        )
+        .expect("naver observation");
+
+        let rows = repo
+            .list_sessions_between(start - chrono::Duration::seconds(1), start + chrono::Duration::minutes(1))
+            .expect("sessions");
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].domain.as_deref(), Some("youtube.com"));
+        assert_eq!(rows[0].duration_seconds, 30);
+        assert_eq!(rows[1].domain.as_deref(), Some("naver.com"));
+        assert_eq!(rows[1].duration_seconds, 1);
     }
 }

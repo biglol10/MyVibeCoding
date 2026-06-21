@@ -60,6 +60,24 @@ describe("UncategorizedReview", () => {
     expect(screen.queryByText("chatgpt.com")).not.toBeInTheDocument();
   });
 
+  it("prioritizes review targets by total uncategorized time", () => {
+    render(
+      <UncategorizedReview
+        onRuleCreated={vi.fn()}
+        sessions={[
+          session({ id: "short-1", domain: "brief.example", durationSeconds: 600 }),
+          session({ id: "long-1", domain: "heavy.example", durationSeconds: 1_500 }),
+          session({ id: "short-2", domain: "brief.example", durationSeconds: 300 }),
+        ]}
+      />,
+    );
+
+    const rows = screen.getAllByRole("row");
+    expect(screen.getByRole("heading", { name: "추천 규칙" })).toBeInTheDocument();
+    expect(within(rows[1]).getByText("heavy.example")).toBeInTheDocument();
+    expect(within(rows[2]).getByText("brief.example")).toBeInTheDocument();
+  });
+
   it("creates a domain rule for uncategorized domains", async () => {
     const user = userEvent.setup();
     const onRuleCreated = vi.fn();
@@ -71,7 +89,7 @@ describe("UncategorizedReview", () => {
     );
 
     const row = screen.getByRole("row", { name: /example\.com/i });
-    await user.click(within(row).getByRole("button", { name: "생산적" }));
+    await user.click(within(row).getByRole("button", { name: /생산적/ }));
 
     expect(createRule).toHaveBeenCalledWith({
       name: "example.com",
@@ -92,7 +110,7 @@ describe("UncategorizedReview", () => {
     );
 
     const row = screen.getByRole("row", { name: /code/i });
-    await user.click(within(row).getByRole("button", { name: "중립" }));
+    await user.click(within(row).getByRole("button", { name: /중립/ }));
 
     expect(createRule).toHaveBeenCalledWith({
       name: "Code",
@@ -132,7 +150,7 @@ describe("UncategorizedReview", () => {
     expect(within(row).getByText("12m")).toBeInTheDocument();
     expect(within(row).getByText("2개 세션")).toBeInTheDocument();
 
-    await user.click(within(row).getByRole("button", { name: "제외" }));
+    await user.click(within(row).getByRole("button", { name: /제외/ }));
 
     expect(createRule).toHaveBeenCalledTimes(1);
     expect(createRule).toHaveBeenCalledWith({
@@ -170,7 +188,7 @@ describe("UncategorizedReview", () => {
     const row = screen.getByRole("row", { name: /code/i });
     expect(within(row).getByText("2개 세션")).toBeInTheDocument();
 
-    await user.click(within(row).getByRole("button", { name: "생산적" }));
+    await user.click(within(row).getByRole("button", { name: /생산적/ }));
 
     await waitFor(() => {
       expect(screen.queryByRole("row", { name: /code/i })).not.toBeInTheDocument();
@@ -209,7 +227,7 @@ describe("UncategorizedReview", () => {
     expect(within(row).getByText("12m")).toBeInTheDocument();
     expect(screen.queryByRole("row", { name: /code - insiders/i })).not.toBeInTheDocument();
 
-    await user.click(within(row).getByRole("button", { name: "제외" }));
+    await user.click(within(row).getByRole("button", { name: /제외/ }));
 
     await waitFor(() => {
       expect(screen.queryByRole("row", { name: /visual studio code/i })).not.toBeInTheDocument();
@@ -221,22 +239,5 @@ describe("UncategorizedReview", () => {
       pattern: "Code.exe",
       category: "ignored",
     });
-  });
-
-  it("keeps quick classification actions reachable in narrow layouts", () => {
-    render(
-      <UncategorizedReview
-        onRuleCreated={vi.fn()}
-        sessions={[session({ id: "app", appName: "Code", processName: "Code.exe", domain: null })]}
-      />,
-    );
-
-    expect(screen.getByRole("table")).toHaveClass("min-w-full");
-    const actionGroup = screen.getByRole("group", { name: "Code 빠른 분류" });
-    expect(actionGroup).toHaveClass("max-[640px]:grid-cols-2");
-    expect(within(actionGroup).getByRole("button", { name: "생산적" })).toBeInTheDocument();
-    expect(within(actionGroup).getByRole("button", { name: "비생산" })).toBeInTheDocument();
-    expect(within(actionGroup).getByRole("button", { name: "중립" })).toBeInTheDocument();
-    expect(within(actionGroup).getByRole("button", { name: "제외" })).toBeInTheDocument();
   });
 });

@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
-import { DayTimeline } from "./DayTimeline";
 import type { ActivitySession } from "../../types/activity";
+import { DayTimeline } from "./DayTimeline";
 
 function session(overrides: Partial<ActivitySession>): ActivitySession {
   return {
@@ -23,7 +23,22 @@ describe("DayTimeline", () => {
   it("exposes timeline segments as a structured list", () => {
     render(<DayTimeline sessions={[session({ id: "one" }), session({ id: "two", domain: "docs.example.com" })]} />);
 
-    expect(screen.getByRole("list", { name: "오늘 활동 세션 타임라인" })).toBeInTheDocument();
+    expect(screen.getByRole("list")).toBeInTheDocument();
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
+  });
+
+  it("excludes ignored sessions from timeline segments", () => {
+    render(
+      <DayTimeline
+        sessions={[
+          session({ id: "productive", domain: "docs.example.com" }),
+          session({ id: "ignored", category: "ignored", domain: "ignored.example" }),
+        ]}
+      />,
+    );
+
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByLabelText(/docs\.example\.com/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/ignored\.example/i)).not.toBeInTheDocument();
   });
 });

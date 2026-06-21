@@ -2,9 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   BRIDGE_HEADER_NAME,
   BRIDGE_HEADER_VALUE,
-  reportActiveTabForWindow,
-  reportUpdatedActiveTab,
   reportActiveTab,
+  reportOpenTabs,
   sanitizeUrl,
 } from "./background";
 
@@ -46,6 +45,7 @@ describe("reportActiveTab", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await reportActiveTab({
+      id: 42,
       title: "ChatGPT",
       url: "https://chatgpt.com/c/123",
     } as chrome.tabs.Tab);
@@ -59,48 +59,33 @@ describe("reportActiveTab", () => {
         },
       }),
     );
-  });
-});
-
-describe("browser activity hooks", () => {
-  it("reports the active tab when a browser window gains focus", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(undefined);
-    const query = vi.fn().mockResolvedValue([
-      {
-        active: true,
-        title: "GitHub",
-        url: "https://github.com/openai/codex",
-      },
-    ]);
-    vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("chrome", {
-      tabs: { query },
-      windows: { WINDOW_ID_NONE: -1 },
-    });
-
-    await reportActiveTabForWindow(42);
-
-    expect(query).toHaveBeenCalledWith({ active: true, windowId: 42 });
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
-      domain: "github.com",
-      title: "GitHub",
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      domain: "chatgpt.com",
+      tabId: 42,
+      title: "ChatGPT",
     });
   });
 
-  it("does not report inactive tabs that finish loading in the background", async () => {
+  it("reports every open http tab", async () => {
     const fetchMock = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("fetch", fetchMock);
 
-    await reportUpdatedActiveTab(
-      { status: "complete" },
-      {
-        active: false,
-        title: "Background video",
-        url: "https://youtube.com/watch?v=abc",
-      } as chrome.tabs.Tab,
-    );
+    await reportOpenTabs([
+      { id: 1, title: "YouTube", url: "https://youtube.com/watch?v=abc" },
+      { id: 2, title: "Local file", url: "file:///C:/private.txt" },
+      { id: 3, title: "Naver", url: "https://www.naver.com/" },
+    ] as chrome.tabs.Tab[]);
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      domain: "youtube.com",
+      tabId: 1,
+      title: "YouTube",
+    });
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+      domain: "naver.com",
+      tabId: 3,
+      title: "Naver",
+    });
   });
 });

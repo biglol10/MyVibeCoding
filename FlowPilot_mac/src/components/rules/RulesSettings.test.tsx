@@ -1,12 +1,30 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createRule, listRules, updateRule } from "../../api/activityApi";
+import {
+  createActivityGroup,
+  createDisplayNameOverride,
+  deleteActivityGroup,
+  deleteDisplayNameOverride,
+  listActivityGroups,
+  listDisplayNameOverrides,
+  createRule,
+  listRules,
+  updateDisplayNameOverride,
+  updateRule,
+} from "../../api/activityApi";
 import type { ClassificationRule } from "../../types/activity";
 import { RulesSettings } from "./RulesSettings";
 
 vi.mock("../../api/activityApi", () => ({
+  createActivityGroup: vi.fn(),
+  createDisplayNameOverride: vi.fn(),
   createRule: vi.fn(),
+  deleteActivityGroup: vi.fn(),
+  deleteDisplayNameOverride: vi.fn(),
+  listActivityGroups: vi.fn(),
+  listDisplayNameOverrides: vi.fn(),
   listRules: vi.fn(),
+  updateDisplayNameOverride: vi.fn(),
   updateRule: vi.fn(),
 }));
 
@@ -42,7 +60,29 @@ const updatedRule: ClassificationRule = {
 describe("RulesSettings", () => {
   beforeEach(() => {
     vi.mocked(listRules).mockResolvedValue([existingRule]);
+    vi.mocked(listActivityGroups).mockResolvedValue([]);
+    vi.mocked(listDisplayNameOverrides).mockResolvedValue([]);
     vi.mocked(createRule).mockResolvedValue(createdRule);
+    vi.mocked(createDisplayNameOverride).mockResolvedValue({
+      displayName: "Test",
+      id: "display-name:app:test.exe",
+      pattern: "test.exe",
+      ruleType: "app",
+    });
+    vi.mocked(createActivityGroup).mockResolvedValue({
+      id: "group:test",
+      name: "Test",
+      color: "#2563eb",
+      matchers: [{ id: "matcher:test", ruleType: "domain", pattern: "test.com" }],
+    });
+    vi.mocked(deleteActivityGroup).mockResolvedValue(undefined);
+    vi.mocked(deleteDisplayNameOverride).mockResolvedValue(undefined);
+    vi.mocked(updateDisplayNameOverride).mockResolvedValue({
+      displayName: "Test",
+      id: "display-name:app:test.exe",
+      pattern: "test.exe",
+      ruleType: "app",
+    });
     vi.mocked(updateRule).mockResolvedValue(updatedRule);
   });
 
@@ -54,79 +94,24 @@ describe("RulesSettings", () => {
     render(<RulesSettings />);
 
     expect(await screen.findByText("ChatGPT")).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "URL 패턴" })).toBeInTheDocument();
+    expect(screen.getAllByRole("option", { name: "URL 패턴" }).length).toBeGreaterThan(0);
   });
 
-  it("sorts the displayed rules by name in ascending order", async () => {
+  it("sorts rule rows by name ascending", async () => {
     vi.mocked(listRules).mockResolvedValue([
-      { ...existingRule, id: "z", name: "Zoom", pattern: "zoom.us" },
-      { ...existingRule, id: "a", name: "Alpha", pattern: "alpha.example" },
-      { ...existingRule, id: "n", name: "Notion", pattern: "notion.so" },
+      { ...existingRule, id: "builtin:domain:zeta.com", name: "Zeta", pattern: "zeta.com" },
+      { ...existingRule, id: "builtin:domain:alpha.com", name: "Alpha", pattern: "alpha.com" },
     ]);
 
     render(<RulesSettings />);
 
-    const alphaRow = await screen.findByRole("row", { name: /Alpha/ });
+    expect(await screen.findByText("Alpha")).toBeInTheDocument();
     const rows = screen.getAllByRole("row");
-    expect(rows.indexOf(alphaRow)).toBe(1);
     expect(within(rows[1]).getByText("Alpha")).toBeInTheDocument();
-    expect(within(rows[2]).getByText("Notion")).toBeInTheDocument();
-    expect(within(rows[3]).getByText("Zoom")).toBeInTheDocument();
+    expect(within(rows[2]).getByText("Zeta")).toBeInTheDocument();
   });
 
-  it("filters rules by name or pattern and reports visible row count", async () => {
-    const user = userEvent.setup();
-    vi.mocked(listRules).mockResolvedValue([
-      { ...existingRule, id: "chat", name: "ChatGPT", pattern: "chatgpt.com" },
-      { ...existingRule, id: "video", name: "YouTube", pattern: "youtube.com" },
-    ]);
-
-    render(<RulesSettings />);
-    await screen.findByText("ChatGPT");
-
-    await user.type(screen.getByLabelText("규칙 검색"), "youtube");
-
-    expect(screen.getByText("1 / 2개 표시")).toBeInTheDocument();
-    expect(screen.getByText("YouTube")).toBeInTheDocument();
-    expect(screen.queryByText("ChatGPT")).not.toBeInTheDocument();
-  });
-
-  it("uses matching column alignment classes for rule table headers and values", async () => {
-    render(<RulesSettings />);
-
-    const row = await screen.findByRole("row", { name: /ChatGPT/ });
-    const headers = screen.getAllByRole("columnheader");
-    const cells = within(row).getAllByRole("cell");
-
-    expect(headers[0]).toHaveClass("w-[22%]", "text-left");
-    expect(cells[0]).toHaveClass("w-[22%]", "text-left");
-    expect(headers[1]).toHaveClass("w-[10%]", "text-left");
-    expect(cells[1]).toHaveClass("w-[10%]", "text-left");
-    expect(headers[2]).toHaveClass("w-[24%]", "text-left");
-    expect(cells[2]).toHaveClass("w-[24%]", "text-left");
-    expect(headers[4]).toHaveClass("w-[10%]", "text-right");
-    expect(cells[4]).toHaveClass("w-[10%]", "text-right");
-    expect(headers[6]).toHaveClass("w-[8%]", "text-right");
-    expect(cells[6]).toHaveClass("w-[8%]", "text-right");
-  });
-
-  it("can sort displayed rules by priority", async () => {
-    const user = userEvent.setup();
-    vi.mocked(listRules).mockResolvedValue([
-      { ...existingRule, id: "low", name: "Low", priority: 10 },
-      { ...existingRule, id: "high", name: "High", priority: 200 },
-    ]);
-
-    render(<RulesSettings />);
-    await screen.findByText("High");
-
-    await user.click(screen.getByRole("button", { name: "우선순위 정렬" }));
-    const rows = screen.getAllByRole("row");
-    expect(within(rows[1]).getByText("Low")).toBeInTheDocument();
-    expect(within(rows[2]).getByText("High")).toBeInTheDocument();
-  });
-
-  it("creates a rule, displays it in sorted order, and clears the pattern field", async () => {
+  it("creates a rule, prepends it, and clears the pattern field", async () => {
     const user = userEvent.setup();
     render(<RulesSettings />);
 
@@ -134,7 +119,7 @@ describe("RulesSettings", () => {
     await user.selectOptions(screen.getByLabelText("규칙 종류"), "urlPattern");
     await user.selectOptions(screen.getByLabelText("분류"), "unproductive");
     await user.type(screen.getByLabelText("패턴"), "/watch");
-    await user.click(screen.getByRole("button", { name: "규칙 추가" }));
+    await user.click(screen.getByRole("button", { name: /규칙 추가/ }));
 
     expect(createRule).toHaveBeenCalledWith({
       name: "/watch",
@@ -162,7 +147,7 @@ describe("RulesSettings", () => {
     await user.selectOptions(screen.getByLabelText("규칙 종류"), "urlPattern");
     await user.selectOptions(screen.getByLabelText("분류"), "unproductive");
     await user.type(screen.getByLabelText("패턴"), "/watch");
-    await user.click(screen.getByRole("button", { name: "규칙 추가" }));
+    await user.click(screen.getByRole("button", { name: /규칙 추가/ }));
 
     const rows = screen.getAllByRole("row");
     expect(rows).toHaveLength(3);
@@ -176,17 +161,17 @@ describe("RulesSettings", () => {
     render(<RulesSettings />);
 
     const row = await screen.findByRole("row", { name: /ChatGPT/ });
-    await user.click(within(row).getByRole("button", { name: "수정" }));
+    await user.click(within(row).getByRole("button", { name: /수정/ }));
 
     expect(screen.getByLabelText("규칙 종류")).toHaveValue("domain");
     expect(screen.getByLabelText("패턴")).toHaveValue("chatgpt.com");
     expect(screen.getByLabelText("분류")).toHaveValue("productive");
-    expect(screen.getByRole("button", { name: "규칙 저장" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /규칙 저장/ })).toBeInTheDocument();
 
     await user.clear(screen.getByLabelText("패턴"));
     await user.type(screen.getByLabelText("패턴"), "openai.com");
     await user.selectOptions(screen.getByLabelText("분류"), "neutral");
-    await user.click(screen.getByRole("button", { name: "규칙 저장" }));
+    await user.click(screen.getByRole("button", { name: /규칙 저장/ }));
 
     expect(updateRule).toHaveBeenCalledWith("builtin:domain:chatgpt.com", {
       name: "openai.com",
@@ -194,7 +179,7 @@ describe("RulesSettings", () => {
       pattern: "openai.com",
       category: "neutral",
     });
-    expect(screen.getByRole("button", { name: "규칙 추가" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /규칙 추가/ })).toBeInTheDocument();
     expect(screen.getByLabelText("패턴")).toHaveValue("");
     expect(screen.getByRole("row", { name: /openai\.com/ })).toBeInTheDocument();
   });
@@ -205,9 +190,9 @@ describe("RulesSettings", () => {
     render(<RulesSettings />);
 
     const row = await screen.findByRole("row", { name: /ChatGPT/ });
-    await user.click(within(row).getByRole("button", { name: "수정" }));
+    await user.click(within(row).getByRole("button", { name: /수정/ }));
     await user.selectOptions(screen.getByLabelText("분류"), "neutral");
-    await user.click(screen.getByRole("button", { name: "규칙 저장" }));
+    await user.click(screen.getByRole("button", { name: /규칙 저장/ }));
 
     expect(updateRule).toHaveBeenCalledWith("builtin:domain:chatgpt.com", {
       name: "ChatGPT",

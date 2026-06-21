@@ -11,7 +11,6 @@ pub mod collector;
 pub mod commands;
 pub mod domain;
 pub mod export;
-pub mod permissions;
 pub mod storage;
 pub mod tray;
 
@@ -19,16 +18,27 @@ pub mod tray;
 pub fn run() {
     if let Err(err) = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
+            commands::create_activity_group,
+            commands::create_display_name_override,
             commands::create_rule,
+            commands::delete_activity_group,
+            commands::delete_display_name_override,
+            commands::delete_session_override,
             commands::export_today_csv,
+            commands::get_heatmap_for_range,
+            commands::get_sessions_for_range,
+            commands::get_summary_for_range,
             commands::get_today_summary,
             commands::get_today_sessions,
+            commands::list_activity_groups,
+            commands::list_display_name_overrides,
             commands::list_rules,
             commands::pause_tracking,
             commands::resume_tracking,
-            commands::update_rule,
-            permissions::get_platform_permission_status,
-            permissions::open_macos_permission_settings
+            commands::update_activity_group,
+            commands::update_display_name_override,
+            commands::upsert_session_override,
+            commands::update_rule
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -50,14 +60,6 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             collector::service::CollectorService::for_windows(
                 Duration::from_secs(5),
-                repository.clone(),
-                tracking_status.clone(),
-            )
-            .start();
-            #[cfg(target_os = "macos")]
-            collector::service::CollectorService::new(
-                Duration::from_secs(5),
-                collector::macos::MacosActivitySnapshotReader::new(),
                 repository.clone(),
                 tracking_status.clone(),
             )

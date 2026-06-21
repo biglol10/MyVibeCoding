@@ -44,6 +44,44 @@ pub fn initialize_schema(conn: &Connection) -> rusqlite::Result<()> {
           FOREIGN KEY(rule_id) REFERENCES classification_rules(id) ON DELETE SET NULL
         );
 
+        CREATE TABLE IF NOT EXISTS activity_groups (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          color TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS activity_group_matchers (
+          id TEXT PRIMARY KEY,
+          group_id TEXT NOT NULL,
+          rule_type TEXT NOT NULL,
+          pattern TEXT NOT NULL,
+          priority INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY(group_id) REFERENCES activity_groups(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS session_overrides (
+          session_id TEXT PRIMARY KEY,
+          category_override TEXT,
+          display_name_override TEXT,
+          note TEXT,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY(session_id) REFERENCES activity_sessions(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS display_name_overrides (
+          id TEXT PRIMARY KEY,
+          rule_type TEXT NOT NULL,
+          pattern TEXT NOT NULL,
+          display_name TEXT NOT NULL,
+          priority INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS settings (
           key TEXT PRIMARY KEY,
           value TEXT NOT NULL
@@ -57,29 +95,13 @@ pub fn initialize_schema(conn: &Connection) -> rusqlite::Result<()> {
           title TEXT NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS window_observations (
-          id TEXT PRIMARY KEY,
-          session_id TEXT,
-          observed_at TEXT NOT NULL,
-          app_name TEXT NOT NULL,
-          process_name TEXT NOT NULL,
-          pid INTEGER,
-          bundle_identifier TEXT,
-          window_title TEXT,
-          is_visible INTEGER NOT NULL DEFAULT 0,
-          is_frontmost INTEGER NOT NULL DEFAULT 0,
-          is_primary INTEGER NOT NULL DEFAULT 0,
-          created_at TEXT NOT NULL,
-          FOREIGN KEY(session_id) REFERENCES activity_sessions(id) ON DELETE SET NULL
-        );
-
         CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON activity_sessions(started_at);
         CREATE INDEX IF NOT EXISTS idx_sessions_domain ON activity_sessions(domain);
         CREATE INDEX IF NOT EXISTS idx_rules_type_pattern ON classification_rules(rule_type, pattern);
+        CREATE INDEX IF NOT EXISTS idx_group_matchers_group_id ON activity_group_matchers(group_id);
+        CREATE INDEX IF NOT EXISTS idx_display_name_overrides_type_pattern ON display_name_overrides(rule_type, pattern);
         CREATE INDEX IF NOT EXISTS idx_browser_events_occurred_at ON browser_events(occurred_at);
         CREATE INDEX IF NOT EXISTS idx_browser_events_domain ON browser_events(domain);
-        CREATE INDEX IF NOT EXISTS idx_window_observations_observed_at ON window_observations(observed_at);
-        CREATE INDEX IF NOT EXISTS idx_window_observations_session_id ON window_observations(session_id);
         "#,
     )
 }
@@ -126,33 +148,25 @@ mod tests {
     }
 
     #[test]
-    fn creates_window_observation_table_and_indexes() {
+    fn creates_report_overlay_tables() {
         let conn = Connection::open_in_memory().expect("in-memory db");
         initialize_schema(&conn).expect("schema initialized");
 
-        let table_exists: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='window_observations'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("table count");
-
-        assert_eq!(table_exists, 1);
-
-        for index_name in [
-            "idx_window_observations_observed_at",
-            "idx_window_observations_session_id",
+        for table_name in [
+            "activity_groups",
+            "activity_group_matchers",
+            "display_name_overrides",
+            "session_overrides",
         ] {
             let exists: i64 = conn
                 .query_row(
-                    "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?1",
-                    [index_name],
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [table_name],
                     |row| row.get(0),
                 )
-                .expect("index count");
+                .expect("table count");
 
-            assert_eq!(exists, 1, "{index_name} should exist");
+            assert_eq!(exists, 1, "{table_name} should exist");
         }
     }
 }

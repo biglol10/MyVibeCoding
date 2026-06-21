@@ -4,7 +4,7 @@ export const CATEGORY_LABELS: Record<ProductivityCategory, string> = {
   productive: "생산적",
   unproductive: "비생산",
   neutral: "중립",
-  ignored: "제외",
+  ignored: "측정 제외",
   uncategorized: "검토 필요",
 };
 
@@ -32,7 +32,7 @@ export const NAV_LABELS = {
   today: "오늘 요약",
   timeline: "타임라인",
   weekly: "주간 리포트",
-  review: "미분류 검토",
+  review: "검토함",
   rules: "분류 규칙",
 } as const;
 
