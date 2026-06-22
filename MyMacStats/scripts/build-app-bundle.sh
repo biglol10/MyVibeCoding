@@ -19,6 +19,10 @@ cp "$ROOT_DIR/Sources/MyMacStatsApp/Resources/MyMacStatsInfo.plist" "$CONTENTS_D
 cp "$ROOT_DIR/Sources/MyMacStatsApp/Resources/MyMacStatsIcon.icns" "$RESOURCES_DIR/MyMacStatsIcon.icns"
 chmod +x "$MACOS_DIR/MyMacStatsApp"
 
+if command -v strip >/dev/null 2>&1; then
+    strip -x "$MACOS_DIR/MyMacStatsApp"
+fi
+
 if command -v codesign >/dev/null 2>&1; then
     codesign --force --deep --sign - "$APP_DIR"
     codesign --verify --deep --strict "$APP_DIR"
