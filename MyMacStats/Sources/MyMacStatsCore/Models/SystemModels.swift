@@ -251,6 +251,16 @@ public struct BatterySnapshot: Equatable, Sendable {
     }
 }
 
+public struct MetricHistorySample: Equatable, Sendable {
+    public let date: Date
+    public let value: Double
+
+    public init(date: Date, value: Double) {
+        self.date = date
+        self.value = value
+    }
+}
+
 public enum ProcessSortKey: String, CaseIterable, Identifiable, Sendable {
     case cpu
     case memory

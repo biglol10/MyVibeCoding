@@ -8,6 +8,7 @@ public protocol SystemSampler {
     func sampleDisk() async -> DiskSnapshot?
     func sampleNetwork() async -> NetworkSnapshot?
     func sampleBattery() async -> BatterySnapshot?
+    func sampleDiskSpaceCandidates() async -> [DiskSpaceCandidate]
     func sampleProcesses() async -> [ProcessMetric]
 }
 
@@ -18,8 +19,10 @@ public struct SystemMetricsSnapshot: Equatable, Sendable {
     public let disk: DiskSnapshot?
     public let network: NetworkSnapshot?
     public let battery: BatterySnapshot?
+    public let diskSpaceCandidates: [DiskSpaceCandidate]
     public let processes: [ProcessMetric]
     public let cpuHistory: [Double]
+    public let cpuHistorySamples: [MetricHistorySample]
     public let updatedAt: Date
 
     public init(
@@ -29,8 +32,10 @@ public struct SystemMetricsSnapshot: Equatable, Sendable {
         disk: DiskSnapshot?,
         network: NetworkSnapshot?,
         battery: BatterySnapshot?,
+        diskSpaceCandidates: [DiskSpaceCandidate] = [],
         processes: [ProcessMetric],
         cpuHistory: [Double],
+        cpuHistorySamples: [MetricHistorySample] = [],
         updatedAt: Date
     ) {
         self.summaries = summaries
@@ -39,8 +44,10 @@ public struct SystemMetricsSnapshot: Equatable, Sendable {
         self.disk = disk
         self.network = network
         self.battery = battery
+        self.diskSpaceCandidates = diskSpaceCandidates
         self.processes = processes
         self.cpuHistory = cpuHistory
+        self.cpuHistorySamples = cpuHistorySamples
         self.updatedAt = updatedAt
     }
 
@@ -56,6 +63,7 @@ public struct SystemMetricsSnapshot: Equatable, Sendable {
             disk: nil,
             network: nil,
             battery: nil,
+            diskSpaceCandidates: [],
             processes: [],
             cpuHistory: [],
             updatedAt: updatedAt
@@ -67,15 +75,38 @@ public struct SystemMetricsSnapshot: Equatable, Sendable {
 public final class SystemMetricsService {
     private let sampler: SystemSampler
     private var evaluator: HealthEvaluator
-    private var cpuHistorySamples: [(date: Date, usage: Double)] = []
+    private var cpuHistorySamples: [MetricHistorySample] = []
     private var consecutiveNetworkFailures = 0
+    private var diskSpaceCandidates: [DiskSpaceCandidate] = []
+    private var diskSpaceCandidateRefreshTask: Task<Void, Never>?
+    private var lastDiskSpaceCandidateRefreshStartedAt: Date?
+    private let diskSpaceCandidateRefreshInterval: TimeInterval
 
-    public init(sampler: SystemSampler = DefaultSystemSampler(), evaluator: HealthEvaluator = HealthEvaluator()) {
+    deinit {
+        diskSpaceCandidateRefreshTask?.cancel()
+    }
+
+    public init(
+        sampler: SystemSampler = DefaultSystemSampler(),
+        evaluator: HealthEvaluator = HealthEvaluator(),
+        diskSpaceCandidateRefreshInterval: TimeInterval = 60
+    ) {
         self.sampler = sampler
         self.evaluator = evaluator
+        self.diskSpaceCandidateRefreshInterval = diskSpaceCandidateRefreshInterval
+    }
+
+    public convenience init(sampler: SystemSampler, evaluator: HealthEvaluator) {
+        self.init(
+            sampler: sampler,
+            evaluator: evaluator,
+            diskSpaceCandidateRefreshInterval: 60
+        )
     }
 
     public func refresh(now: Date = Date()) async -> SystemMetricsSnapshot {
+        refreshDiskSpaceCandidatesIfNeeded(now: now)
+
         let cpu = await sampler.sampleCPU()
         let memory = await sampler.sampleMemory()
         let disk = await sampler.sampleDisk()
@@ -84,8 +115,8 @@ public final class SystemMetricsService {
         let processes = ProcessSorting.filtered(await sampler.sampleProcesses(), searchText: "", sortKey: .cpu)
 
         if let cpu {
-            cpuHistorySamples.append((now, cpu.totalUsagePercent))
-            cpuHistorySamples.removeAll { now.timeIntervalSince($0.date) > 60 }
+            cpuHistorySamples.append(MetricHistorySample(date: now, value: cpu.totalUsagePercent))
+            cpuHistorySamples.removeAll { now.timeIntervalSince($0.date) > 300 }
         }
 
         if network == nil {
@@ -111,10 +142,29 @@ public final class SystemMetricsService {
             disk: disk,
             network: network,
             battery: battery,
+            diskSpaceCandidates: diskSpaceCandidates,
             processes: processes,
-            cpuHistory: cpuHistorySamples.map(\.usage),
+            cpuHistory: cpuHistorySamples.map(\.value),
+            cpuHistorySamples: cpuHistorySamples,
             updatedAt: now
         )
+    }
+
+    private func refreshDiskSpaceCandidatesIfNeeded(now: Date) {
+        guard diskSpaceCandidateRefreshTask == nil else { return }
+        if let lastDiskSpaceCandidateRefreshStartedAt,
+           now.timeIntervalSince(lastDiskSpaceCandidateRefreshStartedAt) < diskSpaceCandidateRefreshInterval {
+            return
+        }
+
+        lastDiskSpaceCandidateRefreshStartedAt = now
+        diskSpaceCandidateRefreshTask = Task { [weak self] in
+            guard let self else { return }
+            let candidates = await self.sampler.sampleDiskSpaceCandidates()
+            guard !Task.isCancelled else { return }
+            self.diskSpaceCandidates = candidates
+            self.diskSpaceCandidateRefreshTask = nil
+        }
     }
 
     private func buildSummaries(
@@ -156,7 +206,7 @@ public final class SystemMetricsService {
                 return MetricSummary(
                     kind: .memory,
                     title: MetricKind.memory.title,
-                    valueText: "\(MetricFormatters.bytes(memory.usedBytes)) / \(MetricFormatters.bytes(memory.totalBytes))",
+                    valueText: "\(MetricFormatters.compactBytes(memory.usedBytes)) / \(MetricFormatters.compactBytes(memory.totalBytes))",
                     detailText: "Free \(MetricFormatters.bytes(memory.freeBytes))",
                     health: evaluator.memoryHealth(snapshot: memory),
                     updatedAt: now
@@ -190,8 +240,8 @@ public final class SystemMetricsService {
                 return MetricSummary(
                     kind: .network,
                     title: MetricKind.network.title,
-                    valueText: "↓ \(MetricFormatters.speed(network.downloadBytesPerSecond))  ↑ \(MetricFormatters.speed(network.uploadBytesPerSecond))",
-                    detailText: network.interfaceName ?? "No interface",
+                    valueText: "↓ \(MetricFormatters.compactSpeed(network.downloadBytesPerSecond))",
+                    detailText: "\(network.interfaceName ?? "No interface")  ↑ \(MetricFormatters.compactSpeed(network.uploadBytesPerSecond))",
                     health: evaluator.networkHealth(snapshot: network, consecutiveFailures: consecutiveNetworkFailures),
                     updatedAt: now
                 )
@@ -234,17 +284,15 @@ public final class SystemMetricsService {
     }
 
     private func sustainedCPUSeconds(above threshold: Double, now: Date) -> TimeInterval {
-        guard let latest = cpuHistorySamples.last, latest.usage >= threshold else { return 0 }
-        let sustainedSamples = cpuHistorySamples.reversed().prefix { $0.usage >= threshold }
+        guard let latest = cpuHistorySamples.last, latest.value >= threshold else { return 0 }
+        let sustainedSamples = cpuHistorySamples.reversed().prefix { $0.value >= threshold }
         guard let earliest = sustainedSamples.last else { return 0 }
         return now.timeIntervalSince(earliest.date)
     }
 }
 
 public final class DefaultSystemSampler: SystemSampler {
-    private var cpuSampler = CPUSampler()
     private let memorySampler = MemorySampler()
-    private let processSampler = ProcessSampler()
     private let diskSampler = DiskSampler()
     private var networkSampler = NetworkSampler()
     private let batterySampler = BatterySampler()
@@ -252,7 +300,10 @@ public final class DefaultSystemSampler: SystemSampler {
     public init() {}
 
     public func sampleCPU() async -> CPUSnapshot? {
-        try? cpuSampler.sample()
+        await Task.detached(priority: .utility) {
+            var sampler = CPUSampler()
+            return try? sampler.sample()
+        }.value
     }
 
     public func sampleMemory() async -> MemorySnapshot? {
@@ -271,7 +322,15 @@ public final class DefaultSystemSampler: SystemSampler {
         try? batterySampler.sample()
     }
 
+    public func sampleDiskSpaceCandidates() async -> [DiskSpaceCandidate] {
+        await Task.detached(priority: .utility) {
+            DiskSpaceCandidateScanner().scan()
+        }.value
+    }
+
     public func sampleProcesses() async -> [ProcessMetric] {
-        (try? processSampler.sample()) ?? []
+        await Task.detached(priority: .utility) {
+            (try? ProcessSampler().sample()) ?? []
+        }.value
     }
 }

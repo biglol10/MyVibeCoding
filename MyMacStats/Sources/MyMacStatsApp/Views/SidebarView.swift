@@ -34,7 +34,8 @@ struct SidebarView: View {
                             Spacer()
                         }
                         .padding(.horizontal, 12)
-                        .frame(maxWidth: .infinity, minHeight: 38)
+                        .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
+                        .contentShape(RoundedRectangle(cornerRadius: 7))
                         .background(isSettingsSelected ? Color.accentColor.opacity(0.2) : Color.clear)
                         .clipShape(RoundedRectangle(cornerRadius: 7))
                     }
@@ -72,12 +73,13 @@ struct SidebarView: View {
                         Text(kind.title)
                             .font(.system(size: 14, weight: .semibold))
                             .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                         Spacer(minLength: 4)
                         Text(summary?.valueText ?? "Unavailable")
                             .font(.system(size: 13, weight: .semibold, design: .monospaced))
                             .foregroundStyle(health.statusColor)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.75)
+                            .minimumScaleFactor(0.65)
                     }
 
                     if let detail = summary?.detailText {
@@ -89,7 +91,8 @@ struct SidebarView: View {
                 }
             }
             .padding(.horizontal, 10)
-            .frame(maxWidth: .infinity, minHeight: 44)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 7))
             .background(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
             .overlay {
                 RoundedRectangle(cornerRadius: 7)

@@ -67,16 +67,23 @@ struct MetricListView: View {
                 .background(Color.primary.opacity(0.055))
                 .clipShape(RoundedRectangle(cornerRadius: 7))
                 .padding(.horizontal, 16)
+                .padding(.top, 12)
                 .padding(.bottom, 12)
             }
 
+            if let causeSummary = viewModel.selectedCauseSummary {
+                CauseSummaryBanner(summary: causeSummary)
+            }
+
             HStack {
-                Text("Process")
+                Text("App")
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text("CPU")
                     .frame(width: 72, alignment: .trailing)
                 Text("Memory")
-                    .frame(width: 96, alignment: .trailing)
+                    .frame(width: 110, alignment: .trailing)
+                Text("")
+                    .frame(width: 40)
             }
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
@@ -84,17 +91,19 @@ struct MetricListView: View {
             .padding(.vertical, 7)
 
             ScrollView {
-                LazyVStack(spacing: 7) {
-                    ForEach(viewModel.displayedProcesses.prefix(60)) { process in
-                        ProcessMetricRow(
-                            process: process,
-                            isSelected: viewModel.selectedProcess?.pid == process.pid
+                LazyVStack(spacing: 5) {
+                    ForEach(viewModel.displayedProcessGroups.prefix(60)) { group in
+                        ProcessAppGroupRow(
+                            group: group,
+                            isSelected: viewModel.selectedProcessGroup?.id == group.id
                         ) {
-                            viewModel.selectProcess(pid: process.pid)
+                            if let process = group.processes.first {
+                                viewModel.selectProcess(pid: process.pid)
+                            }
                         }
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 12)
                 .padding(.bottom, 16)
             }
         }
@@ -106,6 +115,14 @@ struct MetricListView: View {
                 InfoRow(title: disk.volumeName, value: "\(MetricFormatters.bytes(disk.freeBytes)) free")
                 InfoRow(title: "Mount Point", value: disk.mountPoint)
                 InfoRow(title: "Total", value: MetricFormatters.bytes(disk.totalBytes))
+                if !viewModel.snapshot.diskSpaceCandidates.isEmpty {
+                    Divider()
+                        .padding(.vertical, 6)
+                    InfoRow(title: "Space Candidates", value: "\(viewModel.snapshot.diskSpaceCandidates.count)")
+                    ForEach(viewModel.snapshot.diskSpaceCandidates.prefix(4)) { candidate in
+                        DiskCandidateRow(candidate: candidate)
+                    }
+                }
             } else {
                 ContentUnavailableView("Disk Unavailable", systemImage: "internaldrive")
             }

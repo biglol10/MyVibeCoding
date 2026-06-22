@@ -16,6 +16,7 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
 cp "$ROOT_DIR/.build/release/MyMacStatsApp" "$MACOS_DIR/MyMacStatsApp"
 cp "$ROOT_DIR/Sources/MyMacStatsApp/Resources/MyMacStatsInfo.plist" "$CONTENTS_DIR/Info.plist"
+cp "$ROOT_DIR/Sources/MyMacStatsApp/Resources/MyMacStatsIcon.icns" "$RESOURCES_DIR/MyMacStatsIcon.icns"
 chmod +x "$MACOS_DIR/MyMacStatsApp"
 
 if command -v codesign >/dev/null 2>&1; then

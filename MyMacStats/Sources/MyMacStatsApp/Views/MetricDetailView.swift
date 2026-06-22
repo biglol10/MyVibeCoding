@@ -49,7 +49,15 @@ struct MetricDetailView: View {
                     InfoRow(title: "User", value: MetricFormatters.percent(cpu.userPercent))
                     InfoRow(title: "System", value: MetricFormatters.percent(cpu.systemPercent))
                     InfoRow(title: "Idle", value: MetricFormatters.percent(cpu.idlePercent))
-                    SparklineView(values: viewModel.snapshot.cpuHistory)
+                    Picker("History", selection: $viewModel.historyRange) {
+                        ForEach(HistoryRange.allCases) { range in
+                            Text(range.title).tag(range)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
+                    SparklineView(values: viewModel.displayedCPUHistory)
                         .frame(height: 76)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
@@ -65,9 +73,8 @@ struct MetricDetailView: View {
         ScrollView {
             VStack(spacing: 0) {
                 if let memory = viewModel.snapshot.memory {
-                    if viewModel.selectedSummary?.health == .warning || viewModel.selectedSummary?.health == .critical,
-                       let top = viewModel.displayedProcesses.first {
-                        InfoRow(title: "Likely Cause", value: "\(top.name) using \(MetricFormatters.bytes(top.memoryBytes))", valueColor: viewModel.selectedSummary?.health.statusColor ?? .primary)
+                    if let causeSummary = viewModel.selectedCauseSummary {
+                        InfoRow(title: "Likely Cause", value: causeSummary.message, valueColor: viewModel.selectedSummary?.health.statusColor ?? .primary)
                     }
                     InfoRow(title: "Used", value: MetricFormatters.bytes(memory.usedBytes))
                     InfoRow(title: "Free", value: MetricFormatters.bytes(memory.freeBytes))
@@ -91,6 +98,14 @@ struct MetricDetailView: View {
                 InfoRow(title: "Free", value: MetricFormatters.bytes(disk.freeBytes), valueColor: viewModel.selectedSummary?.health.statusColor ?? .primary)
                 InfoRow(title: "Read", value: disk.readBytesPerSecond.map(MetricFormatters.speed) ?? "Unavailable")
                 InfoRow(title: "Write", value: disk.writeBytesPerSecond.map(MetricFormatters.speed) ?? "Unavailable")
+                if !viewModel.snapshot.diskSpaceCandidates.isEmpty {
+                    Divider()
+                        .padding(.vertical, 6)
+                    InfoRow(title: "Space Candidates", value: "\(viewModel.snapshot.diskSpaceCandidates.count)")
+                    ForEach(viewModel.snapshot.diskSpaceCandidates.prefix(6)) { candidate in
+                        DiskCandidateRow(candidate: candidate)
+                    }
+                }
             } else {
                 ContentUnavailableView("Disk Unavailable", systemImage: "internaldrive")
             }
@@ -132,13 +147,75 @@ struct MetricDetailView: View {
 
     private var processDetail: some View {
         VStack(spacing: 0) {
-            if let process = viewModel.selectedProcess {
+            if let group = viewModel.selectedProcessGroup, let process = viewModel.selectedProcess {
+                InfoRow(title: "App", value: group.name)
+                InfoRow(title: "Processes", value: "\(group.processes.count)")
+                InfoRow(title: "Total CPU", value: MetricFormatters.percent(group.cpuPercent, fractionDigits: group.cpuPercent < 10 ? 1 : 0))
+                InfoRow(title: "Total Memory", value: MetricFormatters.bytes(group.memoryBytes))
+                Divider()
+                    .padding(.vertical, 6)
+                if let terminationMessage = viewModel.selectedProcessTerminationMessage {
+                    InfoRow(title: "Status", value: terminationMessage, valueColor: .secondary)
+                }
                 InfoRow(title: "Process", value: process.name)
                 InfoRow(title: "PID", value: "\(process.pid)")
                 InfoRow(title: "CPU", value: MetricFormatters.percent(process.cpuPercent, fractionDigits: process.cpuPercent < 10 ? 1 : 0))
                 InfoRow(title: "Memory", value: MetricFormatters.bytes(process.memoryBytes))
                 InfoRow(title: "Path", value: process.path ?? "Unavailable")
                 InfoRow(title: "Bundle ID", value: process.bundleIdentifier ?? "Unavailable")
+                Button(role: .destructive) {
+                    viewModel.requestTermination(for: process)
+                } label: {
+                    Label("Quit Process", systemImage: "xmark.octagon")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!viewModel.selectedProcessTerminationAvailability.isAllowed)
+                .help(viewModel.selectedProcessTerminationAvailability.reason ?? "Quit selected process")
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                if viewModel.selectedProcessCanForceQuit {
+                    Button(role: .destructive) {
+                        viewModel.requestForceTermination(for: process)
+                    } label: {
+                        Label("Force Quit", systemImage: "exclamationmark.octagon")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                }
+                if group.processes.count > 1 {
+                    Divider()
+                        .padding(.vertical, 8)
+                    ForEach(group.processes.prefix(6)) { child in
+                        Button {
+                            viewModel.selectProcess(pid: child.pid)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(child.name)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                    Text("PID \(child.pid)")
+                                        .font(.caption.weight(.medium))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text(MetricFormatters.percent(child.cpuPercent, fractionDigits: child.cpuPercent < 10 ? 1 : 0))
+                                    .monospacedDigit()
+                                Text(MetricFormatters.bytes(child.memoryBytes))
+                                    .monospacedDigit()
+                                    .frame(width: 90, alignment: .trailing)
+                            }
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 6)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             } else {
                 ContentUnavailableView("No Process Selected", systemImage: "list.bullet.rectangle")
             }

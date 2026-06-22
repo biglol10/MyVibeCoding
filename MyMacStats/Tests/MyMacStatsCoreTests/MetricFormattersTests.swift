@@ -21,4 +21,9 @@ final class MetricFormattersTests: XCTestCase {
     func testSpeedAddsPerSecondSuffix() {
         XCTAssertEqual(MetricFormatters.speed(1_048_576), "1 MB/s")
     }
+
+    func testCompactSpeedKeepsSidebarValuesShort() {
+        XCTAssertEqual(MetricFormatters.compactSpeed(26_400), "25.8K/s")
+        XCTAssertEqual(MetricFormatters.compactSpeed(1_048_576), "1M/s")
+    }
 }

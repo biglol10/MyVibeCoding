@@ -22,6 +22,10 @@ public enum MetricFormatters {
         "\(bytes(bytesPerSecond))/s"
     }
 
+    public static func compactSpeed(_ bytesPerSecond: UInt64) -> String {
+        "\(compactBytes(bytesPerSecond))/s"
+    }
+
     private static func format(bytes: UInt64, units: [String], separator: String) -> String {
         guard bytes >= 1_024 else { return "\(bytes)\(separator)\(units[0])" }
 
