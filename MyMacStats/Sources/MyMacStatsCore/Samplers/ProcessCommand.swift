@@ -11,10 +11,10 @@ enum ProcessCommand {
         process.standardError = error
 
         try process.run()
-        process.waitUntilExit()
-
         let outputData = output.fileHandleForReading.readDataToEndOfFile()
         let errorData = error.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+
         guard process.terminationStatus == 0 else {
             let message = String(data: errorData, encoding: .utf8) ?? executablePath
             throw SamplerError.commandFailed(message)
