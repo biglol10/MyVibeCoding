@@ -1,8 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { CATEGORY_LABELS, EMPTY_STATE_TEXT } from "../../lib/labels";
-import type { ActivitySession } from "../../types/activity";
 import { UsageTable } from "./UsageTable";
+import type { ActivitySession } from "../../types/activity";
 
 function session(overrides: Partial<ActivitySession>): ActivitySession {
   return {
@@ -34,8 +33,8 @@ describe("UsageTable", () => {
 
     const row = screen.getByRole("row", { name: /example\.com/i });
 
-    expect(within(row).getByText(CATEGORY_LABELS.productive)).toBeInTheDocument();
-    expect(within(row).queryByText(CATEGORY_LABELS.unproductive)).not.toBeInTheDocument();
+    expect(within(row).getByText("생산적")).toBeInTheDocument();
+    expect(within(row).queryByText("비생산")).not.toBeInTheDocument();
   });
 
   it("shows idle when a destination row is entirely idle", () => {
@@ -44,54 +43,72 @@ describe("UsageTable", () => {
     expect(screen.getByText("유휴")).toBeInTheDocument();
   });
 
-  it("renders category badges as compact single-line status chips", () => {
-    render(<UsageTable sessions={[session({ category: "uncategorized" })]} />);
-
-    const badge = screen.getByText(CATEGORY_LABELS.uncategorized).closest("[data-slot='badge']");
-
-    expect(badge).toHaveClass("h-7");
-    expect(badge).toHaveClass("rounded-md");
-    expect(badge).toHaveClass("whitespace-nowrap");
-    expect(badge).not.toHaveClass("rounded-full");
-  });
-
-  it("excludes ignored sessions from usage rows", () => {
-    render(
-      <UsageTable
-        sessions={[
-          session({ id: "productive", domain: "docs.example.com", durationSeconds: 600 }),
-          session({ id: "ignored", category: "ignored", domain: "ignored.example", durationSeconds: 300 }),
-        ]}
-      />,
-    );
-
-    expect(screen.getByRole("row", { name: /docs\.example\.com/i })).toBeInTheDocument();
-    expect(screen.queryByRole("row", { name: /ignored\.example/i })).not.toBeInTheDocument();
-  });
-
-  it("sorts rows by column headers", async () => {
-    const user = userEvent.setup();
-
-    render(
-      <UsageTable
-        sessions={[
-          session({ id: "short", domain: "zeta.example", durationSeconds: 60 }),
-          session({ id: "long", domain: "alpha.example", durationSeconds: 120 }),
-        ]}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: /이름/ }));
-
-    const rows = screen.getAllByRole("row").slice(1);
-
-    expect(within(rows[0]).getByText("alpha.example")).toBeInTheDocument();
-    expect(within(rows[1]).getByText("zeta.example")).toBeInTheDocument();
-  });
-
   it("shows an explicit empty state when there are no rows", () => {
     render(<UsageTable sessions={[]} />);
 
-    expect(screen.getByText(EMPTY_STATE_TEXT.noDestinations)).toBeInTheDocument();
+    expect(screen.getByText("아직 사용 항목이 없습니다.")).toBeInTheDocument();
+  });
+
+  it("omits ignored sessions from the report table and share calculation", () => {
+    render(
+      <UsageTable
+        sessions={[
+          session({ id: "productive", domain: "chatgpt.com", durationSeconds: 600, category: "productive" }),
+          session({ id: "ignored", domain: "youtube.com", durationSeconds: 600, category: "ignored" }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("chatgpt.com")).toBeInTheDocument();
+    expect(screen.queryByText("youtube.com")).not.toBeInTheDocument();
+    expect(screen.getAllByText("100%").length).toBeGreaterThan(0);
+  });
+
+  it("defaults to duration descending and can sort by name", async () => {
+    const user = userEvent.setup();
+    render(
+      <UsageTable
+        sessions={[
+          session({ id: "short", domain: "zeta.com", durationSeconds: 60 }),
+          session({ id: "long", domain: "alpha.com", durationSeconds: 600 }),
+        ]}
+      />,
+    );
+
+    const initialRows = screen.getAllByRole("row");
+    expect(within(initialRows[1]).getByText("alpha.com")).toBeInTheDocument();
+    expect(within(initialRows[2]).getByText("zeta.com")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "이름 정렬" }));
+
+    const sortedRows = screen.getAllByRole("row");
+    expect(within(sortedRows[1]).getByText("alpha.com")).toBeInTheDocument();
+    expect(within(sortedRows[2]).getByText("zeta.com")).toBeInTheDocument();
+  });
+
+  it("filters rows by search text and reports visible row count", async () => {
+    const user = userEvent.setup();
+    render(
+      <UsageTable
+        sessions={[
+          session({ id: "chat", domain: "chatgpt.com", durationSeconds: 600 }),
+          session({ id: "video", domain: "youtube.com", durationSeconds: 300 }),
+        ]}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("사용 항목 검색"), "chat");
+
+    expect(screen.getByText("1 / 2개 표시")).toBeInTheDocument();
+    expect(screen.getByText("chatgpt.com")).toBeInTheDocument();
+    expect(screen.queryByText("youtube.com")).not.toBeInTheDocument();
+  });
+
+  it("marks table rows with a narrow-layout card class", () => {
+    render(<UsageTable sessions={[session({ domain: "chatgpt.com" })]} />);
+
+    const row = screen.getByRole("row", { name: /chatgpt\.com/i });
+    expect(row).toHaveClass("max-[640px]:block");
+    expect(screen.getAllByText("비중").length).toBeGreaterThan(0);
   });
 });

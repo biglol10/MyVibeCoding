@@ -1,7 +1,13 @@
+#[cfg(any(test, target_os = "windows"))]
 use crate::collector::session_merger::ActivitySample;
+#[cfg(any(test, target_os = "windows"))]
+use crate::collector::snapshot::ActivitySnapshot;
+#[cfg(target_os = "windows")]
+use crate::collector::snapshot::ActivitySnapshotReader;
 
-pub trait ActiveWindowReader: Send + Sync {
-    fn read_open_windows(&self) -> anyhow::Result<Vec<ActivitySample>>;
+#[cfg(any(test, target_os = "windows"))]
+fn snapshot_from_active_window_sample(sample: ActivitySample) -> ActivitySnapshot {
+    ActivitySnapshot::from_primary(sample)
 }
 
 #[cfg(target_os = "windows")]
@@ -37,49 +43,42 @@ fn process_image_basename(image_path: &str) -> String {
 }
 
 #[cfg(target_os = "windows")]
-impl ActiveWindowReader for WindowsActiveWindowReader {
-    fn read_open_windows(&self) -> anyhow::Result<Vec<ActivitySample>> {
+impl ActivitySnapshotReader for WindowsActiveWindowReader {
+    fn read_snapshot(&self) -> anyhow::Result<ActivitySnapshot> {
         use anyhow::{bail, Context};
         use chrono::Utc;
-        use windows::core::BOOL;
-        use windows::Win32::Foundation::{HWND, LPARAM};
         use windows::core::PWSTR;
         use windows::Win32::System::Threading::{
             OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
             PROCESS_QUERY_LIMITED_INFORMATION,
         };
         use windows::Win32::UI::WindowsAndMessaging::{
-            EnumWindows, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
-            IsWindowVisible,
+            GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
         };
 
-        unsafe fn sample_for_window(
-            hwnd: HWND,
-            observed_at: chrono::DateTime<Utc>,
-        ) -> anyhow::Result<Option<ActivitySample>> {
-            if !IsWindowVisible(hwnd).as_bool() {
-                return Ok(None);
+        unsafe {
+            let hwnd = GetForegroundWindow();
+            if hwnd.is_invalid() {
+                bail!("no foreground window is available");
             }
+
             let title_len = GetWindowTextLengthW(hwnd);
-            if title_len <= 0 {
-                return Ok(None);
+            if title_len < 0 {
+                bail!("foreground window title length was invalid");
             }
             let mut title_buf = vec![0u16; title_len as usize + 1];
             let copied = GetWindowTextW(hwnd, &mut title_buf);
             let window_title = String::from_utf16_lossy(&title_buf[..copied as usize]);
-            if window_title.trim().is_empty() {
-                return Ok(None);
-            }
 
             let mut pid = 0u32;
             GetWindowThreadProcessId(hwnd, Some(&mut pid));
             if pid == 0 {
-                return Ok(None);
+                bail!("foreground window did not report a process id");
             }
 
             let process = OwnedProcessHandle(
                 OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
-                    .with_context(|| format!("OpenProcess failed for window pid {pid}"))?,
+                    .with_context(|| format!("OpenProcess failed for foreground pid {pid}"))?,
             );
 
             let mut process_buf = vec![0u16; 32_768];
@@ -91,18 +90,14 @@ impl ActiveWindowReader for WindowsActiveWindowReader {
                 &mut process_len,
             )
             .with_context(|| {
-                format!("QueryFullProcessImageNameW failed for window pid {pid}")
+                format!("QueryFullProcessImageNameW failed for foreground pid {pid}")
             })?;
 
             let process_path = String::from_utf16_lossy(&process_buf[..process_len as usize]);
             let process_name = process_image_basename(&process_path);
-            if is_browser_process(&process_name) {
-                return Ok(None);
-            }
 
-            Ok(Some(ActivitySample {
-                observed_at,
-                instance_key: format!("window:{}", hwnd.0 as isize),
+            Ok(snapshot_from_active_window_sample(ActivitySample {
+                observed_at: Utc::now(),
                 app_name: process_name.clone(),
                 process_name,
                 window_title,
@@ -110,34 +105,31 @@ impl ActiveWindowReader for WindowsActiveWindowReader {
                 is_idle: false,
             }))
         }
-
-        unsafe extern "system" fn enum_window(hwnd: HWND, lparam: LPARAM) -> BOOL {
-            let samples = &mut *(lparam.0 as *mut Vec<ActivitySample>);
-            let observed_at = Utc::now();
-            if let Ok(Some(sample)) = sample_for_window(hwnd, observed_at) {
-                samples.push(sample);
-            }
-            true.into()
-        }
-
-        unsafe {
-            let mut samples = Vec::new();
-            EnumWindows(Some(enum_window), LPARAM(&mut samples as *mut _ as isize))
-                .context("EnumWindows failed")?;
-            if samples.is_empty() {
-                bail!("no open windows are available");
-            }
-            Ok(samples)
-        }
     }
 }
 
-#[cfg(target_os = "windows")]
-fn is_browser_process(process_name: &str) -> bool {
-    matches!(
-        process_name.to_ascii_lowercase().as_str(),
-        "chrome.exe" | "msedge.exe" | "brave.exe" | "firefox.exe" | "opera.exe" | "vivaldi.exe"
-    )
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+    use chrono::Utc;
+
+    #[test]
+    fn active_window_snapshot_contains_only_primary_observation() {
+        let sample = ActivitySample {
+            observed_at: Utc::now(),
+            app_name: "Code".into(),
+            process_name: "Code.exe".into(),
+            window_title: "FlowPilot".into(),
+            domain: None,
+            is_idle: false,
+        };
+
+        let snapshot = snapshot_from_active_window_sample(sample.clone());
+
+        assert_eq!(snapshot.primary, sample);
+        assert_eq!(snapshot.visible_windows.len(), 1);
+        assert!(snapshot.visible_windows[0].is_primary);
+    }
 }
 
 #[cfg(all(test, target_os = "windows"))]

@@ -1,101 +1,80 @@
 import { invoke } from "@tauri-apps/api/core";
-import { isMeasuredSession } from "../lib/activityFilters";
-import { buildRangeFromPreset } from "../lib/reportRanges";
 import type {
-  ActivityGroup,
-  ActivityGroupDraft,
   ActivitySession,
   ClassificationRule,
-  DisplayNameOverride,
-  DisplayNameOverrideDraft,
-  HeatmapBucket,
-  ReportActivitySession,
-  ReportRange,
+  PlatformPermissionStatus,
+  MacosPermissionPane,
   RuleDraft,
-  SessionOverrideDraft,
   TodaySummary,
 } from "../types/activity";
 
-function todayAt(hour: number, minute: number): Date {
-  const date = new Date();
-  date.setHours(hour, minute, 0, 0);
-  return date;
-}
-
-function devSessionTimes(hour: number, minute: number, durationSeconds: number): Pick<ActivitySession, "endedAt" | "startedAt"> {
-  const startedAt = todayAt(hour, minute);
-  const endedAt = new Date(startedAt.getTime() + durationSeconds * 1000);
-
-  return {
-    endedAt: endedAt.toISOString(),
-    startedAt: startedAt.toISOString(),
-  };
-}
-
-function buildBaseDevSessions(): ActivitySession[] {
-  return [
-    {
-      ...devSessionTimes(9, 0, 2700),
-      id: "dev-1",
-      durationSeconds: 2700,
-      appName: "Chrome",
-      processName: "chrome.exe",
-      windowTitle: "ChatGPT",
-      domain: "chatgpt.com",
-      isIdle: false,
-      category: "productive",
-      matchedRuleId: "builtin:domain:chatgpt.com",
-    },
-    {
-      ...devSessionTimes(9, 46, 1800),
-      id: "dev-2",
-      durationSeconds: 1800,
-      appName: "Chrome",
-      processName: "chrome.exe",
-      windowTitle: "YouTube",
-      domain: "youtube.com",
-      isIdle: false,
-      category: "unproductive",
-      matchedRuleId: "builtin:domain:youtube.com",
-    },
-    {
-      ...devSessionTimes(10, 17, 900),
-      id: "dev-3",
-      durationSeconds: 900,
-      appName: "Code",
-      processName: "Code.exe",
-      windowTitle: "Untitled workspace",
-      domain: null,
-      isIdle: false,
-      category: "uncategorized",
-      matchedRuleId: null,
-    },
-    {
-      ...devSessionTimes(10, 33, 1080),
-      id: "dev-4",
-      durationSeconds: 1080,
-      appName: "Chrome",
-      processName: "chrome.exe",
-      windowTitle: "Naver Search",
-      domain: "naver.com",
-      isIdle: false,
-      category: "neutral",
-      matchedRuleId: "builtin:domain:naver.com",
-    },
-    {
-      ...devSessionTimes(10, 52, 1080),
-      id: "dev-5",
-      durationSeconds: 1080,
-      appName: "Chrome",
-      processName: "chrome.exe",
-      windowTitle: "Chzzk",
-      domain: "chzzk.naver.com",
-      isIdle: false,
-      category: "unproductive",
-      matchedRuleId: "builtin:domain:chzzk.naver.com",
-    },
-  ];
-}
+const baseDevSessions: ActivitySession[] = [
+  {
+    id: "dev-1",
+    startedAt: new Date().toISOString(),
+    endedAt: new Date(Date.now() + 45 * 60 * 1000).toISOString(),
+    durationSeconds: 2700,
+    appName: "Chrome",
+    processName: "chrome.exe",
+    windowTitle: "ChatGPT",
+    domain: "chatgpt.com",
+    isIdle: false,
+    category: "productive",
+    matchedRuleId: "builtin:domain:chatgpt.com",
+  },
+  {
+    id: "dev-2",
+    startedAt: new Date(Date.now() + 46 * 60 * 1000).toISOString(),
+    endedAt: new Date(Date.now() + 76 * 60 * 1000).toISOString(),
+    durationSeconds: 1800,
+    appName: "Chrome",
+    processName: "chrome.exe",
+    windowTitle: "YouTube",
+    domain: "youtube.com",
+    isIdle: false,
+    category: "unproductive",
+    matchedRuleId: "builtin:domain:youtube.com",
+  },
+  {
+    id: "dev-3",
+    startedAt: new Date(Date.now() + 77 * 60 * 1000).toISOString(),
+    endedAt: new Date(Date.now() + 92 * 60 * 1000).toISOString(),
+    durationSeconds: 900,
+    appName: "Code",
+    processName: "Code.exe",
+    windowTitle: "Untitled workspace",
+    domain: null,
+    isIdle: false,
+    category: "uncategorized",
+    matchedRuleId: null,
+  },
+  {
+    id: "dev-4",
+    startedAt: new Date(Date.now() + 93 * 60 * 1000).toISOString(),
+    endedAt: new Date(Date.now() + 111 * 60 * 1000).toISOString(),
+    durationSeconds: 1080,
+    appName: "Chrome",
+    processName: "chrome.exe",
+    windowTitle: "Naver Search",
+    domain: "naver.com",
+    isIdle: false,
+    category: "neutral",
+    matchedRuleId: "builtin:domain:naver.com",
+  },
+  {
+    id: "dev-5",
+    startedAt: new Date(Date.now() + 112 * 60 * 1000).toISOString(),
+    endedAt: new Date(Date.now() + 130 * 60 * 1000).toISOString(),
+    durationSeconds: 1080,
+    appName: "Chrome",
+    processName: "chrome.exe",
+    windowTitle: "Chzzk",
+    domain: "chzzk.naver.com",
+    isIdle: false,
+    category: "unproductive",
+    matchedRuleId: "builtin:domain:chzzk.naver.com",
+  },
+];
 
 const builtinRuleSeeds: Array<Pick<ClassificationRule, "category" | "name" | "pattern" | "ruleType">> = [
   { name: "ChatGPT", ruleType: "domain", pattern: "chatgpt.com", category: "productive" },
@@ -126,16 +105,10 @@ function buildBuiltinDevRules(): ClassificationRule[] {
 
 let builtinDevRules: ClassificationRule[] = buildBuiltinDevRules();
 let devCustomRules: ClassificationRule[] = [];
-let devGroups: ActivityGroup[] = [];
-let devDisplayNameOverrides: DisplayNameOverride[] = [];
-let devSessionOverrides: SessionOverrideDraft[] = [];
 
 export function resetDevActivityFallbackForTest(): void {
   builtinDevRules = buildBuiltinDevRules();
   devCustomRules = [];
-  devGroups = [];
-  devDisplayNameOverrides = [];
-  devSessionOverrides = [];
 }
 
 function validateRuleDraft(draft: RuleDraft): Omit<ClassificationRule, "id" | "isBuiltin" | "isEnabled" | "priority"> {
@@ -248,41 +221,6 @@ function matchesDevRule(rule: ClassificationRule, session: ActivitySession): boo
   return false;
 }
 
-function matchesDraftMatcher(matcher: { pattern: string; ruleType: RuleDraft["ruleType"] }, session: ActivitySession): boolean {
-  if (matcher.ruleType === "domain") {
-    const domain = session.domain ? canonicalRulePattern("domain", session.domain) : null;
-    const pattern = canonicalRulePattern("domain", matcher.pattern);
-
-    return !!domain && !!pattern && (domain === pattern || domain.endsWith(`.${pattern}`));
-  }
-
-  if (matcher.ruleType === "app") {
-    return (
-      session.processName.toLowerCase() === matcher.pattern.toLowerCase() ||
-      session.appName.toLowerCase() === matcher.pattern.toLowerCase()
-    );
-  }
-
-  if (matcher.ruleType === "titleKeyword") {
-    return session.windowTitle.toLowerCase().includes(matcher.pattern.trim().toLowerCase());
-  }
-
-  return false;
-}
-
-function compareDisplayNameOverrideOrder(left: DisplayNameOverride, right: DisplayNameOverride): number {
-  const leftOrder: [number, number] = [ruleSpecificity({ ...left, category: "neutral", isBuiltin: false, isEnabled: true, priority: 100, name: left.displayName }), left.pattern.length];
-  const rightOrder: [number, number] = [ruleSpecificity({ ...right, category: "neutral", isBuiltin: false, isEnabled: true, priority: 100, name: right.displayName }), right.pattern.length];
-
-  for (let index = 0; index < leftOrder.length; index += 1) {
-    if (leftOrder[index] !== rightOrder[index]) {
-      return leftOrder[index] - rightOrder[index];
-    }
-  }
-
-  return 0;
-}
-
 function classifyDevSession(session: ActivitySession): Pick<ActivitySession, "category" | "matchedRuleId"> {
   const userRule = devCustomRules.filter((rule) => matchesDevRule(rule, session)).sort(compareRuleOrder).at(-1);
   const builtinRule = builtinDevRules.filter((rule) => matchesDevRule(rule, session)).sort(compareRuleOrder).at(-1);
@@ -294,63 +232,17 @@ function classifyDevSession(session: ActivitySession): Pick<ActivitySession, "ca
   };
 }
 
-function displayNameForDevSession(session: ActivitySession, override?: SessionOverrideDraft): string {
-  if (override?.displayNameOverride?.trim()) {
-    return override.displayNameOverride.trim();
-  }
-
-  const displayNameOverride = devDisplayNameOverrides
-    .filter((candidate) => matchesDraftMatcher(candidate, session))
-    .sort(compareDisplayNameOverrideOrder)
-    .at(-1);
-  if (displayNameOverride) {
-    return displayNameOverride.displayName;
-  }
-
-  const group = devGroups.find((candidate) => {
-    return candidate.matchers.some((matcher) => matchesDraftMatcher(matcher, session));
-  });
-
-  return group?.name ?? session.domain ?? session.appName;
-}
-
-function getDevSessions(): ReportActivitySession[] {
-  return buildBaseDevSessions().map((session) => ({
+function getDevSessions(): ActivitySession[] {
+  return baseDevSessions.map((session) => ({
     ...session,
     ...classifyDevSession(session),
-  })).map((session) => {
-    const override = devSessionOverrides.find((entry) => entry.sessionId === session.id);
-    const category = override?.categoryOverride ?? session.category;
-
-    return {
-      ...session,
-      category,
-      categorySource: override?.categoryOverride ? "override" : "automatic",
-      displayName: displayNameForDevSession(session, override),
-      matchedRuleId: override?.categoryOverride ? null : session.matchedRuleId,
-      note: override?.note?.trim() || null,
-    };
-  });
-}
-
-function getMeasuredDevSessions(): ReportActivitySession[] {
-  return getDevSessions().filter(isMeasuredSession);
-}
-
-function getDevSessionsForRange(range: ReportRange): ReportActivitySession[] {
-  const start = new Date(range.start).getTime();
-  const end = new Date(range.end).getTime();
-
-  return getMeasuredDevSessions().filter((session) => {
-    const startedAt = new Date(session.startedAt).getTime();
-    return startedAt >= start && startedAt < end;
-  });
+  })).filter((session) => session.category !== "ignored");
 }
 
 function summarizeSessions(sessions: ActivitySession[]): TodaySummary {
   return sessions.reduce<TodaySummary>(
     (summary, session) => {
-      if (!isMeasuredSession(session)) {
+      if (session.category === "ignored") {
         return summary;
       }
 
@@ -382,31 +274,6 @@ function summarizeSessions(sessions: ActivitySession[]): TodaySummary {
       uncategorizedSeconds: 0,
     },
   );
-}
-
-function buildHeatmapBuckets(sessions: ReportActivitySession[]): HeatmapBucket[] {
-  const totals = new Map<string, { categories: Map<ReportActivitySession["category"], number>; seconds: number }>();
-
-  for (const session of sessions) {
-    const startedAt = new Date(session.startedAt);
-    const weekday = (startedAt.getDay() + 6) % 7;
-    const hour = startedAt.getHours();
-    const key = `${weekday}:${hour}`;
-    const bucket = totals.get(key) ?? { categories: new Map(), seconds: 0 };
-    bucket.seconds += session.durationSeconds;
-    bucket.categories.set(session.category, (bucket.categories.get(session.category) ?? 0) + session.durationSeconds);
-    totals.set(key, bucket);
-  }
-
-  return [...totals.entries()]
-    .map(([key, bucket]) => {
-      const [weekday, hour] = key.split(":").map(Number);
-      const dominantCategory =
-        [...bucket.categories.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] ?? "uncategorized";
-
-      return { dominantCategory, hour, seconds: bucket.seconds, weekday };
-    })
-    .sort((left, right) => left.weekday - right.weekday || left.hour - right.hour);
 }
 
 function ruleTypeIdSegment(ruleType: RuleDraft["ruleType"]): string {
@@ -454,33 +321,18 @@ function canonicalRulePattern(ruleType: RuleDraft["ruleType"], pattern: string):
   return trimmed || null;
 }
 
-export async function getSummaryForRange(range: ReportRange): Promise<TodaySummary> {
-  if (!isDesktopRuntime()) {
-    return summarizeSessions(getDevSessionsForRange(range));
-  }
-  return invoke<TodaySummary>("get_summary_for_range", { start: range.start, end: range.end });
-}
-
-export async function getSessionsForRange(range: ReportRange): Promise<ReportActivitySession[]> {
-  if (!isDesktopRuntime()) {
-    return getDevSessionsForRange(range);
-  }
-  return invoke<ReportActivitySession[]>("get_sessions_for_range", { start: range.start, end: range.end });
-}
-
-export async function getHeatmapForRange(range: ReportRange): Promise<HeatmapBucket[]> {
-  if (!isDesktopRuntime()) {
-    return buildHeatmapBuckets(getDevSessionsForRange(range));
-  }
-  return invoke<HeatmapBucket[]>("get_heatmap_for_range", { start: range.start, end: range.end });
-}
-
 export async function getTodaySummary(): Promise<TodaySummary> {
-  return getSummaryForRange(buildRangeFromPreset("today"));
+  if (!isDesktopRuntime()) {
+    return summarizeSessions(getDevSessions());
+  }
+  return invoke<TodaySummary>("get_today_summary");
 }
 
-export async function getTodaySessions(): Promise<ReportActivitySession[]> {
-  return getSessionsForRange(buildRangeFromPreset("today"));
+export async function getTodaySessions(): Promise<ActivitySession[]> {
+  if (!isDesktopRuntime()) {
+    return getDevSessions();
+  }
+  return invoke<ActivitySession[]>("get_today_sessions");
 }
 
 export async function exportTodayCsv(): Promise<string> {
@@ -541,180 +393,26 @@ export async function updateRule(ruleId: string, draft: RuleDraft): Promise<Clas
   return invoke<ClassificationRule>("update_rule", { ruleId, draft });
 }
 
-function normalizeGroupDraft(draft: ActivityGroupDraft): ActivityGroupDraft {
-  const name = draft.name.trim();
-  if (!name) {
-    throw new Error("그룹 이름을 입력해야 합니다.");
-  }
-
-  const matchers = draft.matchers
-    .map((matcher) => ({
-      ruleType: matcher.ruleType,
-      pattern: canonicalRulePattern(matcher.ruleType, matcher.pattern) ?? "",
-    }))
-    .filter((matcher) => matcher.pattern);
-
-  if (matchers.length === 0) {
-    throw new Error("그룹에는 최소 1개의 패턴이 필요합니다.");
-  }
-
-  return {
-    color: draft.color.trim() || "#2563eb",
-    matchers,
-    name,
-  };
-}
-
-export async function listActivityGroups(): Promise<ActivityGroup[]> {
+export async function getPlatformPermissionStatus(): Promise<PlatformPermissionStatus> {
   if (!isDesktopRuntime()) {
-    return devGroups;
-  }
-  return invoke<ActivityGroup[]>("list_activity_groups");
-}
-
-export async function createActivityGroup(draft: ActivityGroupDraft): Promise<ActivityGroup> {
-  if (!isDesktopRuntime()) {
-    const normalized = normalizeGroupDraft(draft);
-    const id = `group:${patternIdSegment(normalized.name)}:${devGroups.length + 1}`;
-    const group: ActivityGroup = {
-      ...normalized,
-      id,
-      matchers: normalized.matchers.map((matcher, index) => ({
-        ...matcher,
-        id: `${id}:matcher:${index}`,
-      })),
+    return {
+      platform: "other",
+      accessibilityGranted: true,
+      screenRecordingGranted: true,
+      accessibilityRequiredReason: "",
+      screenRecordingRequiredReason: "",
+      canPromptAccessibility: false,
+      canPromptScreenRecording: false,
     };
-    devGroups = [group, ...devGroups];
-    return group;
   }
 
-  return invoke<ActivityGroup>("create_activity_group", { draft });
+  return invoke<PlatformPermissionStatus>("get_platform_permission_status");
 }
 
-export async function updateActivityGroup(groupId: string, draft: ActivityGroupDraft): Promise<ActivityGroup> {
+export async function openMacosPermissionSettings(pane: MacosPermissionPane): Promise<void> {
   if (!isDesktopRuntime()) {
-    const normalized = normalizeGroupDraft(draft);
-    const group: ActivityGroup = {
-      ...normalized,
-      id: groupId,
-      matchers: normalized.matchers.map((matcher, index) => ({
-        ...matcher,
-        id: `${groupId}:matcher:${index}`,
-      })),
-    };
-    devGroups = devGroups.map((entry) => (entry.id === groupId ? group : entry));
-    return group;
-  }
-
-  return invoke<ActivityGroup>("update_activity_group", { groupId, draft });
-}
-
-export async function deleteActivityGroup(groupId: string): Promise<void> {
-  if (!isDesktopRuntime()) {
-    devGroups = devGroups.filter((group) => group.id !== groupId);
     return;
   }
 
-  return invoke<void>("delete_activity_group", { groupId });
-}
-
-function normalizeDisplayNameOverrideDraft(draft: DisplayNameOverrideDraft): DisplayNameOverrideDraft {
-  const pattern = canonicalRulePattern(draft.ruleType, draft.pattern);
-  if (!pattern) {
-    throw new Error("표시명을 적용할 식별값을 입력해야 합니다.");
-  }
-
-  const displayName = draft.displayName.trim();
-  if (!displayName) {
-    throw new Error("표시 이름을 입력해야 합니다.");
-  }
-
-  return {
-    displayName,
-    pattern,
-    ruleType: draft.ruleType,
-  };
-}
-
-function displayNameOverrideId(draft: DisplayNameOverrideDraft): string {
-  return `display-name:${ruleTypeIdSegment(draft.ruleType)}:${patternIdSegment(draft.pattern)}`;
-}
-
-export async function listDisplayNameOverrides(): Promise<DisplayNameOverride[]> {
-  if (!isDesktopRuntime()) {
-    return devDisplayNameOverrides;
-  }
-
-  return invoke<DisplayNameOverride[]>("list_display_name_overrides");
-}
-
-export async function createDisplayNameOverride(draft: DisplayNameOverrideDraft): Promise<DisplayNameOverride> {
-  if (!isDesktopRuntime()) {
-    const normalized = normalizeDisplayNameOverrideDraft(draft);
-    const created: DisplayNameOverride = {
-      ...normalized,
-      id: displayNameOverrideId(normalized),
-    };
-    devDisplayNameOverrides = [
-      created,
-      ...devDisplayNameOverrides.filter((entry) => entry.id !== created.id),
-    ];
-    return created;
-  }
-
-  return invoke<DisplayNameOverride>("create_display_name_override", { draft });
-}
-
-export async function updateDisplayNameOverride(
-  overrideId: string,
-  draft: DisplayNameOverrideDraft,
-): Promise<DisplayNameOverride> {
-  if (!isDesktopRuntime()) {
-    const normalized = normalizeDisplayNameOverrideDraft(draft);
-    if (!devDisplayNameOverrides.some((entry) => entry.id === overrideId)) {
-      throw new Error("표시명 별칭을 찾을 수 없습니다.");
-    }
-    const updated: DisplayNameOverride = {
-      ...normalized,
-      id: overrideId,
-    };
-    devDisplayNameOverrides = devDisplayNameOverrides.map((entry) => (entry.id === overrideId ? updated : entry));
-    return updated;
-  }
-
-  return invoke<DisplayNameOverride>("update_display_name_override", { overrideId, draft });
-}
-
-export async function deleteDisplayNameOverride(overrideId: string): Promise<void> {
-  if (!isDesktopRuntime()) {
-    devDisplayNameOverrides = devDisplayNameOverrides.filter((entry) => entry.id !== overrideId);
-    return;
-  }
-
-  return invoke<void>("delete_display_name_override", { overrideId });
-}
-
-export async function upsertSessionOverride(draft: SessionOverrideDraft): Promise<void> {
-  if (!isDesktopRuntime()) {
-    devSessionOverrides = [
-      {
-        ...draft,
-        displayNameOverride: draft.displayNameOverride?.trim() || null,
-        note: draft.note?.trim() || null,
-      },
-      ...devSessionOverrides.filter((entry) => entry.sessionId !== draft.sessionId),
-    ];
-    return;
-  }
-
-  return invoke<void>("upsert_session_override", { draft });
-}
-
-export async function deleteSessionOverride(sessionId: string): Promise<void> {
-  if (!isDesktopRuntime()) {
-    devSessionOverrides = devSessionOverrides.filter((entry) => entry.sessionId !== sessionId);
-    return;
-  }
-
-  return invoke<void>("delete_session_override", { sessionId });
+  await invoke("open_macos_permission_settings", { pane });
 }

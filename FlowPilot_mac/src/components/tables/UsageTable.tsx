@@ -1,23 +1,29 @@
-import { useMemo, type CSSProperties } from "react";
-import type { ColumnDef } from "@tanstack/react-table";
-import { Pencil } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { DataTable, SortableHeader } from "@/components/ui/data-table";
+import { useMemo, useState } from "react";
+import {
+  createColumnHelper,
+  flexRender,
+  getCoreRowModel,
+  getFilteredRowModel,
+  getSortedRowModel,
+  type SortingState,
+  useReactTable,
+} from "@tanstack/react-table";
 import { colorForCategory } from "../../lib/colors";
-import { isMeasuredSession } from "../../lib/activityFilters";
-import { CATEGORY_LABELS, EMPTY_STATE_TEXT, RULE_SOURCE_LABELS } from "../../lib/labels";
+import { EMPTY_STATE_TEXT } from "../../lib/labels";
 import { formatDuration } from "../../lib/time";
-import type { ActivitySession, ProductivityCategory, ReportActivitySession } from "../../types/activity";
-
-type DisplaySession = ActivitySession & Partial<Pick<ReportActivitySession, "displayName" | "note" | "categorySource">>;
+import type { ActivitySession, ProductivityCategory } from "../../types/activity";
+import { Badge } from "../ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
+import { Progress } from "../ui/progress";
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "../ui/table";
+import { AnalyticsTableToolbar } from "./AnalyticsTableToolbar";
+import { SortableTableHead } from "./SortableTableHead";
+import { displayCategory, displayRuleSource } from "./tableFormatting";
 
 interface UsageTableProps {
   description?: string;
   maxRows?: number;
-  onEditSession?: (session: DisplaySession) => void;
-  sessions: DisplaySession[];
+  sessions: ActivitySession[];
   title?: string;
 }
 
@@ -28,12 +34,13 @@ interface UsageRow {
   isIdle: boolean;
   matchedRule: string | null;
   name: string;
-  session: DisplaySession;
   share: number;
 }
 
-function displayName(session: DisplaySession): string {
-  return session.displayName ?? session.domain ?? session.appName;
+const columnHelper = createColumnHelper<UsageRow>();
+
+function displayName(session: ActivitySession): string {
+  return session.domain ?? session.appName;
 }
 
 function dominantCategory(categories: Map<ProductivityCategory, number>): ProductivityCategory {
@@ -41,8 +48,8 @@ function dominantCategory(categories: Map<ProductivityCategory, number>): Produc
 }
 
 function buildRows(sessions: ActivitySession[]): UsageRow[] {
-  const measuredSessions = sessions.filter(isMeasuredSession);
-  const totalSeconds = measuredSessions.reduce((total, session) => total + session.durationSeconds, 0);
+  const reportableSessions = sessions.filter((session) => session.category !== "ignored");
+  const totalSeconds = reportableSessions.reduce((total, session) => total + session.durationSeconds, 0);
   const groups = new Map<
     string,
     {
@@ -51,11 +58,10 @@ function buildRows(sessions: ActivitySession[]): UsageRow[] {
       idleSeconds: number;
       matchedRules: Set<string>;
       name: string;
-      session: DisplaySession;
     }
   >();
 
-  for (const session of measuredSessions) {
+  for (const session of reportableSessions) {
     const name = displayName(session);
     const group = groups.get(name) ?? {
       categories: new Map<ProductivityCategory, number>(),
@@ -63,7 +69,6 @@ function buildRows(sessions: ActivitySession[]): UsageRow[] {
       idleSeconds: 0,
       matchedRules: new Set<string>(),
       name,
-      session,
     };
     group.durationSeconds += session.durationSeconds;
 
@@ -88,165 +93,192 @@ function buildRows(sessions: ActivitySession[]): UsageRow[] {
       isIdle: group.durationSeconds === group.idleSeconds,
       matchedRule: [...group.matchedRules][0] ?? null,
       name: group.name,
-      session: group.session,
       share: totalSeconds > 0 ? group.durationSeconds / totalSeconds : 0,
     }))
     .sort((left, right) => right.durationSeconds - left.durationSeconds);
 }
 
-function displayRule(matchedRuleId: string | null): string {
-  if (!matchedRuleId) {
-    return RULE_SOURCE_LABELS.none;
-  }
-
-  if (matchedRuleId.startsWith("builtin:")) {
-    return RULE_SOURCE_LABELS.builtin;
-  }
-
-  if (matchedRuleId.startsWith("user:")) {
-    return RULE_SOURCE_LABELS.custom;
-  }
-
-  return matchedRuleId;
-}
-
-function categoryBadgeStyle(color: string): CSSProperties {
-  return {
-    backgroundColor: `color-mix(in srgb, ${color} 10%, white)`,
-    borderColor: `color-mix(in srgb, ${color} 46%, white)`,
-    color,
-  };
+function rowSearchText(row: UsageRow): string {
+  return [
+    row.name,
+    displayCategory(row.category, row.isIdle),
+    displayRuleSource(row.matchedRule),
+    formatDuration(row.durationSeconds),
+    `${Math.round(row.share * 100)}%`,
+  ]
+    .join(" ")
+    .toLowerCase();
 }
 
 export function UsageTable({
   description = "앱과 사이트를 사용 시간 기준으로 정리했습니다.",
   maxRows,
-  onEditSession,
   sessions,
   title = "상위 앱과 사이트",
 }: UsageTableProps) {
-  const rows = buildRows(sessions).slice(0, maxRows ?? Number.POSITIVE_INFINITY);
-  const columns = useMemo<ColumnDef<UsageRow>[]>(
+  const rows = useMemo(
+    () => buildRows(sessions).slice(0, maxRows ?? Number.POSITIVE_INFINITY),
+    [maxRows, sessions],
+  );
+  const [globalFilter, setGlobalFilter] = useState("");
+  const [sorting, setSorting] = useState<SortingState>([{ id: "durationSeconds", desc: true }]);
+  const columns = useMemo(
     () => [
-      {
-        accessorKey: "name",
-        cell: ({ row }) => {
-          const color = colorForCategory(row.original.category, row.original.isIdle);
-
+      columnHelper.accessor("name", {
+        header: "이름",
+        cell: (info) => {
+          const row = info.row.original;
+          const color = colorForCategory(row.category, row.isIdle);
           return (
-            <span className="inline-flex min-w-44 max-w-64 items-center gap-2">
-              <i className="size-2.5 shrink-0 rounded-full shadow-sm" style={{ backgroundColor: color }} />
-              <span className="truncate font-semibold">{row.original.name}</span>
+            <span className="inline-flex max-w-60 items-center gap-2 [overflow-wrap:anywhere]">
+              <i className="size-2.5 shrink-0 rounded-sm" style={{ backgroundColor: color }} />
+              {info.getValue()}
             </span>
           );
         },
-        header: ({ column }) => <SortableHeader column={column}>이름</SortableHeader>,
-        sortingFn: "alphanumeric",
-        sortDescFirst: false,
-      },
-      {
-        accessorKey: "category",
-        cell: ({ row }) => {
-          const color = colorForCategory(row.original.category, row.original.isIdle);
-
+      }),
+      columnHelper.accessor((row) => displayCategory(row.category, row.isIdle), {
+        id: "categoryLabel",
+        header: "분류",
+        cell: (info) => {
+          const row = info.row.original;
+          const color = colorForCategory(row.category, row.isIdle);
           return (
-            <Badge
-              className="h-7 min-w-20 justify-center gap-1.5 whitespace-nowrap rounded-md border px-2.5 text-[11px] font-bold leading-none shadow-none"
-              style={categoryBadgeStyle(color)}
-              variant="outline"
-            >
-              <i className="size-1.5 rounded-full" style={{ backgroundColor: color }} />
-              <span>{row.original.isIdle ? "유휴" : CATEGORY_LABELS[row.original.category]}</span>
+            <Badge className="border bg-white" style={{ borderColor: color, color }} variant="outline">
+              {info.getValue()}
             </Badge>
           );
         },
-        header: ({ column }) => <SortableHeader column={column}>분류</SortableHeader>,
-        sortingFn: (left, right) => {
-          const leftLabel = left.original.isIdle ? "유휴" : CATEGORY_LABELS[left.original.category];
-          const rightLabel = right.original.isIdle ? "유휴" : CATEGORY_LABELS[right.original.category];
-
-          return leftLabel.localeCompare(rightLabel, "ko-KR");
-        },
-        sortDescFirst: false,
-      },
-      {
-        accessorKey: "durationSeconds",
-        cell: ({ row }) => <span className="font-semibold tabular-nums">{formatDuration(row.original.durationSeconds)}</span>,
-        header: ({ column }) => <SortableHeader column={column}>시간</SortableHeader>,
-        sortDescFirst: true,
-      },
-      {
-        accessorKey: "share",
-        cell: ({ row }) => {
-          const color = colorForCategory(row.original.category, row.original.isIdle);
-          const sharePercent = Math.round(row.original.share * 100);
-
+      }),
+      columnHelper.accessor("durationSeconds", {
+        header: "시간",
+        cell: (info) => <span className="font-medium">{formatDuration(info.getValue())}</span>,
+        sortingFn: "basic",
+      }),
+      columnHelper.accessor("share", {
+        header: "비중",
+        cell: (info) => {
+          const row = info.row.original;
+          const color = colorForCategory(row.category, row.isIdle);
+          const sharePercent = Math.round(info.getValue() * 100);
           return (
-            <span className="flex min-w-32 items-center gap-2" aria-label={`${sharePercent}퍼센트`}>
-              <span className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted shadow-inner">
-                <span
-                  className="block h-full rounded-full shadow-sm"
-                  style={{ width: `${sharePercent}%`, backgroundColor: color }}
-                />
-              </span>
-              <span className="w-10 text-right text-xs font-bold tabular-nums text-muted-foreground">{sharePercent}%</span>
+            <span className="inline-grid min-w-32 grid-cols-[82px_auto] items-center gap-2 max-[640px]:min-w-0 max-[640px]:grid-cols-[minmax(0,1fr)_auto]">
+              <Progress
+                aria-label={`${sharePercent}퍼센트`}
+                className="h-2"
+                indicatorStyle={{ backgroundColor: color }}
+                value={sharePercent}
+              />
+              <span className="text-sm font-semibold text-muted-foreground">{sharePercent}%</span>
             </span>
           );
         },
-        header: ({ column }) => <SortableHeader column={column}>비중</SortableHeader>,
-        sortDescFirst: true,
-      },
-      {
-        accessorFn: (row) => displayRule(row.matchedRule),
-        cell: ({ row }) => (
-          <span className="block max-w-52 truncate text-muted-foreground">{displayRule(row.original.matchedRule)}</span>
+        sortingFn: "basic",
+      }),
+      columnHelper.accessor((row) => displayRuleSource(row.matchedRule), {
+        id: "ruleSource",
+        header: "적용 규칙",
+        cell: (info) => (
+          <span className="max-w-60 [overflow-wrap:anywhere] text-muted-foreground">{info.getValue()}</span>
         ),
-        header: ({ column }) => <SortableHeader column={column}>적용 규칙</SortableHeader>,
-        id: "matchedRule",
-        sortDescFirst: false,
-      },
-      ...(onEditSession
-        ? [
-            {
-              cell: ({ row }) => (
-                <div className="flex justify-end">
-                  <Button size="sm" variant="outline" type="button" onClick={() => onEditSession(row.original.session)}>
-                    <Pencil className="size-4" />
-                    수정
-                  </Button>
-                </div>
-              ),
-              enableSorting: false,
-              header: () => <span className="block text-right">관리</span>,
-              id: "actions",
-            } satisfies ColumnDef<UsageRow>,
-          ]
-        : []),
+      }),
     ],
-    [onEditSession],
+    [],
   );
+  const table = useReactTable({
+    columns,
+    data: rows,
+    getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    globalFilterFn: (row, _columnId, filterValue) => {
+      return rowSearchText(row.original).includes(String(filterValue).trim().toLowerCase());
+    },
+    onGlobalFilterChange: setGlobalFilter,
+    onSortingChange: setSorting,
+    state: { globalFilter, sorting },
+  });
+  const visibleRows = table.getRowModel().rows;
 
   return (
     <Card aria-labelledby="usage-table-title">
       <CardHeader className="border-b">
-        <CardTitle id="usage-table-title">{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
+        <div>
+          <CardTitle id="usage-table-title">{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
+        </div>
       </CardHeader>
 
-      <CardContent className="p-0">
-        {rows.length > 0 ? (
-          <DataTable
-            columns={columns}
-            data={rows}
-            emptyState={EMPTY_STATE_TEXT.noDestinations}
-            initialSorting={[{ desc: true, id: "durationSeconds" }]}
+      {rows.length > 0 ? (
+        <CardContent className="p-0">
+          <AnalyticsTableToolbar
+            searchLabel="사용 항목 검색"
+            searchPlaceholder="앱, 도메인, 규칙 검색"
+            searchValue={globalFilter}
+            onSearchChange={setGlobalFilter}
+            totalRows={rows.length}
+            visibleRows={visibleRows.length}
           />
-        ) : (
-          <p className="m-5 rounded-lg border border-dashed bg-muted/25 p-8 text-center text-sm font-semibold text-muted-foreground">
+          <div className="overflow-x-auto">
+            <Table className="min-w-[680px] max-[640px]:min-w-0">
+              <TableHeader className="max-[640px]:hidden">
+                {table.getHeaderGroups().map((headerGroup) => (
+                  <TableRow key={headerGroup.id}>
+                    {headerGroup.headers.map((header) => (
+                      <SortableTableHead
+                        key={header.id}
+                        canSort={header.column.getCanSort()}
+                        label={String(header.column.columnDef.header)}
+                        sortState={header.column.getIsSorted()}
+                        toggleSorting={header.column.getToggleSortingHandler()}
+                      />
+                    ))}
+                  </TableRow>
+                ))}
+              </TableHeader>
+              <TableBody>
+                {visibleRows.length > 0 ? (
+                  visibleRows.map((row) => (
+                    <TableRow className="max-[640px]:block max-[640px]:p-5" key={row.id}>
+                      {row.getVisibleCells().map((cell) => (
+                        <TableCell
+                          className="max-[640px]:mt-3 max-[640px]:flex max-[640px]:items-center max-[640px]:justify-between max-[640px]:gap-4 max-[640px]:p-0"
+                          key={cell.id}
+                        >
+                          <span
+                            aria-hidden="true"
+                            className="hidden shrink-0 text-xs font-semibold text-muted-foreground max-[640px]:inline"
+                          >
+                            {String(cell.column.columnDef.header)}
+                          </span>
+                          <span className="min-w-0 text-right max-[640px]:text-left">
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </span>
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell
+                      className="h-32 text-center text-sm font-semibold text-muted-foreground"
+                      colSpan={columns.length}
+                    >
+                      검색 결과가 없습니다.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      ) : (
+        <CardContent>
+          <p className="grid min-h-36 place-items-center text-center text-sm font-semibold text-muted-foreground">
             {EMPTY_STATE_TEXT.noDestinations}
           </p>
-        )}
-      </CardContent>
+        </CardContent>
+      )}
     </Card>
   );
 }

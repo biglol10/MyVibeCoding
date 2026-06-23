@@ -9,11 +9,10 @@ const BRIDGE_HEADER_NAME: &str = "x-flowpilot-bridge";
 const BRIDGE_HEADER_VALUE: &str = "flowpilot-browser-bridge-v1";
 const MAX_BROWSER_EVENT_BODY_BYTES: usize = 16 * 1024;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserEventDraft {
     pub domain: String,
-    pub tab_id: Option<i64>,
     pub url: Option<String>,
     pub title: String,
 }

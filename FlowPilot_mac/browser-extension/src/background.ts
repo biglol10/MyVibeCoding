@@ -5,7 +5,6 @@ export interface SanitizedUrl {
 
 export const BRIDGE_HEADER_NAME = "x-flowpilot-bridge";
 export const BRIDGE_HEADER_VALUE = "flowpilot-browser-bridge-v1";
-const OPEN_TABS_ALARM_NAME = "flowpilot-open-tabs";
 
 export function sanitizeUrl(rawUrl: string, storeFullUrl: boolean): SanitizedUrl {
   const parsed = new URL(rawUrl);
@@ -41,41 +40,53 @@ export async function reportActiveTab(tab: chrome.tabs.Tab) {
     },
     body: JSON.stringify({
       title: tab.title ?? "",
-      tabId: tab.id,
       ...payload,
     }),
   }).catch(() => undefined);
 }
 
-export async function reportOpenTabs(tabs?: chrome.tabs.Tab[]) {
-  const openTabs = tabs ?? await chrome.tabs.query({});
-  await Promise.all(openTabs.map((tab) => reportActiveTab(tab)));
+export async function reportActiveTabForWindow(windowId: number) {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) {
+    return;
+  }
+
+  const [tab] = await chrome.tabs.query({ active: true, windowId });
+  if (tab) {
+    await reportActiveTab(tab);
+  }
 }
 
-function scheduleOpenTabsReporting() {
-  void chrome.alarms.create(OPEN_TABS_ALARM_NAME, { periodInMinutes: 1 });
-  void reportOpenTabs();
+export async function reportActiveTabForLastFocusedWindow() {
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (tab) {
+    await reportActiveTab(tab);
+  }
+}
+
+export async function reportUpdatedActiveTab(
+  changeInfo: chrome.tabs.OnUpdatedInfo,
+  tab: chrome.tabs.Tab,
+) {
+  if (changeInfo.status === "complete" && tab.active) {
+    await reportActiveTab(tab);
+  }
 }
 
 if (typeof chrome !== "undefined" && chrome.tabs) {
   chrome.tabs.onActivated.addListener(async ({ tabId }) => {
-    await reportOpenTabs();
+    const tab = await chrome.tabs.get(tabId);
+    await reportActiveTab(tab);
   });
 
   chrome.tabs.onUpdated.addListener(async (_tabId, changeInfo, tab) => {
-    if (changeInfo.status === "complete") {
-      await reportOpenTabs();
-    }
+    await reportUpdatedActiveTab(changeInfo, tab);
   });
 
-  if (chrome.alarms) {
-    chrome.runtime.onInstalled.addListener(scheduleOpenTabsReporting);
-    chrome.runtime.onStartup.addListener(scheduleOpenTabsReporting);
-    chrome.alarms.onAlarm.addListener(async (alarm) => {
-      if (alarm.name === OPEN_TABS_ALARM_NAME) {
-        await reportOpenTabs();
-      }
-    });
-    scheduleOpenTabsReporting();
-  }
+  chrome.windows?.onFocusChanged?.addListener(async (windowId) => {
+    await reportActiveTabForWindow(windowId);
+  });
+
+  chrome.runtime?.onStartup?.addListener(async () => {
+    await reportActiveTabForLastFocusedWindow();
+  });
 }

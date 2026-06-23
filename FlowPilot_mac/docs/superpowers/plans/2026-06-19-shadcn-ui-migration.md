@@ -1,101 +1,104 @@
-# shadcn/ui Migration Implementation Plan
+# shadcn UI Migration Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace FlowPilot's custom CSS-heavy React UI with a shadcn/ui-style Tailwind/Radix component system while preserving all existing behavior.
+**Goal:** Replace FlowPilot's custom React dashboard UI with a shadcn-compatible component system without changing app behavior.
 
-**Architecture:** Add Tailwind v4 and shadcn-compatible UI primitives under `src/components/ui`, then migrate screens from layout primitives outward: app shell, cards, tables, forms, dialogs, and report controls. Keep Recharts and specialized chart math, but render chart panels and controls through the new design system.
+**Architecture:** Add Tailwind plus local shadcn-style primitives in `src/components/ui`, then migrate existing feature components to compose those primitives. Keep all data loading, chart calculations, rules APIs, and navigation state unchanged.
 
-**Tech Stack:** React 19, Vite 8, Tauri v2, Tailwind CSS v4, Radix UI primitives, class-variance-authority, tailwind-merge, lucide-react, Recharts, Vitest.
+**Tech Stack:** React 19, Vite, TypeScript, Tailwind CSS, class-variance-authority, tailwind-merge, lucide-react, Vitest.
 
 ---
 
-### Task 1: Foundation
+### Task 1: Add Tailwind and shadcn Foundation
 
 **Files:**
-- Modify: `package.json`
-- Modify: `package-lock.json`
-- Modify: `vite.config.ts`
-- Modify: `tsconfig.json`
-- Modify: `tsconfig.app.json`
-- Modify: `src/index.css`
 - Create: `components.json`
-- Create: `src/lib/utils.ts`
+- Modify: `package.json`
+- Modify: `src/index.css`
+- Modify: `src/App.tsx`
 
-- [ ] Add Tailwind/Radix/shadcn dependencies.
-- [ ] Configure Vite `tailwindcss()` plugin and `@/*` alias.
-- [ ] Configure TypeScript `@/*` alias.
-- [ ] Replace base CSS with Tailwind theme tokens and global desktop app defaults.
-- [ ] Verify with `npm.cmd run build`.
+- [ ] Add Tailwind, helper dependencies, and shadcn config.
+- [ ] Move global theme variables into `src/index.css`.
+- [ ] Keep `src/styles.css` temporarily during migration so each component can be moved safely.
+- [ ] Run `npm test` and `npm run build`.
 
-### Task 2: UI Primitives
+### Task 2: Add UI Primitives
 
 **Files:**
+- Create: `src/lib/utils.ts`
 - Create: `src/components/ui/button.tsx`
 - Create: `src/components/ui/card.tsx`
 - Create: `src/components/ui/badge.tsx`
-- Create: `src/components/ui/table.tsx`
 - Create: `src/components/ui/input.tsx`
-- Create: `src/components/ui/label.tsx`
 - Create: `src/components/ui/select.tsx`
-- Create: `src/components/ui/textarea.tsx`
-- Create: `src/components/ui/dialog.tsx`
+- Create: `src/components/ui/table.tsx`
+- Create: `src/components/ui/alert.tsx`
+- Create: `src/components/ui/progress.tsx`
 - Create: `src/components/ui/separator.tsx`
-- Create: `src/components/ui/scroll-area.tsx`
-- Create: `src/components/ui/tabs.tsx`
+- Create: `src/components/ui/button.test.tsx`
 
-- [ ] Add shadcn-compatible primitives using Radix where appropriate.
-- [ ] Keep components small and reusable.
-- [ ] Verify with `npm.cmd test -- src/components/layout/AppShell.test.tsx`.
+- [ ] Write a failing button variant test.
+- [ ] Implement `cn` and primitives.
+- [ ] Verify the new primitive test passes.
+- [ ] Run `npm test`.
 
-### Task 3: App Shell and Page Frame
+### Task 3: Migrate Layout and App States
 
 **Files:**
 - Modify: `src/components/layout/AppShell.tsx`
+- Modify: `src/components/platform/MacosPermissionNotice.tsx`
 - Modify: `src/App.tsx`
-- Modify: `src/components/reports/ReportRangePicker.tsx`
 
-- [ ] Replace custom sidebar classes with Tailwind/shadcn button/card patterns.
-- [ ] Replace loading/error/page header surfaces with shadcn cards.
-- [ ] Replace range segment buttons and date fields with shadcn buttons/inputs.
-- [ ] Verify app shell and app tests.
+- [ ] Replace sidebar, nav buttons, status pill, permission notice, loading, and error panels with UI primitives.
+- [ ] Preserve Korean labels and existing ARIA attributes.
+- [ ] Run `npm test -- src/App.test.tsx src/components/layout/AppShell.test.tsx src/components/platform/MacosPermissionNotice.test.tsx`.
 
-### Task 4: Dashboard and Tables
+### Task 4: Migrate Dashboard Components
 
 **Files:**
 - Modify: `src/components/dashboard/TodaySummary.tsx`
 - Modify: `src/components/dashboard/WeeklyTrends.tsx`
 - Modify: `src/components/dashboard/DayTimeline.tsx`
-- Modify: `src/components/dashboard/ActivityHeatmap.tsx`
-- Modify: `src/components/tables/UsageTable.tsx`
+- Modify: `src/pages/TodayPage.tsx`
+- Modify: `src/pages/TimelinePage.tsx`
+- Modify: `src/pages/WeeklyReportPage.tsx`
 
-- [ ] Convert summary cards, chart panels, timeline, heatmap, and usage tables to shadcn cards/tables/badges/buttons.
-- [ ] Preserve chart data and accessibility labels.
-- [ ] Verify dashboard/table tests.
+- [ ] Replace dashboard panels and metric cards with `Card` composition.
+- [ ] Keep Recharts and timeline calculations unchanged.
+- [ ] Run dashboard component tests.
 
-### Task 5: Settings and Dialogs
+### Task 5: Migrate Tables and Rule Workflows
 
 **Files:**
+- Modify: `src/components/tables/UsageTable.tsx`
 - Modify: `src/components/rules/RulesSettings.tsx`
 - Modify: `src/components/rules/UncategorizedReview.tsx`
-- Modify: `src/components/displayNames/DisplayNameOverridesSettings.tsx`
-- Modify: `src/components/groups/ActivityGroupsSettings.tsx`
-- Modify: `src/components/sessions/SessionEditModal.tsx`
 
-- [ ] Convert forms to shadcn labels/inputs/selects/buttons.
-- [ ] Convert session edit modal to Radix Dialog.
-- [ ] Convert settings tables to shadcn Table.
-- [ ] Verify rules/group/display-name/session tests.
+- [ ] Replace raw table styling with `Table` primitives.
+- [ ] Replace form controls with `Input`, `Select`, `Button`, `Badge`, and `Alert`.
+- [ ] Preserve rule creation/editing behavior and disabled states.
+- [ ] Run rules and table tests.
 
-### Task 6: Cleanup and Verification
+### Task 6: Remove Legacy CSS Surface
 
 **Files:**
 - Modify: `src/styles.css`
-- Modify: `src/App.tsx`
+- Modify: `src/index.css`
 
-- [ ] Remove broad custom component CSS after migration.
-- [ ] Keep only chart/heatmap/timeline special styling that is clearer as CSS variables or Tailwind classes.
-- [ ] Run `npm.cmd test`.
-- [ ] Run `npm.cmd run build`.
-- [ ] Sync to ASCII build path if Windows Tauri build is required.
-- [ ] Run Rust tests and rebuild `dist-windows`.
+- [ ] Remove migrated legacy selectors from `src/styles.css`.
+- [ ] Keep only app-specific chart/timeline helpers that are not shadcn primitives.
+- [ ] Ensure Tailwind classes cover layout, spacing, color, borders, typography, and states.
+- [ ] Run `npm run build`.
+
+### Task 7: Verify and Package
+
+**Files:**
+- No source files expected.
+
+- [ ] Run `npm test`.
+- [ ] Run `npm test` in `browser-extension`.
+- [ ] Run `cargo test --manifest-path src-tauri/Cargo.toml`.
+- [ ] Run `npm run build`.
+- [ ] Start the app with `npm run tauri dev` and verify the UI renders.
+- [ ] Commit the migration.

@@ -1,0 +1,10 @@
+.recharts-default-tooltip {
+  border: 1px solid hsl(var(--border)) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12) !important;
+}
+
+.recharts-tooltip-label,
+.recharts-legend-item-text {
+  color: hsl(var(--foreground)) !important;
+}

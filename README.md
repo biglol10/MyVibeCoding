@@ -9,7 +9,7 @@
 | MyCaptureProgram | macOS 스크린샷/화면 녹화, 편집, OCR, 빠른 가리기 앱 | [MyCaptureProgram](./MyCaptureProgram) | [CaptureStudio-macos-arm64.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyCaptureProgram/CaptureStudio-macos-arm64.zip) |
 | MyMacClean | macOS 앱 삭제와 잔여 파일 정리를 돕는 SwiftUI 유틸리티 | [MyMacClean](./MyMacClean) | [MyMacClean-test-build.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacClean/MyMacClean-test-build.zip) |
 | MyMacStats | CPU, RAM, Disk, Network, Battery, Processes 상태와 원인 앱을 보여주는 SwiftUI 시스템 모니터 | [MyMacStats](./MyMacStats) | [MyMacStats-test-build.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacStats/MyMacStats-test-build.zip) |
-| FlowPilot_mac | Tauri 기반 활동 추적, 생산성 분류, 리포트 앱 | [FlowPilot_mac](./FlowPilot_mac) | [macOS DMG](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_0.1.0_aarch64.dmg), [macOS zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_mac_arm64.zip), [Windows setup](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_0.1.0_x64-setup.exe), [Windows portable](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot-0.1.0-portable.zip), [Windows exe](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/flowpilot.exe) |
+| FlowPilot_mac | Tauri 기반 활동 추적, 생산성 분류, 리포트 앱 | [FlowPilot_mac](./FlowPilot_mac) | [macOS 개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_personal_mac_arm64.zip), [macOS DMG](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_0.1.0_aarch64.dmg), [Windows setup](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_0.1.0_x64-setup.exe), [Windows portable](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot-0.1.0-portable.zip), [Windows exe](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/flowpilot.exe) |
 
 ## 클론
 
@@ -75,4 +75,4 @@ npm run tauri -- dev
 
 다운로드 파일은 `downloads/` 아래에 함께 커밋합니다. 새 빌드를 만들면 같은 파일명으로 교체한 뒤 커밋/푸시하면 README의 GitHub raw 링크가 그대로 최신 파일을 가리킵니다.
 
-macOS 다운로드 파일은 Apple Developer ID 서명/공증이 없는 개발 테스트용 빌드입니다. Gatekeeper 경고가 나오면 각 macOS 배포 폴더에 포함된 `처음 실행하기.command`를 Finder에서 우클릭 후 `열기`로 실행하세요.
+macOS 앱을 다른 Mac에서 앱 더블클릭만으로 실행할 수 있게 공개 배포하려면 Apple Developer ID 서명과 notarization이 필요합니다. 개인 Mac에 설치하는 용도라면 각 앱 zip에 포함된 설치 스크립트를 사용하세요. MyMacStats 개인용 zip은 `MyMacStats/scripts/build-app-bundle.sh --deploy-personal`, FlowPilot 개인용 zip은 `FlowPilot_mac`에서 `npm run package:macos:personal`로 만들 수 있습니다.

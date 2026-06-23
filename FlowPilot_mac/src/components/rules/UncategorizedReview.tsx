@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { Wand2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { createRule } from "../../api/activityApi";
 import { CATEGORY_ACTION_LABELS, EMPTY_STATE_TEXT, RULE_TYPE_LABELS } from "../../lib/labels";
 import { formatDuration } from "../../lib/time";
 import type { ActivitySession, ProductivityCategory, RuleType } from "../../types/activity";
+import { Alert, AlertDescription } from "../ui/alert";
+import { Button } from "../ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 
 interface UncategorizedReviewProps {
   onRuleCreated: () => void;
@@ -69,17 +69,15 @@ function aggregateReviewTargets(sessions: ActivitySession[]): ReviewTarget[] {
     }
   }
 
-  return Array.from(targets.values()).sort((a, b) => {
-    return b.durationSeconds - a.durationSeconds || b.count - a.count || a.name.localeCompare(b.name, "ko-KR");
-  });
+  return Array.from(targets.values());
 }
 
 export function UncategorizedReview({ onRuleCreated, sessions }: UncategorizedReviewProps) {
   const [reviewedTargetKeys, setReviewedTargetKeys] = useState<Set<string>>(() => new Set());
-  const reviewTargets = aggregateReviewTargets(sessions).filter((target) => !reviewedTargetKeys.has(target.key));
+  const reviewTargets = aggregateReviewTargets(sessions).filter(
+    (target) => !reviewedTargetKeys.has(target.key),
+  );
   const targetCountLabel = `${reviewTargets.length}개 항목 검토 필요`;
-  const description =
-    reviewTargets.length > 0 ? `${targetCountLabel} · 사용 시간이 긴 항목부터 정렬` : targetCountLabel;
   const [creatingRule, setCreatingRule] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -109,50 +107,63 @@ export function UncategorizedReview({ onRuleCreated, sessions }: UncategorizedRe
   return (
     <Card aria-labelledby="uncategorized-review-title">
       <CardHeader className="border-b">
-        <CardTitle id="uncategorized-review-title">추천 규칙</CardTitle>
-        <CardDescription>{description}</CardDescription>
+        <div>
+          <CardTitle id="uncategorized-review-title">검토 대기 항목</CardTitle>
+          <CardDescription>{targetCountLabel}</CardDescription>
+        </div>
       </CardHeader>
 
-      <CardContent className="space-y-4 p-5">
-        {error ? (
-          <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm font-semibold text-destructive" role="alert">
-            {error}
-          </p>
-        ) : null}
+      {error ? (
+        <Alert className="rounded-none border-x-0 border-t-0" variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
 
-        {reviewTargets.length > 0 ? (
-          <Table>
-            <TableHeader>
+      {reviewTargets.length > 0 ? (
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+          <Table className="min-w-full max-[640px]:block">
+            <TableHeader className="max-[640px]:hidden">
               <TableRow>
-                <TableHead>이름</TableHead>
-                <TableHead>종류</TableHead>
-                <TableHead>시간</TableHead>
-                <TableHead>작업</TableHead>
+                <TableHead scope="col">이름</TableHead>
+                <TableHead scope="col">종류</TableHead>
+                <TableHead scope="col">시간</TableHead>
+                <TableHead scope="col">작업</TableHead>
               </TableRow>
             </TableHeader>
-            <TableBody>
+            <TableBody className="max-[640px]:block">
               {reviewTargets.map((target) => (
-                <TableRow key={target.key}>
-                  <TableCell className="font-semibold">
-                    <span className="grid gap-1">
-                      <span>{target.name}</span>
-                      <span className="text-xs font-medium text-muted-foreground">{target.count}개 세션</span>
+                <TableRow className="max-[640px]:block max-[640px]:p-5" key={target.key}>
+                  <TableHead className="normal-case text-foreground max-[640px]:block max-[640px]:h-auto max-[640px]:p-0" scope="row">
+                    <span className="block">{target.name}</span>
+                    <span className="mt-1 block text-xs font-semibold text-muted-foreground">
+                      {target.count}개 세션
                     </span>
+                  </TableHead>
+                  <TableCell className="max-[640px]:mt-3 max-[640px]:flex max-[640px]:justify-between max-[640px]:p-0">
+                    <span className="hidden text-xs font-semibold text-muted-foreground max-[640px]:inline">종류</span>
+                    {RULE_TYPE_LABELS[target.ruleType]}
                   </TableCell>
-                  <TableCell>{RULE_TYPE_LABELS[target.ruleType]}</TableCell>
-                  <TableCell>{formatDuration(target.durationSeconds)}</TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-2">
+                  <TableCell className="font-medium max-[640px]:mt-2 max-[640px]:flex max-[640px]:justify-between max-[640px]:p-0">
+                    <span className="hidden text-xs font-semibold text-muted-foreground max-[640px]:inline">시간</span>
+                    {formatDuration(target.durationSeconds)}
+                  </TableCell>
+                  <TableCell className="max-[640px]:mt-4 max-[640px]:block max-[640px]:p-0">
+                    <div
+                      aria-label={`${target.name} 빠른 분류`}
+                      className="flex flex-wrap gap-2 max-[640px]:grid max-[640px]:grid-cols-2"
+                      role="group"
+                    >
                       {QUICK_CATEGORIES.map((category) => (
                         <Button
+                          className="max-[640px]:w-full"
                           key={category}
-                          size="sm"
-                          variant="outline"
                           type="button"
                           disabled={creatingRule !== null}
                           onClick={() => void handleCreateRule(target, category)}
+                          size="sm"
+                          variant="outline"
                         >
-                          <Wand2 className="size-4" />
                           {creatingRule === `${target.key}:${category}` ? "저장 중" : CATEGORY_ACTION_LABELS[category]}
                         </Button>
                       ))}
@@ -162,12 +173,15 @@ export function UncategorizedReview({ onRuleCreated, sessions }: UncategorizedRe
               ))}
             </TableBody>
           </Table>
-        ) : (
-          <p className="rounded-lg border border-dashed bg-muted/25 p-8 text-center text-sm font-semibold text-muted-foreground">
+          </div>
+        </CardContent>
+      ) : (
+        <CardContent>
+          <p className="grid min-h-36 place-items-center text-center text-sm font-semibold text-muted-foreground">
             {EMPTY_STATE_TEXT.noUncategorized}
           </p>
-        )}
-      </CardContent>
+        </CardContent>
+      )}
     </Card>
   );
 }

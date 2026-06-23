@@ -1,11 +1,23 @@
 import type { ReactNode } from "react";
 import { render, screen } from "@testing-library/react";
-import { EMPTY_STATE_TEXT } from "../../lib/labels";
-import type { ActivitySession, TodaySummary as TodaySummaryDto } from "../../types/activity";
 import { TodaySummary } from "./TodaySummary";
+import type { ActivitySession, TodaySummary as TodaySummaryDto } from "../../types/activity";
 
 vi.mock("recharts", () => ({
-  Bar: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  Bar: ({
+    children,
+    dataKey,
+    isAnimationActive,
+  }: {
+    children?: ReactNode;
+    dataKey?: string;
+    isAnimationActive?: boolean;
+  }) => (
+    <div>
+      {dataKey ? <span>{`bar:${dataKey}:animated:${String(isAnimationActive)}`}</span> : null}
+      {children}
+    </div>
+  ),
   BarChart: ({ children, data }: { children?: ReactNode; data?: Array<{ name: string }> }) => (
     <div>
       {data?.map((entry) => <span key={entry.name}>{entry.name}</span>)}
@@ -23,9 +35,7 @@ vi.mock("recharts", () => ({
   PieChart: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   ResponsiveContainer: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   Tooltip: () => null,
-  XAxis: ({ height, interval }: { height?: number; interval?: number }) => (
-    <span data-height={String(height)} data-interval={String(interval)} data-testid="top-destinations-x-axis" />
-  ),
+  XAxis: () => null,
   YAxis: () => null,
 }));
 
@@ -72,43 +82,38 @@ describe("TodaySummary", () => {
     expect(screen.queryByText("Chrome")).not.toBeInTheDocument();
   });
 
-  it("excludes ignored sessions from breakdown and top destinations", () => {
+  it("omits ignored sessions from the category breakdown and top destinations", () => {
     render(
       <TodaySummary
         sessions={[
-          session({ id: "productive", domain: "docs.example.com", durationSeconds: 600 }),
-          session({ id: "ignored", category: "ignored", domain: "ignored.example", durationSeconds: 300 }),
+          session({ id: "productive", domain: "chatgpt.com", durationSeconds: 600, category: "productive" }),
+          session({ id: "ignored", domain: "youtube.com", durationSeconds: 300, category: "ignored" }),
         ]}
         summary={{ ...emptySummary, productiveSeconds: 600, trackedSeconds: 600 }}
       />,
     );
 
-    expect(screen.getByText("docs.example.com")).toBeInTheDocument();
-    expect(screen.queryByText("ignored.example")).not.toBeInTheDocument();
-  });
-
-  it("keeps every top destination axis label visible", () => {
-    render(
-      <TodaySummary
-        sessions={[
-          session({ id: "one", appName: "explorer.exe", domain: null, durationSeconds: 600 }),
-          session({ id: "two", appName: "Code.exe", domain: null, durationSeconds: 500 }),
-          session({ id: "three", appName: "TextInputHost.exe", domain: null, durationSeconds: 400 }),
-          session({ id: "four", appName: "Chrome.exe", domain: null, durationSeconds: 300 }),
-          session({ id: "five", appName: "SystemSettings.exe", domain: null, durationSeconds: 200 }),
-        ]}
-        summary={{ ...emptySummary, productiveSeconds: 2000, trackedSeconds: 2000 }}
-      />,
-    );
-
-    expect(screen.getByTestId("top-destinations-x-axis")).toHaveAttribute("data-interval", "0");
-    expect(screen.getByTestId("top-destinations-x-axis")).toHaveAttribute("data-height", "56");
+    expect(screen.queryByText("제외")).not.toBeInTheDocument();
+    expect(screen.queryByText("youtube.com")).not.toBeInTheDocument();
+    expect(screen.getByText("chatgpt.com")).toBeInTheDocument();
+    expect(screen.getAllByText("100%").length).toBeGreaterThan(0);
   });
 
   it("shows explicit empty states for missing breakdown and destination data", () => {
     render(<TodaySummary sessions={[]} summary={emptySummary} />);
 
-    expect(screen.getByText(EMPTY_STATE_TEXT.noCategoryTime)).toBeInTheDocument();
-    expect(screen.getByText(EMPTY_STATE_TEXT.noDestinations)).toBeInTheDocument();
+    expect(screen.getByText("아직 분류된 시간이 없습니다.")).toBeInTheDocument();
+    expect(screen.getByText("아직 사용 항목이 없습니다.")).toBeInTheDocument();
+  });
+
+  it("disables bar animation so refreshes do not visually flicker", () => {
+    render(
+      <TodaySummary
+        sessions={[session({ id: "chat", domain: "chatgpt.com", durationSeconds: 900 })]}
+        summary={{ ...emptySummary, productiveSeconds: 900, trackedSeconds: 900 }}
+      />,
+    );
+
+    expect(screen.getByText("bar:seconds:animated:false")).toBeInTheDocument();
   });
 });

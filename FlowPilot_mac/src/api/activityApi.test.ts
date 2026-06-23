@@ -1,23 +1,12 @@
 import {
-  createActivityGroup,
-  createDisplayNameOverride,
   createRule,
-  deleteDisplayNameOverride,
-  deleteSessionOverride,
   exportTodayCsv,
-  getHeatmapForRange,
-  getSessionsForRange,
-  getSummaryForRange,
   getTodaySessions,
   getTodaySummary,
-  listDisplayNameOverrides,
   listRules,
   resetDevActivityFallbackForTest,
-  updateDisplayNameOverride,
   updateRule,
-  upsertSessionOverride,
 } from "./activityApi";
-import { buildRangeFromPreset } from "../lib/reportRanges";
 
 beforeEach(() => {
   resetDevActivityFallbackForTest();
@@ -112,48 +101,6 @@ describe("exportTodayCsv dev fallback", () => {
 });
 
 describe("interactive dev fallback", () => {
-  it("returns report data for a selected range", async () => {
-    const range = buildRangeFromPreset("today");
-
-    await expect(getSummaryForRange(range)).resolves.toMatchObject({ trackedSeconds: expect.any(Number) });
-    await expect(getSessionsForRange(range)).resolves.toEqual(expect.any(Array));
-    await expect(getHeatmapForRange(range)).resolves.toEqual(expect.any(Array));
-  });
-
-  it("applies session overrides and groups in dev fallback", async () => {
-    await upsertSessionOverride({
-      sessionId: "dev-3",
-      categoryOverride: "productive",
-      displayNameOverride: "개발 작업",
-      note: "집중 코딩",
-    });
-    await createActivityGroup({
-      name: "AI 도구",
-      color: "#2563eb",
-      matchers: [{ ruleType: "domain", pattern: "chatgpt.com" }],
-    });
-
-    const sessions = await getSessionsForRange(buildRangeFromPreset("today"));
-
-    expect(sessions).toEqual(expect.arrayContaining([expect.objectContaining({ displayName: "AI 도구" })]));
-    expect(sessions).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: "dev-3",
-          category: "productive",
-          categorySource: "override",
-          displayName: "개발 작업",
-          note: "집중 코딩",
-        }),
-      ]),
-    );
-
-    await deleteSessionOverride("dev-3");
-    await expect(getSessionsForRange(buildRangeFromPreset("today"))).resolves.toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: "dev-3", categorySource: "automatic" })]),
-    );
-  });
-
   it("classifies built-in demo destinations before custom rules", async () => {
     await expect(getTodaySessions()).resolves.toEqual(
       expect.arrayContaining([
@@ -190,62 +137,46 @@ describe("interactive dev fallback", () => {
     });
   });
 
-  it("applies global display name overrides and returns to the source name after removal", async () => {
-    const created = await createDisplayNameOverride({
-      displayName: "VS Code",
-      pattern: "Code.exe",
-      ruleType: "app",
-    });
-
-    await expect(listDisplayNameOverrides()).resolves.toContainEqual(created);
-    await expect(getTodaySessions()).resolves.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          appName: "Code",
-          displayName: "VS Code",
-        }),
-      ]),
-    );
-
-    const updated = await updateDisplayNameOverride(created.id, {
-      displayName: "Visual Studio Code",
-      pattern: "Code.exe",
-      ruleType: "app",
-    });
-    expect(updated.displayName).toBe("Visual Studio Code");
-    await expect(getTodaySessions()).resolves.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          appName: "Code",
-          displayName: "Visual Studio Code",
-        }),
-      ]),
-    );
-
-    await deleteDisplayNameOverride(created.id);
-    await expect(getTodaySessions()).resolves.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          appName: "Code",
-          displayName: "Code",
-        }),
-      ]),
-    );
-  });
-
-  it("excludes ignored demo sessions from reports", async () => {
+  it("removes ignored demo sessions from reports until the rule is reclassified", async () => {
     const ignored = await createRule({
-      name: "Ignore Code",
+      name: "Code",
       ruleType: "app",
       pattern: "Code.exe",
       category: "ignored",
     });
 
     await expect(getTodaySessions()).resolves.not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ matchedRuleId: ignored.id })]),
+      expect.arrayContaining([
+        expect.objectContaining({
+          appName: "Code",
+        }),
+      ]),
     );
     await expect(getTodaySummary()).resolves.toMatchObject({
+      productiveSeconds: 2700,
       trackedSeconds: 6660,
+      uncategorizedSeconds: 0,
+    });
+
+    const restored = await updateRule(ignored.id, {
+      name: "Code",
+      ruleType: "app",
+      pattern: "Code.exe",
+      category: "productive",
+    });
+
+    await expect(getTodaySessions()).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          appName: "Code",
+          category: "productive",
+          matchedRuleId: restored.id,
+        }),
+      ]),
+    );
+    await expect(getTodaySummary()).resolves.toMatchObject({
+      productiveSeconds: 3600,
+      trackedSeconds: 7560,
       uncategorizedSeconds: 0,
     });
   });

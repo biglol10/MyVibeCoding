@@ -7,14 +7,7 @@ export type ProductivityCategory =
 
 export type RuleType = "domain" | "app" | "titleKeyword" | "urlPattern";
 
-export type ReportRangePreset = "today" | "yesterday" | "thisWeek" | "lastWeek" | "last30Days" | "custom";
-
-export interface ReportRange {
-  end: string;
-  label: string;
-  preset: ReportRangePreset;
-  start: string;
-}
+export type MacosPermissionPane = "accessibility" | "screenRecording";
 
 export interface ClassificationRule {
   id: string;
@@ -48,61 +41,6 @@ export interface ActivitySession {
   matchedRuleId?: string | null;
 }
 
-export interface ReportActivitySession extends ActivitySession {
-  categorySource: "automatic" | "override";
-  displayName: string;
-  note?: string | null;
-}
-
-export interface HeatmapBucket {
-  dominantCategory: ProductivityCategory;
-  hour: number;
-  seconds: number;
-  weekday: number;
-}
-
-export interface ActivityGroupMatcherDraft {
-  pattern: string;
-  ruleType: RuleType;
-}
-
-export interface ActivityGroupMatcher extends ActivityGroupMatcherDraft {
-  id: string;
-}
-
-export interface ActivityGroup {
-  color: string;
-  id: string;
-  matchers: ActivityGroupMatcher[];
-  name: string;
-}
-
-export interface ActivityGroupDraft {
-  color: string;
-  matchers: ActivityGroupMatcherDraft[];
-  name: string;
-}
-
-export interface DisplayNameOverride {
-  displayName: string;
-  id: string;
-  pattern: string;
-  ruleType: RuleType;
-}
-
-export interface DisplayNameOverrideDraft {
-  displayName: string;
-  pattern: string;
-  ruleType: RuleType;
-}
-
-export interface SessionOverrideDraft {
-  categoryOverride?: ProductivityCategory | null;
-  displayNameOverride?: string | null;
-  note?: string | null;
-  sessionId: string;
-}
-
 export interface TodaySummary {
   trackedSeconds: number;
   productiveSeconds: number;
@@ -110,4 +48,14 @@ export interface TodaySummary {
   neutralSeconds: number;
   idleSeconds: number;
   uncategorizedSeconds: number;
+}
+
+export interface PlatformPermissionStatus {
+  platform: "macos" | "windows" | "other";
+  accessibilityGranted: boolean;
+  screenRecordingGranted: boolean;
+  accessibilityRequiredReason: string;
+  screenRecordingRequiredReason: string;
+  canPromptAccessibility: boolean;
+  canPromptScreenRecording: boolean;
 }

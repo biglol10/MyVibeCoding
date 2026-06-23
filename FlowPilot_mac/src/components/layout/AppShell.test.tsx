@@ -15,7 +15,7 @@ describe("AppShell", () => {
 
     expect(screen.getByRole("heading", { name: "FlowPilot" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "오늘 요약" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("button", { name: "검토함 3" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "미분류 검토 3" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "타임라인" }));
 

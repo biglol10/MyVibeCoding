@@ -13,7 +13,7 @@ describe("Korean labels", () => {
       productive: "생산적",
       unproductive: "비생산",
       neutral: "중립",
-      ignored: "측정 제외",
+      ignored: "제외",
       uncategorized: "검토 필요",
     });
   });
@@ -22,7 +22,7 @@ describe("Korean labels", () => {
     expect(NAV_LABELS.today).toBe("오늘 요약");
     expect(NAV_LABELS.timeline).toBe("타임라인");
     expect(NAV_LABELS.weekly).toBe("주간 리포트");
-    expect(NAV_LABELS.review).toBe("검토함");
+    expect(NAV_LABELS.review).toBe("미분류 검토");
     expect(NAV_LABELS.rules).toBe("분류 규칙");
     expect(STATUS_LABELS.readyDesktop).toBe("기록 중");
     expect(RULE_TYPE_LABELS.domain).toBe("도메인");

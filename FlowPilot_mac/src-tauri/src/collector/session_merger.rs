@@ -3,7 +3,6 @@ use chrono::{DateTime, Utc};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActivitySample {
     pub observed_at: DateTime<Utc>,
-    pub instance_key: String,
     pub app_name: String,
     pub process_name: String,
     pub window_title: String,
@@ -27,7 +26,6 @@ mod tests {
     fn sample(title: &str, domain: Option<&str>, is_idle: bool) -> ActivitySample {
         ActivitySample {
             observed_at: Utc::now(),
-            instance_key: "window:chrome".into(),
             app_name: "Chrome".into(),
             process_name: "chrome.exe".into(),
             window_title: title.into(),

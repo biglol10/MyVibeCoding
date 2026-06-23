@@ -1,73 +1,75 @@
 @import "tailwindcss";
 
-@custom-variant dark (&:is(.dark *));
+:root {
+  color-scheme: light;
+  --background: 210 40% 98%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --primary: 221 83% 53%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 210 40% 96%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 16% 47%;
+  --accent: 210 40% 96%;
+  --accent-foreground: 222 47% 11%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 214 32% 91%;
+  --input: 214 32% 91%;
+  --ring: 221 83% 53%;
+  --radius: 0.5rem;
+  font-family: Pretendard, "Segoe UI", "Apple SD Gothic Neo", ui-sans-serif, system-ui, sans-serif;
+}
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-:root {
-  --radius: 0.5rem;
-  --background: oklch(0.968 0.012 247.858);
-  --foreground: oklch(0.18 0.025 260);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.025 260);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.025 260);
-  --primary: oklch(0.546 0.215 262.88);
-  --primary-foreground: oklch(0.985 0.003 247.858);
-  --secondary: oklch(0.929 0.013 255.508);
-  --secondary-foreground: oklch(0.25 0.035 260);
-  --muted: oklch(0.929 0.013 255.508);
-  --muted-foreground: oklch(0.48 0.04 257.287);
-  --accent: oklch(0.932 0.033 255.585);
-  --accent-foreground: oklch(0.24 0.05 260);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.86 0.018 255.508);
-  --input: oklch(0.86 0.018 255.508);
-  --ring: oklch(0.546 0.215 262.88);
+* {
+  border-color: hsl(var(--border));
 }
 
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
-    box-sizing: border-box;
-  }
+html {
+  background: hsl(var(--background));
+}
 
-  html {
-    @apply bg-background text-foreground;
-    font-family: Pretendard, "Segoe UI", "Apple SD Gothic Neo", ui-sans-serif, system-ui, sans-serif;
-  }
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
 
-  body {
-    @apply m-0 min-h-screen min-w-80 bg-background text-foreground antialiased;
-  }
-
-  button,
-  input,
-  select,
-  textarea {
-    font: inherit;
-  }
+button,
+input,
+select,
+textarea {
+  font: inherit;
 }
