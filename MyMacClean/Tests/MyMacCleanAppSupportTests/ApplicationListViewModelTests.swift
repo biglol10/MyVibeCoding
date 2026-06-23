@@ -111,12 +111,14 @@ final class ApplicationListViewModelTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: appURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL.path))
         XCTAssertEqual(viewModel.apps, [remainingApp])
-        XCTAssertEqual(viewModel.selectedApp, remainingApp)
+        XCTAssertNil(viewModel.selectedApp)
         XCTAssertTrue(viewModel.candidates.isEmpty)
         XCTAssertTrue(viewModel.selectedCandidateIDs.isEmpty)
+        XCTAssertTrue(viewModel.deletionResults.isEmpty)
+        XCTAssertNil(viewModel.deletionReport)
     }
 
-    func testSuccessfulDeletionCreatesVerifiedReport() async throws {
+    func testSuccessfulAppDeletionRecordsReceiptWithoutLeavingInspectorReport() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("MyMacCleanReportTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let appURL = root.appendingPathComponent("Report.app", isDirectory: true)
@@ -152,6 +154,53 @@ final class ApplicationListViewModelTests: XCTestCase {
 
         await viewModel.deleteConfirmedItems(confirmation: "DELETE")
 
+        XCTAssertNil(viewModel.selectedApp)
+        XCTAssertNil(viewModel.deletionReport)
+        XCTAssertEqual(try DeletionReceiptStore(fileURL: receiptURL).readReceipts().count, 1)
+    }
+
+    func testSuccessfulRelatedFileDeletionKeepsSelectedAppAndReport() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("MyMacCleanRelatedFileReportTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let appURL = root.appendingPathComponent("Report.app", isDirectory: true)
+        let cacheURL = root.appendingPathComponent("Library/Caches/com.example.report", isDirectory: true)
+        try FileManager.default.createDirectory(at: appURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: cacheURL, withIntermediateDirectories: true)
+        let receiptURL = root.appendingPathComponent("receipts.jsonl")
+        let app = InstalledApp(
+            displayName: "Report",
+            bundleIdentifier: "com.example.report",
+            version: nil,
+            executableName: nil,
+            bundleURL: appURL,
+            iconIdentifier: nil,
+            bundleSize: 1,
+            lastOpenedAt: nil
+        )
+        let candidate = RelatedFileCandidate(
+            url: cacheURL,
+            kind: .cache,
+            size: 1,
+            matchReason: "bundle identifier match",
+            confidence: .high,
+            safety: .safe,
+            defaultSelected: true,
+            requiresManualReview: false,
+            isProtected: false
+        )
+        let viewModel = ApplicationListViewModel(receiptStore: DeletionReceiptStore(fileURL: receiptURL))
+
+        viewModel.apps = [app]
+        viewModel.selectApp(app)
+        viewModel.candidates = [candidate]
+        viewModel.selectedCandidateIDs = [candidate.id]
+
+        await viewModel.deleteConfirmedItems(confirmation: "DELETE")
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL.path))
+        XCTAssertEqual(viewModel.selectedApp, app)
+        XCTAssertTrue(viewModel.candidates.isEmpty)
         XCTAssertEqual(viewModel.deletionReport?.statusTitle, "Deleted and verified")
         XCTAssertEqual(try DeletionReceiptStore(fileURL: receiptURL).readReceipts().count, 1)
     }

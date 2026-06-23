@@ -98,15 +98,18 @@ public final class ApplicationListViewModel {
             )
             try? receiptStore.append(receipt)
             deletionResults = results
-            reconcileSuccessfulDeletion(plan: plan, results: results)
-            deletionReport = DeletionReportViewModel(receipt: receipt)
+            let removedSelectedApp = reconcileSuccessfulDeletion(plan: plan, results: results)
+            if !removedSelectedApp {
+                deletionReport = DeletionReportViewModel(receipt: receipt)
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    private func reconcileSuccessfulDeletion(plan: DeletionPlan, results: [DeletionItemResult]) {
-        guard results.allSatisfy(\.success) else { return }
+    @discardableResult
+    private func reconcileSuccessfulDeletion(plan: DeletionPlan, results: [DeletionItemResult]) -> Bool {
+        guard results.allSatisfy(\.success) else { return false }
 
         let deletedCandidateIDs = Set(plan.candidates.map(\.id))
         let removedAppBundle = plan.candidates.contains {
@@ -115,25 +118,20 @@ public final class ApplicationListViewModel {
 
         if removedAppBundle {
             removeDeletedAppFromList(plan.app)
+            return true
         } else {
             candidates.removeAll { deletedCandidateIDs.contains($0.id) }
             selectedCandidateIDs.subtract(deletedCandidateIDs)
+            return false
         }
     }
 
     private func removeDeletedAppFromList(_ deletedApp: InstalledApp) {
-        let deletedIndex = apps.firstIndex { $0.id == deletedApp.id }
         apps.removeAll { $0.id == deletedApp.id }
-
-        guard !apps.isEmpty else {
-            selectedApp = nil
-            candidates = []
-            selectedCandidateIDs = []
-            deletionResults = []
-            return
-        }
-
-        let replacementIndex = min(deletedIndex ?? 0, apps.count - 1)
-        selectApp(apps[replacementIndex])
+        selectedApp = nil
+        candidates = []
+        selectedCandidateIDs = []
+        deletionResults = []
+        deletionReport = nil
     }
 }
