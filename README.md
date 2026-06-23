@@ -74,3 +74,5 @@ npm run tauri -- dev
 ## 다운로드 파일 관리
 
 다운로드 파일은 `downloads/` 아래에 함께 커밋합니다. 새 빌드를 만들면 같은 파일명으로 교체한 뒤 커밋/푸시하면 README의 GitHub raw 링크가 그대로 최신 파일을 가리킵니다.
+
+macOS 다운로드 파일은 Apple Developer ID 서명/공증이 없는 개발 테스트용 빌드입니다. Gatekeeper 경고가 나오면 각 macOS 배포 폴더에 포함된 `처음 실행하기.command`를 Finder에서 우클릭 후 `열기`로 실행하세요.

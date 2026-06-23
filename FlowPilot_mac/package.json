@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "dist:macos": "bash scripts/package-macos-dist.sh",
     "dist:windows": "powershell -ExecutionPolicy Bypass -File scripts/package-windows-dist.ps1",
     "preview": "vite preview",
     "test": "vitest run",

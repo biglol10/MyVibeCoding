@@ -13,6 +13,7 @@ DerivedData/
 # Node / Vite / Tauri
 node_modules/
 dist/
+dist-macos/
 dist-windows/
 release/
 src-tauri/target/
