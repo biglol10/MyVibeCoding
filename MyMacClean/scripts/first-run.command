@@ -4,23 +4,30 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_PATH="$SCRIPT_DIR/MyMacClean.app"
 
-echo "MyMacClean 처음 실행 도우미"
+echo "MyMacClean first-run helper"
 echo
 
 if [ ! -d "$APP_PATH" ]; then
-    echo "오류: 같은 폴더에서 MyMacClean.app을 찾을 수 없습니다."
-    echo "압축을 풀면 MyMacClean 폴더 안에 MyMacClean.app과 이 파일이 함께 있어야 합니다."
+    echo "Error: MyMacClean.app was not found next to this helper."
+    echo "After unzipping, keep MyMacClean.app and this command in the same MyMacClean folder."
     exit 1
 fi
 
 if command -v xattr >/dev/null 2>&1; then
-    echo "macOS 다운로드 격리 속성을 제거합니다..."
-    xattr -dr com.apple.quarantine "$APP_PATH" 2>/dev/null || true
+    echo "Removing macOS download quarantine from the MyMacClean package..."
+    xattr -cr "$SCRIPT_DIR" 2>/dev/null || true
+    xattr -dr com.apple.quarantine "$SCRIPT_DIR" 2>/dev/null || true
 else
-    echo "xattr 명령을 찾을 수 없어 격리 속성 제거를 건너뜁니다."
+    echo "xattr was not found; skipping quarantine cleanup."
 fi
 
-echo "MyMacClean을 실행합니다..."
+if ! codesign --verify --deep --strict "$APP_PATH" >/dev/null 2>&1; then
+    echo "Error: MyMacClean.app failed local code signature verification."
+    echo "Download the package again from the release page."
+    exit 1
+fi
+
+echo "Opening MyMacClean..."
 open "$APP_PATH"
 echo
-echo "앱이 열리지 않으면 시스템 설정 > 개인정보 보호 및 보안에서 실행 허용을 확인하세요."
+echo "If macOS still blocks the app, open System Settings > Privacy & Security and allow MyMacClean."
