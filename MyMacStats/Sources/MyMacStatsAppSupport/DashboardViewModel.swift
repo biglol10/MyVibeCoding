@@ -23,13 +23,22 @@ public enum HistoryRange: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+private struct ProcessSortPreference: Equatable {
+    let key: ProcessSortKey
+    let ascending: Bool
+}
+
 @MainActor
 public final class DashboardViewModel: ObservableObject {
     @Published public private(set) var snapshot: SystemMetricsSnapshot
     @Published public var selectedKind: MetricKind
     @Published public var searchText: String
-    @Published public var sortKey: ProcessSortKey
-    @Published public var sortAscending: Bool
+    @Published public var sortKey: ProcessSortKey {
+        didSet { saveSelectedSortPreference() }
+    }
+    @Published public var sortAscending: Bool {
+        didSet { saveSelectedSortPreference() }
+    }
     @Published public var refreshInterval: RefreshInterval
     @Published public var historyRange: HistoryRange
     @Published public var selectedProcessID: Int32?
@@ -46,6 +55,8 @@ public final class DashboardViewModel: ObservableObject {
     private var displayedProcessesCache: [ProcessMetric] = []
     private var displayedProcessGroupsCacheKey: ProcessDisplayCacheKey?
     private var displayedProcessGroupsCache: [ProcessAppGroup] = []
+    private var sortPreferences: [MetricKind: ProcessSortPreference]
+    private var isApplyingSortPreference: Bool
 
     public init(
         snapshot: SystemMetricsSnapshot = .empty(),
@@ -67,6 +78,8 @@ public final class DashboardViewModel: ObservableObject {
         self.terminationMessage = nil
         self.terminationMessageProcessID = nil
         self.forceQuitCandidateProcessID = nil
+        self.sortPreferences = MetricKind.defaultProcessSortPreferences
+        self.isApplyingSortPreference = false
     }
 
     public var summaries: [MetricSummary] {
@@ -113,6 +126,10 @@ public final class DashboardViewModel: ObservableObject {
         return displayedProcessGroupsCache
     }
 
+    public var showsProcessControls: Bool {
+        selectedKind.usesProcessList
+    }
+
     public var selectedProcessGroup: ProcessAppGroup? {
         if let selectedProcessID,
            let selected = displayedProcessGroups.first(where: { group in
@@ -124,23 +141,7 @@ public final class DashboardViewModel: ObservableObject {
     }
 
     private var effectiveProcessSort: (key: ProcessSortKey, ascending: Bool) {
-        let effectiveSort: ProcessSortKey
-        let effectiveAscending: Bool
-        switch selectedKind {
-        case .cpu:
-            effectiveSort = .cpu
-            effectiveAscending = false
-        case .memory:
-            effectiveSort = .memory
-            effectiveAscending = false
-        case .processes:
-            effectiveSort = sortKey
-            effectiveAscending = sortAscending
-        case .disk, .network, .battery:
-            effectiveSort = sortKey
-            effectiveAscending = sortAscending
-        }
-        return (effectiveSort, effectiveAscending)
+        (sortKey, sortAscending)
     }
 
     public var selectedSummary: MetricSummary? {
@@ -198,6 +199,7 @@ public final class DashboardViewModel: ObservableObject {
     public func select(_ kind: MetricKind) {
         selectedKind = kind
         selectedProcessID = nil
+        applySortPreference(for: kind)
     }
 
     public func replaceSnapshot(_ snapshot: SystemMetricsSnapshot) {
@@ -206,6 +208,19 @@ public final class DashboardViewModel: ObservableObject {
 
     public func selectProcess(pid: Int32) {
         selectedProcessID = pid
+    }
+
+    private func applySortPreference(for kind: MetricKind) {
+        guard let preference = sortPreferences[kind] else { return }
+        isApplyingSortPreference = true
+        sortKey = preference.key
+        sortAscending = preference.ascending
+        isApplyingSortPreference = false
+    }
+
+    private func saveSelectedSortPreference() {
+        guard !isApplyingSortPreference, selectedKind.usesProcessList else { return }
+        sortPreferences[selectedKind] = ProcessSortPreference(key: sortKey, ascending: sortAscending)
     }
 
     public func requestTermination(for process: ProcessMetric) {
@@ -302,4 +317,23 @@ private struct ProcessDisplayCacheKey: Equatable {
     let searchText: String
     let sortKey: ProcessSortKey
     let ascending: Bool
+}
+
+private extension MetricKind {
+    var usesProcessList: Bool {
+        switch self {
+        case .cpu, .memory, .processes:
+            true
+        case .disk, .network, .battery:
+            false
+        }
+    }
+
+    static var defaultProcessSortPreferences: [MetricKind: ProcessSortPreference] {
+        [
+            .cpu: ProcessSortPreference(key: .cpu, ascending: false),
+            .memory: ProcessSortPreference(key: .memory, ascending: false),
+            .processes: ProcessSortPreference(key: .cpu, ascending: false)
+        ]
+    }
 }

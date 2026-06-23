@@ -23,7 +23,7 @@ struct MetricListView: View {
         HStack(alignment: .center, spacing: 12) {
             PanelHeader(title: viewModel.selectedKind.title, subtitle: subtitle)
 
-            if viewModel.selectedKind == .processes {
+            if viewModel.showsProcessControls {
                 Picker("Sort", selection: $viewModel.sortKey) {
                     ForEach(ProcessSortKey.allCases) { key in
                         Text(key.title).tag(key)
@@ -55,11 +55,11 @@ struct MetricListView: View {
 
     private var processList: some View {
         VStack(spacing: 0) {
-            if viewModel.selectedKind == .processes {
+            if viewModel.showsProcessControls {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
-                    TextField("Search processes", text: $viewModel.searchText)
+                    TextField("Search apps, processes, PID, path", text: $viewModel.searchText)
                         .textFieldStyle(.plain)
                 }
                 .padding(.horizontal, 12)

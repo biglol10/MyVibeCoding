@@ -25,6 +25,59 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.displayedProcesses.map(\.name), ["Safari", "Xcode", "Finder"])
     }
 
+    func testProcessBackedScreensExposeSearchAndSortControls() {
+        let viewModel = DashboardViewModel(snapshot: snapshot)
+
+        XCTAssertTrue(viewModel.showsProcessControls)
+
+        viewModel.select(.memory)
+        XCTAssertTrue(viewModel.showsProcessControls)
+
+        viewModel.select(.processes)
+        XCTAssertTrue(viewModel.showsProcessControls)
+
+        viewModel.select(.disk)
+        XCTAssertFalse(viewModel.showsProcessControls)
+    }
+
+    func testCPUAndMemoryScreensUseVisibleSortControls() {
+        let viewModel = DashboardViewModel(snapshot: snapshot)
+
+        viewModel.sortKey = .name
+        viewModel.sortAscending = true
+
+        XCTAssertEqual(viewModel.displayedProcesses.map(\.name), ["Finder", "Safari", "Xcode"])
+
+        viewModel.select(.memory)
+        viewModel.sortKey = .pid
+        viewModel.sortAscending = true
+
+        XCTAssertEqual(viewModel.displayedProcesses.map(\.pid), [10, 20, 30])
+    }
+
+    func testEachProcessBackedScreenKeepsItsOwnSortPreference() {
+        let viewModel = DashboardViewModel(snapshot: snapshot)
+
+        XCTAssertEqual(viewModel.sortKey, .cpu)
+        XCTAssertFalse(viewModel.sortAscending)
+
+        viewModel.select(.memory)
+
+        XCTAssertEqual(viewModel.sortKey, .memory)
+        XCTAssertFalse(viewModel.sortAscending)
+
+        viewModel.sortKey = .pid
+        viewModel.sortAscending = true
+
+        viewModel.select(.cpu)
+        XCTAssertEqual(viewModel.sortKey, .cpu)
+        XCTAssertFalse(viewModel.sortAscending)
+
+        viewModel.select(.memory)
+        XCTAssertEqual(viewModel.sortKey, .pid)
+        XCTAssertTrue(viewModel.sortAscending)
+    }
+
     func testProcessesScreenUsesSearchAndExplicitSortControls() {
         let viewModel = DashboardViewModel(snapshot: snapshot)
         viewModel.select(.processes)
