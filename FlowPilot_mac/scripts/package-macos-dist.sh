@@ -47,6 +47,10 @@ fi
 cp "$HELPER_SOURCE" "$HELPER_DEST"
 chmod +x "$HELPER_DEST"
 
+if command -v strip >/dev/null 2>&1 && [ -f "$APP_DIR/Contents/MacOS/flowpilot" ]; then
+    strip -x "$APP_DIR/Contents/MacOS/flowpilot"
+fi
+
 if [ -d "$ROOT_DIR/browser-extension/dist" ]; then
     mkdir -p "$PACKAGE_DIR/Chrome_Extension"
     cp "$ROOT_DIR/browser-extension/manifest.json" "$PACKAGE_DIR/Chrome_Extension/manifest.json"
