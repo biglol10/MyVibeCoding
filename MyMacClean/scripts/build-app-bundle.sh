@@ -11,7 +11,9 @@ RESOURCES_DIR="$CONTENTS_DIR/Resources"
 ZIP_PATH="$DIST_DIR/MyMacClean-test-build.zip"
 NOTARY_ZIP_PATH="$DIST_DIR/MyMacClean-notary.zip"
 FIRST_RUN_SOURCE="$ROOT_DIR/scripts/first-run.command"
+INSTALLER_SOURCE="$ROOT_DIR/scripts/install.command"
 FIRST_RUN_COMMAND="$PACKAGE_DIR/Open MyMacClean.command"
+INSTALLER_COMMAND="$PACKAGE_DIR/Install MyMacClean.command"
 README_PATH="$PACKAGE_DIR/READ ME FIRST.txt"
 SIGN_IDENTITY="${MACOS_SIGN_IDENTITY:-}"
 REQUIRE_NOTARIZATION="${REQUIRE_NOTARIZATION:-0}"
@@ -40,18 +42,24 @@ cp "$ROOT_DIR/.build/release/MyMacCleanApp" "$MACOS_DIR/MyMacCleanApp"
 cp "$ROOT_DIR/Sources/MyMacCleanApp/Resources/MyMacCleanInfo.plist" "$CONTENTS_DIR/Info.plist"
 cp "$ROOT_DIR/Sources/MyMacCleanApp/Resources/MyMacCleanIcon.icns" "$RESOURCES_DIR/MyMacCleanIcon.icns"
 cp "$FIRST_RUN_SOURCE" "$FIRST_RUN_COMMAND"
+cp "$INSTALLER_SOURCE" "$INSTALLER_COMMAND"
 chmod +x "$MACOS_DIR/MyMacCleanApp"
 chmod +x "$FIRST_RUN_COMMAND"
+chmod +x "$INSTALLER_COMMAND"
 cat > "$README_PATH" <<'README'
 MyMacClean test build
 
 If you get a macOS message saying the app is damaged or should be moved to Trash,
 do not open MyMacClean.app directly.
 
-First run:
+Install on your personal Mac:
 1. Open this folder after unzipping.
-2. Double-click "Open MyMacClean.command".
-3. The helper removes macOS download quarantine from this package and opens the app.
+2. Double-click "Install MyMacClean.command".
+3. The installer removes macOS download quarantine, copies MyMacClean.app to /Applications,
+   verifies the installed app, and opens it.
+
+Run without installing:
+Double-click "Open MyMacClean.command".
 
 For a double-clickable public release, build with a Developer ID Application
 certificate and Apple notarization credentials.
@@ -69,7 +77,7 @@ else
         exit 1
     fi
     echo "Warning: using non-Developer ID signing identity '$SIGN_IDENTITY'." >&2
-    echo "Downloaded apps signed this way must be opened through Open MyMacClean.command." >&2
+    echo "Downloaded apps signed this way must be installed through Install MyMacClean.command or opened through Open MyMacClean.command." >&2
     codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_DIR"
 fi
 codesign --verify --deep --strict "$APP_DIR"
