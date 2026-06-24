@@ -19,6 +19,7 @@ public final class ApplicationListViewModel {
     public var deletionResults: [DeletionItemResult] = []
     public var deletionReport: DeletionReportViewModel?
     public var errorMessage: String?
+    public var isLoadingApps = false
     public var isScanning = false
 
     public init(
@@ -41,9 +42,33 @@ public final class ApplicationListViewModel {
     }
 
     public func loadApps() async {
+        await reloadApps(selectFirstWhenEmpty: true)
+    }
+
+    public func refreshApps() async {
+        await reloadApps(selectFirstWhenEmpty: false)
+    }
+
+    private func reloadApps(selectFirstWhenEmpty: Bool) async {
+        isLoadingApps = true
+        defer { isLoadingApps = false }
         do {
-            apps = try await discoveryService.discoverApps()
-            selectApp(apps.first)
+            let previousSelection = selectedApp
+            let refreshedApps = try await discoveryService.discoverApps()
+            apps = refreshedApps
+
+            if let previousSelection {
+                if let refreshedSelection = refreshedApps.first(where: { isSameApp($0, previousSelection) }) {
+                    selectedApp = refreshedSelection
+                } else {
+                    selectedApp = nil
+                    clearReviewState()
+                }
+            } else if selectFirstWhenEmpty {
+                selectApp(refreshedApps.first)
+            } else {
+                clearReviewState()
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -56,10 +81,7 @@ public final class ApplicationListViewModel {
     public func selectApp(_ app: InstalledApp?) {
         guard selectedApp?.id != app?.id else { return }
         selectedApp = app
-        candidates = []
-        selectedCandidateIDs = []
-        deletionResults = []
-        deletionReport = nil
+        clearReviewState()
     }
 
     public func scanSelectedApp() async {
@@ -129,9 +151,21 @@ public final class ApplicationListViewModel {
     private func removeDeletedAppFromList(_ deletedApp: InstalledApp) {
         apps.removeAll { $0.id == deletedApp.id }
         selectedApp = nil
+        clearReviewState()
+    }
+
+    private func clearReviewState() {
         candidates = []
         selectedCandidateIDs = []
         deletionResults = []
         deletionReport = nil
+    }
+
+    private func isSameApp(_ lhs: InstalledApp, _ rhs: InstalledApp) -> Bool {
+        normalizedAppURL(lhs.bundleURL) == normalizedAppURL(rhs.bundleURL)
+    }
+
+    private func normalizedAppURL(_ url: URL) -> URL {
+        url.resolvingSymlinksInPath().standardizedFileURL
     }
 }

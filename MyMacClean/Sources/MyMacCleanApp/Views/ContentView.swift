@@ -120,11 +120,22 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button {
+                    Task { await refreshApplications() }
+                } label: {
+                    Label("Refresh Applications", systemImage: "arrow.clockwise")
+                        .labelStyle(.iconOnly)
+                        .frame(width: 26, height: 26)
+                }
+                .buttonStyle(.bordered)
+                .help("Refresh Applications")
+                .disabled(viewModel.isLoadingApps || viewModel.isScanning)
+
                 Button(SidebarDestination.applications.primaryActionTitle) {
                     Task { await viewModel.scanSelectedApp() }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(viewModel.selectedApp == nil || viewModel.isScanning)
+                .disabled(viewModel.selectedApp == nil || viewModel.isScanning || viewModel.isLoadingApps)
             }
             .padding()
 
@@ -580,6 +591,11 @@ struct ContentView: View {
 
     private var activeSection: SidebarDestination {
         navigationState.selectedDestination
+    }
+
+    private func refreshApplications() async {
+        await viewModel.refreshApps()
+        orphanFilesViewModel.updateInstalledApps(viewModel.apps)
     }
 
     private func deletionStatusTitle(for receipt: DeletionReceipt) -> String {
