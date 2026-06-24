@@ -20,7 +20,7 @@ echo
 
 if pgrep -x MyMacStatsApp >/dev/null 2>&1; then
     echo "실행 중인 MyMacStats를 종료합니다..."
-    osascript -e 'tell application id "com.local.MyMacStats" to quit' >/dev/null 2>&1 || true
+    pkill -x MyMacStatsApp >/dev/null 2>&1 || true
     sleep 1
 fi
 

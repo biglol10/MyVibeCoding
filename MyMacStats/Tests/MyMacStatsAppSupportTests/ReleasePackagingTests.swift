@@ -19,6 +19,8 @@ final class ReleasePackagingTests: XCTestCase {
         XCTAssertTrue(helper.contains("ditto --rsrc --extattr"))
         XCTAssertTrue(helper.contains("xattr -dr com.apple.quarantine"))
         XCTAssertTrue(helper.contains("open \"$INSTALLED_APP_PATH\""))
+        XCTAssertTrue(helper.contains("pkill -x MyMacStatsApp"))
+        XCTAssertFalse(helper.contains("osascript"))
 
         let buildScript = try String(contentsOf: buildScriptURL, encoding: .utf8)
         XCTAssertTrue(buildScript.contains("MACOS_SIGN_IDENTITY"))
