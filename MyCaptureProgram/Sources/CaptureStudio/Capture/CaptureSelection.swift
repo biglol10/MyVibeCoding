@@ -17,20 +17,20 @@ public struct CaptureSelection: Equatable, Sendable {
         rect.width >= 8 && rect.height >= 8
     }
 
-    public var sourceRectInPixels: CGRect {
+    public var sourceRectInPoints: CGRect {
         CGRect(
-            x: (rect.minX - screenFrame.minX) * scale,
-            y: (screenFrame.maxY - rect.maxY) * scale,
-            width: rect.width * scale,
-            height: rect.height * scale
+            x: rect.minX - screenFrame.minX,
+            y: screenFrame.maxY - rect.maxY,
+            width: rect.width,
+            height: rect.height
         ).integral
     }
 
     public var pixelWidth: Int {
-        max(1, Int(sourceRectInPixels.width))
+        max(1, Int((rect.width * scale).rounded(.up)))
     }
 
     public var pixelHeight: Int {
-        max(1, Int(sourceRectInPixels.height))
+        max(1, Int((rect.height * scale).rounded(.up)))
     }
 }

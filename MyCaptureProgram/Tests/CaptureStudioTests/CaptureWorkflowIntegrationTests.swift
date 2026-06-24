@@ -1,3 +1,4 @@
+@preconcurrency import AVFoundation
 import Foundation
 @preconcurrency import ScreenCaptureKit
 import XCTest
@@ -46,7 +47,12 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
             settings.copyCapturedImageToClipboard = false
             settings.defaultDelaySeconds = 0
         }
-        let coordinator = try await Self.makeCoordinator(appState: appState, settingsStore: settingsStore)
+        let selection = try await Self.smallDisplaySelection()
+        let coordinator = try await Self.makeCoordinator(
+            appState: appState,
+            settingsStore: settingsStore,
+            selection: selection
+        )
 
         await coordinator.startNewCapture()
 
@@ -74,7 +80,12 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
             settings.copyCapturedImageToClipboard = false
             settings.defaultDelaySeconds = 0
         }
-        let coordinator = try await Self.makeCoordinator(appState: appState, settingsStore: settingsStore)
+        let selection = try await Self.smallDisplaySelection()
+        let coordinator = try await Self.makeCoordinator(
+            appState: appState,
+            settingsStore: settingsStore,
+            selection: selection
+        )
 
         await coordinator.startNewCapture()
 
@@ -111,7 +122,12 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
             settings.recordingQuality = .standard
             settings.showInFinderAfterSave = false
         }
-        let coordinator = try await Self.makeCoordinator(appState: appState, settingsStore: settingsStore)
+        let selection = try await Self.smallDisplaySelection()
+        let coordinator = try await Self.makeCoordinator(
+            appState: appState,
+            settingsStore: settingsStore,
+            selection: selection
+        )
 
         await coordinator.startNewCapture()
 
@@ -119,6 +135,7 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
         XCTAssertEqual(fileURL.pathExtension, "mp4")
         XCTAssertEqual(fileURL.deletingLastPathComponent().standardizedFileURL, temporaryDirectory.standardizedFileURL)
         XCTAssertGreaterThan(try Self.fileSize(at: fileURL), 0)
+        try await Self.assertVideo(at: fileURL, matches: selection)
         XCTAssertFalse(appState.currentDocument?.isDirty ?? true)
     }
 
@@ -137,7 +154,12 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
             settings.showCursorInRecordings = false
             settings.recordingQuality = .standard
         }
-        let coordinator = try await Self.makeCoordinator(appState: appState, settingsStore: settingsStore)
+        let selection = try await Self.smallDisplaySelection()
+        let coordinator = try await Self.makeCoordinator(
+            appState: appState,
+            settingsStore: settingsStore,
+            selection: selection
+        )
 
         await coordinator.startNewCapture()
 
@@ -154,6 +176,7 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
         let savedURL = try XCTUnwrap(appState.currentDocument?.fileURL)
         XCTAssertEqual(savedURL.deletingLastPathComponent().standardizedFileURL, temporaryDirectory.standardizedFileURL)
         XCTAssertGreaterThan(try Self.fileSize(at: savedURL), 0)
+        try await Self.assertVideo(at: savedURL, matches: selection)
         XCTAssertFalse(FileManager.default.fileExists(atPath: temporaryRecordingURL.path))
         XCTAssertFalse(appState.currentDocument?.isDirty ?? true)
     }
@@ -161,15 +184,22 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
     private static func makeCoordinator(
         appState: AppState,
         settingsStore: SettingsStore,
-        clipboardService: ClipboardServicing = SpyClipboardService()
+        clipboardService: ClipboardServicing = SpyClipboardService(),
+        selection: CaptureSelection? = nil
     ) async throws -> CaptureCoordinator {
-        CaptureCoordinator(
+        let resolvedSelection: CaptureSelection
+        if let selection {
+            resolvedSelection = selection
+        } else {
+            resolvedSelection = try await smallDisplaySelection()
+        }
+        return CaptureCoordinator(
             appState: appState,
             settingsStore: settingsStore,
             screenshotService: ScreenCaptureKitScreenshotService(),
             fileOutputService: FileOutputService(),
             recordingService: ScreenCaptureKitRecordingService(),
-            selectionService: FixedSelectionService(selection: try await smallDisplaySelection()),
+            selectionService: FixedSelectionService(selection: resolvedSelection),
             delaySleeper: NoOpDelaySleeper(),
             clipboardService: clipboardService,
             fileRevealService: NoOpFileRevealService()
@@ -180,11 +210,14 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         let display = try XCTUnwrap(content.displays.first)
         let screenFrame = CGRect(x: 0, y: 0, width: display.width, height: display.height)
+        let scale = NSScreen.screens.first { screen in
+            screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID == display.displayID
+        }?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
         return CaptureSelection(
             displayID: display.displayID,
             screenFrame: screenFrame,
             rect: CGRect(x: 0, y: 0, width: 160, height: 120),
-            scale: 1
+            scale: scale
         )
     }
 
@@ -204,6 +237,20 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
     private static func fileSize(at url: URL) throws -> Int {
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         return try XCTUnwrap(attributes[.size] as? NSNumber).intValue
+    }
+
+    private static func assertVideo(at url: URL, matches selection: CaptureSelection) async throws {
+        let asset = AVURLAsset(url: url)
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let videoTrack = try XCTUnwrap(tracks.first)
+        let naturalSize = try await videoTrack.load(.naturalSize)
+        let preferredTransform = try await videoTrack.load(.preferredTransform)
+        let transformedSize = naturalSize.applying(preferredTransform)
+        let width = Int(abs(transformedSize.width).rounded())
+        let height = Int(abs(transformedSize.height).rounded())
+
+        XCTAssertEqual(width, selection.pixelWidth)
+        XCTAssertEqual(height, selection.pixelHeight)
     }
 
     private static func isolatedDefaults(_ name: String) -> UserDefaults {

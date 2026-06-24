@@ -34,11 +34,37 @@ final class FileOutputServiceTests: XCTestCase {
         XCTAssertEqual(resolved.standardizedFileURL, temporaryDirectory.standardizedFileURL)
     }
 
+    func testDirectoryWithSpacesAndKoreanCharactersIsUsed() throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Capture QA \(UUID().uuidString) 한글 폴더", isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        let service = FileOutputService()
+        var settings = AppSettings.defaults
+        settings.screenshotFolderPath = temporaryDirectory.path
+        let data = Data([0x89, 0x50, 0x4E, 0x47])
+
+        let fileURL = try service.writeScreenshotData(data, settings: settings, date: Date(timeIntervalSince1970: 1_782_000_000))
+
+        XCTAssertEqual(try Data(contentsOf: fileURL), data)
+        XCTAssertEqual(fileURL.deletingLastPathComponent().standardizedFileURL, temporaryDirectory.standardizedFileURL)
+    }
+
     func testMissingDirectoryFallsBackToDesktop() {
         let service = FileOutputService()
         let missingPath = "/path/that/does/not/exist"
 
         let resolved = service.resolvedOutputDirectory(preferredPath: missingPath)
+
+        XCTAssertTrue(resolved.path.hasSuffix("/Desktop"))
+    }
+
+    func testFilePathFallsBackToDesktopInsteadOfBeingTreatedAsDirectory() throws {
+        let temporaryFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CaptureStudio-output-\(UUID().uuidString).txt")
+        try Data("not a directory".utf8).write(to: temporaryFile)
+        let service = FileOutputService()
+
+        let resolved = service.resolvedOutputDirectory(preferredPath: temporaryFile.path)
 
         XCTAssertTrue(resolved.path.hasSuffix("/Desktop"))
     }

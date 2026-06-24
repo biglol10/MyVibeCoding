@@ -4,25 +4,31 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var settingsStore: SettingsStore
     @EnvironmentObject private var shortcutManager: ShortcutManager
+    @AppStorage(SettingsTab.storageKey) private var selectedTab = SettingsTab.defaultOpen.rawValue
     @State private var shortcutDraftKeys: [ShortcutAction: String] = [:]
     @State private var shortcutErrorMessage: String?
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             outputSettings
-                .tabItem { Label("Output", systemImage: "folder") }
+                .tabItem { Label(SettingsTab.output.title, systemImage: SettingsTab.output.systemImage) }
+                .tag(SettingsTab.output.rawValue)
 
             captureSettings
-                .tabItem { Label("Capture", systemImage: "viewfinder") }
+                .tabItem { Label(SettingsTab.capture.title, systemImage: SettingsTab.capture.systemImage) }
+                .tag(SettingsTab.capture.rawValue)
 
             recordSettings
-                .tabItem { Label("Record", systemImage: "record.circle") }
+                .tabItem { Label(SettingsTab.record.title, systemImage: SettingsTab.record.systemImage) }
+                .tag(SettingsTab.record.rawValue)
 
             shortcutSettings
-                .tabItem { Label("Shortcuts", systemImage: "keyboard") }
+                .tabItem { Label(SettingsTab.shortcuts.title, systemImage: SettingsTab.shortcuts.systemImage) }
+                .tag(SettingsTab.shortcuts.rawValue)
 
             advancedSettings
-                .tabItem { Label("Advanced", systemImage: "gearshape.2") }
+                .tabItem { Label(SettingsTab.advanced.title, systemImage: SettingsTab.advanced.systemImage) }
+                .tag(SettingsTab.advanced.rawValue)
         }
         .padding(20)
     }
@@ -58,34 +64,51 @@ struct SettingsView: View {
     }
 
     private var captureSettings: some View {
-        Form {
+        VStack(alignment: .leading, spacing: 18) {
             Toggle("Copy captured image to clipboard", isOn: binding(\.copyCapturedImageToClipboard))
-            Stepper("Default delay: \(settingsStore.settings.defaultDelaySeconds)s", value: intBinding(\.defaultDelaySeconds), in: 0...10)
+            timeControl(
+                SettingsTimeControl.captureDelay,
+                value: timeBinding(\.defaultDelaySeconds, control: .captureDelay)
+            )
+
+            Spacer()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.top, 24)
     }
 
     private var recordSettings: some View {
-        Form {
+        VStack(alignment: .leading, spacing: 18) {
             Toggle("Include system audio", isOn: binding(\.includeSystemAudio))
             Toggle("Include microphone", isOn: binding(\.includeMicrophone))
             Toggle("Show cursor in recordings", isOn: binding(\.showCursorInRecordings))
-            Stepper("Countdown: \(settingsStore.settings.countdownSeconds)s", value: intBinding(\.countdownSeconds), in: 0...10)
-            Stepper("Duration: \(settingsStore.settings.recordingDurationSeconds)s", value: intBinding(\.recordingDurationSeconds), in: 1...120)
+            timeControl(
+                SettingsTimeControl.recordingCountdown,
+                value: timeBinding(\.countdownSeconds, control: .recordingCountdown)
+            )
+            timeControl(
+                SettingsTimeControl.recordingDuration,
+                value: timeBinding(\.recordingDurationSeconds, control: .recordingDuration)
+            )
             Picker("Quality", selection: recordingQualityBinding) {
                 ForEach(AppSettings.RecordingQuality.allCases) { quality in
                     Text(quality.rawValue.capitalized).tag(quality)
                 }
             }
+
+            Spacer()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.top, 24)
     }
 
     private var shortcutSettings: some View {
         Form {
-            if let shortcutErrorMessage {
-                Text(shortcutErrorMessage)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
+            Text(ShortcutErrorPresentation.displayMessage(for: shortcutErrorMessage))
+                .font(.caption)
+                .foregroundStyle(.red)
+                .opacity(ShortcutErrorPresentation.opacity(for: shortcutErrorMessage))
+                .frame(height: ShortcutErrorPresentation.reservedMessageHeight, alignment: .center)
 
             ForEach(implementedShortcutActions) { action in
                 shortcutRow(for: action)
@@ -101,8 +124,8 @@ struct SettingsView: View {
 
     private var advancedSettings: some View {
         Form {
-            LabeledContent("Screen Recording", value: "Checked when capture starts")
-            LabeledContent("Microphone", value: "Checked when recording starts")
+            LabeledContent("Screen Recording", value: AdvancedPermissionStatusPresentation.screenRecording)
+            LabeledContent("Microphone", value: AdvancedPermissionStatusPresentation.microphone)
 
             Button("Reset All Settings") {
                 settingsStore.reset()
@@ -122,19 +145,60 @@ struct SettingsView: View {
         )
     }
 
-    private func intBinding(_ keyPath: WritableKeyPath<AppSettings, Int>) -> Binding<Int> {
+    private func timeBinding(
+        _ keyPath: WritableKeyPath<AppSettings, Int>,
+        control: SettingsTimeControl
+    ) -> Binding<Int> {
         Binding(
             get: { settingsStore.settings[keyPath: keyPath] },
             set: { newValue in
                 settingsStore.update { settings in
-                    settings[keyPath: keyPath] = newValue
+                    settings[keyPath: keyPath] = control.clampedValue(for: newValue)
                 }
             }
         )
     }
 
+    private func timeControl(_ control: SettingsTimeControl, value: Binding<Int>) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(control.title)
+                Spacer()
+                Text(control.formattedValue(value.wrappedValue))
+                    .font(.body.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 8) {
+                ForEach(control.presets, id: \.self) { preset in
+                    Button {
+                        value.wrappedValue = preset
+                    } label: {
+                        Text(control.formattedValue(preset))
+                            .fontWeight(value.wrappedValue == preset ? .semibold : .regular)
+                            .frame(minWidth: 42)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+
+                Spacer(minLength: 8)
+
+                TextField("Seconds", value: value, format: .number)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 72)
+                    .multilineTextAlignment(.trailing)
+
+                Text("sec")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+        .frame(maxWidth: 480, alignment: .leading)
+    }
+
     private var implementedShortcutActions: [ShortcutAction] {
-        [.newScreenshot, .newRecording, .openSettings]
+        ShortcutDefinition.customizableActions
     }
 
     private func folderRow(

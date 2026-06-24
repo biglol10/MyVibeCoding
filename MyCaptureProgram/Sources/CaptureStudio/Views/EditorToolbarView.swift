@@ -3,6 +3,8 @@ import SwiftUI
 struct EditorToolbarView: View {
     let documentKind: EditorDocument.Kind?
     let activeTool: EditorTool
+    let canCopy: Bool
+    let canSave: Bool
     let onToolSelected: (EditorTool) -> Void
     let onUndo: () -> Void
     let onRedo: () -> Void
@@ -28,13 +30,22 @@ struct EditorToolbarView: View {
                 toolbarButton("eye.slash", "Quick Redact", action: onQuickRedact)
             }
 
-            Divider().frame(height: 22)
-            toolbarButton("doc.on.doc", "Copy", action: onCopy)
-            toolbarButton("square.and.arrow.down", "Save", action: onSave)
+            if canCopy || canSave {
+                if documentKind == .screenshot {
+                    Divider().frame(height: 22)
+                }
+
+                if canCopy {
+                    toolbarButton("doc.on.doc", "Copy", action: onCopy)
+                }
+
+                if canSave {
+                    toolbarButton("square.and.arrow.down", "Save", action: onSave)
+                }
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .opacity(documentKind == nil ? 0.45 : 1)
     }
 
     private func toolbarButton(_ systemName: String, _ help: String, action: @escaping () -> Void) -> some View {

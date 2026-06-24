@@ -12,20 +12,20 @@ struct CaptureStudioApp: App {
                 .environmentObject(appState)
                 .environmentObject(settingsStore)
                 .environmentObject(shortcutManager)
-                .frame(minWidth: 620, minHeight: 430)
         }
+        .defaultSize(width: 560, height: 128)
         .commands {
             CommandMenu("Capture") {
-                Button("New Screenshot") {
-                    startCapture(mode: .screenshot)
+                Button("Capture") {
+                    startScreenshotCapture()
                 }
                 .keyboardShortcut(
                     shortcutBinding(for: .newScreenshot).keyEquivalent,
                     modifiers: shortcutBinding(for: .newScreenshot).eventModifiers
                 )
 
-                Button("New Recording") {
-                    startCapture(mode: .record)
+                Button("Record") {
+                    startScreenRecording()
                 }
                 .keyboardShortcut(
                     shortcutBinding(for: .newRecording).keyEquivalent,
@@ -34,13 +34,16 @@ struct CaptureStudioApp: App {
 
                 Divider()
 
-                Button("Settings") {
-                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                }
-                .keyboardShortcut(
-                    shortcutBinding(for: .openSettings).keyEquivalent,
-                    modifiers: shortcutBinding(for: .openSettings).eventModifiers
+                OpenSettingsCommand(
+                    binding: shortcutBinding(for: .openSettings)
                 )
+            }
+
+            CommandGroup(replacing: .help) {
+                Button("CaptureStudio Guide") {
+                    appState.isGuidePresented = true
+                }
+                .keyboardShortcut("?", modifiers: [.command])
             }
         }
 
@@ -56,14 +59,36 @@ struct CaptureStudioApp: App {
         shortcutManager.bindings[action] ?? ShortcutDefinition.defaultBinding(for: action)
     }
 
-    private func startCapture(mode: CaptureMode) {
+    private func startScreenshotCapture() {
         Task { @MainActor in
-            appState.captureMode = mode
             await CaptureCoordinator(
                 appState: appState,
                 settingsStore: settingsStore
-            ).startNewCapture()
+            ).startScreenshotCapture()
         }
+    }
+
+    private func startScreenRecording() {
+        Task { @MainActor in
+            await CaptureCoordinator(
+                appState: appState,
+                settingsStore: settingsStore
+            ).startScreenRecording()
+        }
+    }
+
+}
+
+private struct OpenSettingsCommand: View {
+    @Environment(\.openSettings) private var openSettings
+    let binding: ShortcutBinding
+
+    var body: some View {
+        Button("Settings") {
+            SettingsTab.selectDefaultOpenTab()
+            openSettings()
+        }
+        .keyboardShortcut(binding.keyEquivalent, modifiers: binding.eventModifiers)
     }
 }
 

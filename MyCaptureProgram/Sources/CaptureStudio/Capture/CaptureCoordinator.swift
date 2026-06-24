@@ -12,6 +12,8 @@ public final class CaptureCoordinator: ObservableObject {
     private let delaySleeper: CaptureDelaySleeping
     private let clipboardService: ClipboardServicing
     private let fileRevealService: FileRevealServicing
+    private let fileTrashService: FileTrashServicing
+    private let windowVisibilityController: CaptureWindowVisibilityControlling
     private let imageRenderService: ImageRenderServicing
     private let ocrService: OCRServicing
     private let redactionDetector: RedactionDetector
@@ -25,10 +27,12 @@ public final class CaptureCoordinator: ObservableObject {
         ocrService: OCRServicing = VisionOCRService(),
         redactionDetector: RedactionDetector = RedactionDetector(),
         recordingService: RecordingServicing = ScreenCaptureKitRecordingService(),
-        selectionService: SelectionServicing = AppKitSelectionService(),
+        selectionService: SelectionServicing? = nil,
         delaySleeper: CaptureDelaySleeping = TaskCaptureDelaySleeper(),
         clipboardService: ClipboardServicing = PasteboardClipboardService(),
-        fileRevealService: FileRevealServicing = WorkspaceFileRevealService()
+        fileRevealService: FileRevealServicing = WorkspaceFileRevealService(),
+        fileTrashService: FileTrashServicing = WorkspaceFileTrashService(),
+        windowVisibilityController: CaptureWindowVisibilityControlling = AppKitCaptureWindowVisibilityController()
     ) {
         self.appState = appState
         self.settingsStore = settingsStore
@@ -38,10 +42,12 @@ public final class CaptureCoordinator: ObservableObject {
         self.ocrService = ocrService
         self.redactionDetector = redactionDetector
         self.recordingService = recordingService
-        self.selectionService = selectionService
+        self.selectionService = selectionService ?? AppKitSelectionService(windowVisibilityController: windowVisibilityController)
         self.delaySleeper = delaySleeper
         self.clipboardService = clipboardService
         self.fileRevealService = fileRevealService
+        self.fileTrashService = fileTrashService
+        self.windowVisibilityController = windowVisibilityController
     }
 
     public func startNewCapture() async {
@@ -53,9 +59,11 @@ public final class CaptureCoordinator: ObservableObject {
         }
     }
 
-    private func startScreenshotCapture() async {
+    public func startScreenshotCapture() async {
         do {
             let settings = settingsStore.settings
+            let didHideCaptureWindows = hideCaptureWindowsIfNeeded(settings: settings)
+            defer { restoreCaptureWindowsIfNeeded(didHideCaptureWindows) }
             try await waitIfNeeded(seconds: settings.defaultDelaySeconds)
             let selection = try await selectionService.selectRectangle()
             let result = try await screenshotService.captureImage(selection: selection)
@@ -85,13 +93,15 @@ public final class CaptureCoordinator: ObservableObject {
             }
         } catch {
             appState.currentDocument = nil
-            appState.statusMessage = "Screenshot failed: \(error.localizedDescription)"
+            appState.statusMessage = "Screenshot failed: \(userMessage(for: error))"
         }
     }
 
-    private func startScreenRecording() async {
+    public func startScreenRecording() async {
         do {
             let settings = settingsStore.settings
+            let didHideCaptureWindows = hideCaptureWindowsIfNeeded(settings: settings)
+            defer { restoreCaptureWindowsIfNeeded(didHideCaptureWindows) }
             try await waitIfNeeded(seconds: settings.countdownSeconds)
             let selection = try await selectionService.selectRectangle()
             let outputURL = settings.automaticallySaveRecordings
@@ -112,7 +122,11 @@ public final class CaptureCoordinator: ObservableObject {
             }
         } catch {
             appState.currentDocument = nil
-            appState.statusMessage = "Recording failed: \(error.localizedDescription)"
+            if isRecordingStoppedByUser(error) {
+                appState.statusMessage = "Recording stopped."
+            } else {
+                appState.statusMessage = "Recording failed: \(userMessage(for: error))"
+            }
         }
     }
 
@@ -189,6 +203,40 @@ public final class CaptureCoordinator: ObservableObject {
             }
         case .recording:
             appState.statusMessage = "Recording copy is not available."
+        }
+    }
+
+    public func revealCurrentDocument() {
+        guard let fileURL = appState.currentDocument?.fileURL else {
+            appState.statusMessage = "No saved file to reveal."
+            return
+        }
+
+        fileRevealService.reveal(fileURL)
+        appState.statusMessage = "Revealed in Finder."
+    }
+
+    public func deleteCurrentDocument() {
+        guard let document = appState.currentDocument else {
+            appState.statusMessage = "Nothing to delete."
+            return
+        }
+
+        let deletedMessage = document.kind == .recording ? "Recording deleted." : "Screenshot deleted."
+        let discardedMessage = document.kind == .recording ? "Recording discarded." : "Screenshot discarded."
+
+        guard let fileURL = document.fileURL else {
+            appState.currentDocument = nil
+            appState.statusMessage = discardedMessage
+            return
+        }
+
+        do {
+            try fileTrashService.trash(fileURL)
+            appState.currentDocument = nil
+            appState.statusMessage = deletedMessage
+        } catch {
+            appState.statusMessage = "Delete failed: \(error.localizedDescription)"
         }
     }
 
@@ -312,5 +360,43 @@ public final class CaptureCoordinator: ObservableObject {
 
         appState.statusMessage = "Starting in \(clampedSeconds)s..."
         try await delaySleeper.sleep(seconds: clampedSeconds)
+    }
+
+    private func hideCaptureWindowsIfNeeded(settings: AppSettings) -> Bool {
+        guard settings.hideAppDuringCapture else {
+            return false
+        }
+
+        windowVisibilityController.hideCaptureWindows()
+        return true
+    }
+
+    private func restoreCaptureWindowsIfNeeded(_ shouldRestore: Bool) {
+        guard shouldRestore else {
+            return
+        }
+
+        windowVisibilityController.restoreCaptureWindows()
+    }
+
+    private func userMessage(for error: Error) -> String {
+        let description = error.localizedDescription
+        let lowercasedDescription = description.lowercased()
+        if lowercasedDescription.contains("tcc")
+            || lowercasedDescription.contains("permission")
+            || lowercasedDescription.contains("denied")
+            || description.contains("거절")
+            || description.contains("권한") {
+            return "Screen access is off. Enable CaptureStudio in System Settings > Privacy & Security."
+        }
+        return description
+    }
+
+    private func isRecordingStoppedByUser(_ error: Error) -> Bool {
+        guard let recordingError = error as? RecordingError else {
+            return false
+        }
+
+        return recordingError == .stoppedByUser
     }
 }

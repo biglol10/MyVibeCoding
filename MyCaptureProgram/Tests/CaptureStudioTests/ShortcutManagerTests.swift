@@ -59,6 +59,10 @@ final class ShortcutManagerTests: XCTestCase {
         XCTAssertEqual(binding.eventModifiers, [.command, .shift])
     }
 
+    func testCustomizableActionsIncludeEveryDefaultShortcut() {
+        XCTAssertEqual(ShortcutDefinition.customizableActions, ShortcutAction.allCases)
+    }
+
     private func isolatedDefaults(_ name: String) -> UserDefaults {
         let suiteName = "ShortcutManagerTests.\(name)"
         let defaults = UserDefaults(suiteName: suiteName)!

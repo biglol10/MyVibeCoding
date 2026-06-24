@@ -111,6 +111,8 @@ public extension ShortcutModifier {
 }
 
 public enum ShortcutDefinition {
+    public static let customizableActions = ShortcutAction.allCases
+
     public static let defaultBindings: [ShortcutAction: ShortcutBinding] = [
         .newScreenshot: ShortcutBinding(key: "S", modifiers: [.command, .shift]),
         .newRecording: ShortcutBinding(key: "R", modifiers: [.command, .shift]),

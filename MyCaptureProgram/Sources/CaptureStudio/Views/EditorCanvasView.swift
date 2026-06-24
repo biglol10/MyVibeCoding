@@ -19,7 +19,10 @@ struct EditorCanvasView: View {
                     Image(nsImage: image)
                         .resizable()
                         .scaledToFit()
-                        .overlay(layerOverlay(geometry: geometry))
+
+                    layerOverlay(geometry: geometry)
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .allowsHitTesting(false)
                 } else {
                     ContentUnavailableView("No Preview", systemImage: "photo")
                 }

@@ -32,18 +32,36 @@ public struct ScreenCaptureKitScreenshotService: ScreenshotServicing {
         }
         let filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
         let configuration = SCStreamConfiguration()
-        configuration.sourceRect = selection.sourceRectInPixels
+        configuration.sourceRect = selection.sourceRectInPoints
         configuration.width = selection.pixelWidth
         configuration.height = selection.pixelHeight
         configuration.showsCursor = true
 
         let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
-        let bitmap = NSBitmapImageRep(cgImage: image)
+        let croppedImage = ScreenshotImageCropper.crop(image, to: selection) ?? image
+        let bitmap = NSBitmapImageRep(cgImage: croppedImage)
         guard let pngData = bitmap.representation(using: .png, properties: [:]) else {
             throw ScreenshotError.pngEncodingFailed
         }
 
         return ScreenshotResult(pngData: pngData)
+    }
+}
+
+enum ScreenshotImageCropper {
+    static func crop(_ image: CGImage, to selection: CaptureSelection) -> CGImage? {
+        let expectedWidth = selection.pixelWidth
+        let expectedHeight = selection.pixelHeight
+
+        guard image.width != expectedWidth || image.height != expectedHeight else {
+            return image
+        }
+
+        guard image.width >= expectedWidth, image.height >= expectedHeight else {
+            return image
+        }
+
+        return image.cropping(to: CGRect(x: 0, y: 0, width: expectedWidth, height: expectedHeight))
     }
 }
 

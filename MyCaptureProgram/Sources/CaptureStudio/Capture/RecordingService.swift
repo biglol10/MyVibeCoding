@@ -103,7 +103,7 @@ private final class ScreenRecorder: NSObject, @preconcurrency SCStreamDelegate, 
         }
         let filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
         let configuration = SCStreamConfiguration()
-        configuration.sourceRect = selection.sourceRectInPixels
+        configuration.sourceRect = selection.sourceRectInPoints
         configuration.width = selection.pixelWidth
         configuration.height = selection.pixelHeight
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
@@ -144,7 +144,7 @@ private final class ScreenRecorder: NSObject, @preconcurrency SCStreamDelegate, 
     }
 
     func stream(_ stream: SCStream, didStopWithError error: any Error) {
-        finishWithError(error)
+        finishWithError(RecordingError.stoppedByUser)
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
@@ -231,6 +231,7 @@ private final class ScreenRecorder: NSObject, @preconcurrency SCStreamDelegate, 
         }
         didFinish = true
         assetWriter?.cancelWriting()
+        try? FileManager.default.removeItem(at: outputURL)
         finishContinuation?.resume(throwing: error)
         finishContinuation = nil
     }
@@ -242,6 +243,7 @@ public enum RecordingError: LocalizedError, Equatable {
     case writerUnavailable
     case noVideoFramesCaptured
     case writerFailed
+    case stoppedByUser
 
     public var errorDescription: String? {
         switch self {
@@ -255,6 +257,8 @@ public enum RecordingError: LocalizedError, Equatable {
             return "No video frames were captured."
         case .writerFailed:
             return "The recording writer failed."
+        case .stoppedByUser:
+            return "The recording was stopped."
         }
     }
 }
