@@ -94,7 +94,15 @@ chmod +x install-flowpilot-personal.command
 ./install-flowpilot-personal.command
 ```
 
+직접 Applications로 드래그할 필요는 없습니다. 설치 스크립트가 기존 `/Applications/FlowPilot.app`을 삭제하고 새 앱을 복사합니다.
+`/Applications` 쓰기 권한이 막힌 Mac에서는 관리자 비밀번호를 한 번 물어볼 수 있습니다.
+
 이 개인용 ZIP은 본인 Mac 사이에서만 사용합니다. 공개 다운로드 링크나 불특정 사용자 배포에는 Developer ID 서명과 공증된 DMG를 사용합니다.
+
+macOS 권한은 설치 스크립트나 Terminal에 주는 것이 아닙니다. 설치 스크립트는 `/Applications/FlowPilot.app`을 설치한 뒤
+`open /Applications/FlowPilot.app`으로 앱 번들을 실행합니다. Accessibility 또는 Screen Recording 권한을 줄 때는 시스템 설정에서
+`FlowPilot` 또는 `/Applications/FlowPilot.app`을 선택하세요. `Contents/MacOS/flowpilot` 실행 파일을 직접 실행하면 권한 대상이
+흐려질 수 있으므로 사용하지 않습니다.
 
 ## Validation Commands
 

@@ -69,6 +69,13 @@ pub fn run() {
             tray::setup_tray(app)?;
             Ok(())
         })
+        .on_window_event(|window, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .run(tauri::generate_context!())
     {
         eprintln!("error while running tauri application: {err}");

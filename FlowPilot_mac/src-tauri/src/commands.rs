@@ -52,7 +52,14 @@ pub fn get_today_summary(state: State<AppState>) -> Result<TodaySummaryDto, Stri
         .repository
         .lock()
         .map_err(|_| "Repository lock poisoned.".to_string())?;
-    let sessions = classified_sessions_for_local_today(&repository)?;
+
+    today_summary_from_repository(&repository)
+}
+
+pub(crate) fn today_summary_from_repository(
+    repository: &Repository,
+) -> Result<TodaySummaryDto, String> {
+    let sessions = classified_sessions_for_local_today(repository)?;
 
     Ok(summarize_sessions(&sessions))
 }

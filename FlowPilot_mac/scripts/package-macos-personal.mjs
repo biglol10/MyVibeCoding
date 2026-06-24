@@ -50,16 +50,20 @@ echo "실행 중인 FlowPilot을 종료합니다..."
 osascript -e 'tell application "FlowPilot" to quit' >/dev/null 2>&1 || true
 sleep 1
 
-echo "기존 FlowPilot을 삭제합니다..."
-mkdir -p "$target_dir"
-rm -rf "$target_app"
-
 echo "FlowPilot을 $target_dir에 설치합니다..."
-ditto "$source_app" "$target_app"
+mkdir -p "$target_dir" 2>/dev/null || true
+if rm -rf "$target_app" && ditto "$source_app" "$target_app"; then
+  echo "일반 사용자 권한으로 설치했습니다."
+else
+  echo "일반 권한으로 $target_dir에 설치할 수 없어 관리자 권한으로 다시 시도합니다..."
+  echo "macOS가 비밀번호를 물어보면 이 Mac의 로그인 비밀번호를 입력하세요."
+  sudo rm -rf "$target_app"
+  sudo ditto "$source_app" "$target_app"
+fi
 
 echo "개인 Mac 설치용 quarantine 속성을 제거합니다..."
 xattr -dr com.apple.quarantine "$source_app" 2>/dev/null || true
-xattr -dr com.apple.quarantine "$target_app" 2>/dev/null || true
+xattr -dr com.apple.quarantine "$target_app" 2>/dev/null || sudo xattr -dr com.apple.quarantine "$target_app" 2>/dev/null || true
 
 echo "앱 서명을 검증합니다..."
 codesign --verify --deep --strict --verbose=2 "$target_app"
@@ -68,6 +72,10 @@ echo "FlowPilot을 실행합니다..."
 open "$target_app"
 
 echo "설치 완료: $target_app"
+echo ""
+echo "macOS 권한 요청이 나오면 install-flowpilot-personal.command나 Terminal이 아니라"
+echo "$target_app 항목을 허용하세요."
+echo "시스템 설정에서 직접 추가할 때도 $target_app을 선택하세요."
 `;
 }
 
@@ -87,8 +95,17 @@ export function buildPersonalReadme() {
     "   chmod +x install-flowpilot-personal.command",
     "   ./install-flowpilot-personal.command",
     "",
+    "직접 Applications로 드래그할 필요는 없습니다.",
     "설치 스크립트는 기존 /Applications/FlowPilot.app을 삭제하고 새 앱을 복사한 뒤",
     "macOS 다운로드 quarantine 속성을 제거합니다.",
+    "만약 /Applications에 쓰기 권한이 없으면 설치 중 관리자 비밀번호를 한 번 물어볼 수 있습니다.",
+    "",
+    "macOS 권한 안내:",
+    "",
+    "권한은 install-flowpilot-personal.command나 Terminal이 아니라 /Applications/FlowPilot.app에 줘야 합니다.",
+    "설치 스크립트는 마지막에 open /Applications/FlowPilot.app으로 앱 번들을 실행하므로",
+    "시스템 설정 > 개인정보 보호 및 보안에서 FlowPilot 또는 /Applications/FlowPilot.app을 선택하면 됩니다.",
+    "앱 내부 실행 파일(Contents/MacOS/flowpilot)을 직접 실행하지 마세요.",
     "",
     "Chrome 도메인 집계를 쓰려면 Chrome_Extension 폴더를 Chrome 확장 프로그램 개발자 모드에서 로드하세요.",
   ].join("\n");
