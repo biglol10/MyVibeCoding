@@ -75,6 +75,16 @@ pub fn get_today_sessions(state: State<AppState>) -> Result<Vec<ActivitySessionD
 }
 
 #[tauri::command]
+pub fn get_week_sessions(state: State<AppState>) -> Result<Vec<ActivitySessionDto>, String> {
+    let repository = state
+        .repository
+        .lock()
+        .map_err(|_| "Repository lock poisoned.".to_string())?;
+
+    classified_sessions_for_local_week(&repository)
+}
+
+#[tauri::command]
 pub fn export_today_csv(state: State<AppState>) -> Result<String, String> {
     let repository = state
         .repository
@@ -229,6 +239,15 @@ fn classified_sessions_for_local_today(
     repository: &Repository,
 ) -> Result<Vec<ActivitySessionDto>, String> {
     let (start, end) = local_day_bounds_utc(Local::now().date_naive())?;
+    classified_sessions_for_range(repository, start, end)
+}
+
+fn classified_sessions_for_local_week(
+    repository: &Repository,
+) -> Result<Vec<ActivitySessionDto>, String> {
+    let today = Local::now().date_naive();
+    let (start, _) = local_day_bounds_utc(today - chrono::Duration::days(6))?;
+    let (_, end) = local_day_bounds_utc(today)?;
     classified_sessions_for_range(repository, start, end)
 }
 
@@ -764,6 +783,81 @@ mod tests {
                 .map(|session| session.id.as_str())
                 .collect::<Vec<_>>(),
             vec!["inside"]
+        );
+    }
+
+    #[test]
+    fn local_week_sessions_include_previous_six_local_days() {
+        let repository = Repository::in_memory_for_test().expect("repo");
+        let today = Local::now().date_naive();
+        let (today_start, today_end) = local_day_bounds_utc(today).expect("today bounds");
+        let week_start = local_day_bounds_utc(today - Duration::days(6))
+            .expect("week start bounds")
+            .0;
+        let sessions = [
+            activity_session(
+                "before-week",
+                week_start - Duration::seconds(1),
+                60,
+                Some("chatgpt.com"),
+                "Chrome",
+                "chrome.exe",
+                "Before Week",
+                false,
+            ),
+            activity_session(
+                "week-start",
+                week_start,
+                60,
+                Some("chatgpt.com"),
+                "Chrome",
+                "chrome.exe",
+                "Week Start",
+                false,
+            ),
+            activity_session(
+                "yesterday",
+                today_start - Duration::hours(2),
+                60,
+                Some("github.com"),
+                "Chrome",
+                "chrome.exe",
+                "Yesterday",
+                false,
+            ),
+            activity_session(
+                "today",
+                today_start,
+                60,
+                Some("chatgpt.com"),
+                "Chrome",
+                "chrome.exe",
+                "Today",
+                false,
+            ),
+            activity_session(
+                "tomorrow",
+                today_end,
+                60,
+                Some("chatgpt.com"),
+                "Chrome",
+                "chrome.exe",
+                "Tomorrow",
+                false,
+            ),
+        ];
+        for session in sessions {
+            repository.save_session(&session).expect("session saved");
+        }
+
+        let classified = classified_sessions_for_local_week(&repository).expect("classified");
+
+        assert_eq!(
+            classified
+                .iter()
+                .map(|session| session.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["week-start", "yesterday", "today"]
         );
     }
 }

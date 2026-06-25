@@ -23,6 +23,7 @@ pub fn run() {
             commands::export_today_csv,
             commands::get_today_summary,
             commands::get_today_sessions,
+            commands::get_week_sessions,
             commands::list_rules,
             commands::pause_tracking,
             commands::resume_tracking,

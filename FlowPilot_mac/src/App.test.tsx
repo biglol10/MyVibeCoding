@@ -6,6 +6,7 @@ import {
   getPlatformPermissionStatus,
   getTodaySessions,
   getTodaySummary,
+  getWeekSessions,
   listRules,
 } from "./api/activityApi";
 import App from "./App";
@@ -20,6 +21,7 @@ vi.mock("./api/activityApi", () => ({
   getPlatformPermissionStatus: vi.fn(),
   getTodaySessions: vi.fn(),
   getTodaySummary: vi.fn(),
+  getWeekSessions: vi.fn(),
   listRules: vi.fn(),
 }));
 
@@ -81,6 +83,22 @@ const todaySessions: ActivitySession[] = [
   }),
 ];
 
+const weekSessions: ActivitySession[] = [
+  session({
+    id: "yesterday-github",
+    startedAt: "2026-06-17T09:00:00.000Z",
+    endedAt: "2026-06-17T09:20:00.000Z",
+    appName: "Chrome",
+    processName: "chrome.exe",
+    windowTitle: "GitHub",
+    domain: "github.com",
+    category: "productive",
+    matchedRuleId: "builtin:domain:github.com",
+    durationSeconds: 1200,
+  }),
+  ...todaySessions,
+];
+
 const existingRule: ClassificationRule = {
   id: "builtin:domain:chatgpt.com",
   name: "ChatGPT",
@@ -116,6 +134,7 @@ describe("App", () => {
     });
     vi.mocked(getTodaySummary).mockResolvedValue(todaySummary);
     vi.mocked(getTodaySessions).mockResolvedValue(todaySessions);
+    vi.mocked(getWeekSessions).mockResolvedValue(weekSessions);
     vi.mocked(listRules).mockResolvedValue([existingRule]);
     vi.mocked(createRule).mockResolvedValue(codeRule);
   });
@@ -142,6 +161,19 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: "분류 규칙" }));
     expect(await screen.findByRole("heading", { name: "분류 규칙" })).toBeInTheDocument();
+  });
+
+  it("uses persisted week sessions on the weekly report page", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "오늘 요약" });
+    expect(screen.queryByText("github.com")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "주간 리포트" }));
+
+    expect(await screen.findByRole("heading", { name: "주간 리포트" })).toBeInTheDocument();
+    expect(screen.getByText("github.com")).toBeInTheDocument();
   });
 
   it("reloads the rules table after a quick rule is created", async () => {
@@ -189,12 +221,27 @@ describe("App", () => {
           durationSeconds: 600,
         }),
       ]);
+    vi.mocked(getWeekSessions)
+      .mockResolvedValueOnce(weekSessions)
+      .mockResolvedValueOnce([
+        ...weekSessions,
+        session({
+          id: "week-notion",
+          appName: "Notion",
+          processName: "Notion",
+          windowTitle: "Product spec",
+          category: "productive",
+          matchedRuleId: "user:app:Notion",
+          durationSeconds: 600,
+        }),
+      ]);
 
     render(<App />);
     await act(async () => {});
 
     expect(getTodaySummary).toHaveBeenCalledTimes(1);
     expect(getTodaySessions).toHaveBeenCalledTimes(1);
+    expect(getWeekSessions).toHaveBeenCalledTimes(1);
     expect(screen.getAllByText("3개 세션").length).toBeGreaterThan(0);
 
     await act(async () => {
@@ -202,12 +249,14 @@ describe("App", () => {
     });
     expect(getTodaySummary).toHaveBeenCalledTimes(1);
     expect(getTodaySessions).toHaveBeenCalledTimes(1);
+    expect(getWeekSessions).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
     expect(getTodaySummary).toHaveBeenCalledTimes(2);
     expect(getTodaySessions).toHaveBeenCalledTimes(2);
+    expect(getWeekSessions).toHaveBeenCalledTimes(2);
     expect(screen.getAllByText("4개 세션").length).toBeGreaterThan(0);
   });
 });

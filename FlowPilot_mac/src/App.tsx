@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { getPlatformPermissionStatus, getTodaySessions, getTodaySummary } from "./api/activityApi";
+import { getPlatformPermissionStatus, getTodaySessions, getTodaySummary, getWeekSessions } from "./api/activityApi";
 import { AppShell } from "./components/layout/AppShell";
 import { MacosPermissionNotice } from "./components/platform/MacosPermissionNotice";
 import { Alert, AlertDescription, AlertTitle } from "./components/ui/alert";
@@ -17,7 +17,7 @@ import "./styles.css";
 
 type DashboardState =
   | { status: "loading" }
-  | { sessions: ActivitySession[]; status: "ready"; summary: TodaySummaryDto }
+  | { status: "ready"; todaySessions: ActivitySession[]; todaySummary: TodaySummaryDto; weekSessions: ActivitySession[] }
   | { message: string; status: "error" };
 
 const DASHBOARD_REFRESH_INTERVAL_MS = 60_000;
@@ -30,9 +30,13 @@ export default function App() {
 
   const loadDashboard = useCallback(async (shouldApply = () => true) => {
     try {
-      const [summary, sessions] = await Promise.all([getTodaySummary(), getTodaySessions()]);
+      const [todaySummary, todaySessions, weekSessions] = await Promise.all([
+        getTodaySummary(),
+        getTodaySessions(),
+        getWeekSessions(),
+      ]);
       if (shouldApply()) {
-        setDashboardState({ sessions, status: "ready", summary });
+        setDashboardState({ status: "ready", todaySessions, todaySummary, weekSessions });
       }
     } catch (error) {
       if (shouldApply()) {
@@ -96,13 +100,21 @@ export default function App() {
     }
 
     const keys = new Set(
-      dashboardState.sessions
+      dashboardState.todaySessions
         .filter((session) => session.category === "uncategorized")
         .map((session) => `${session.domain ? "domain" : "app"}:${session.domain ?? session.processName}`),
     );
 
     return keys.size;
   }, [dashboardState]);
+
+  const pageSessions = useMemo(() => {
+    if (dashboardState.status !== "ready") {
+      return [];
+    }
+
+    return currentPage === "weekly" ? dashboardState.weekSessions : dashboardState.todaySessions;
+  }, [currentPage, dashboardState]);
 
   function handleRuleCreated() {
     setRulesRefreshVersion((version) => version + 1);
@@ -143,18 +155,24 @@ export default function App() {
               <h2 className="m-0 mt-1 text-2xl font-semibold leading-tight tracking-normal">{NAV_LABELS[currentPage]}</h2>
             </div>
             <Badge className="shrink-0" variant="secondary">
-              {dashboardState.sessions.length > 0
-                ? `${dashboardState.sessions.length}개 세션`
+              {pageSessions.length > 0
+                ? `${pageSessions.length}개 세션`
                 : EMPTY_STATE_TEXT.noActivityToday}
             </Badge>
           </header>
 
-          {currentPage === "today" ? <TodayPage sessions={dashboardState.sessions} summary={dashboardState.summary} /> : null}
-          {currentPage === "timeline" ? <TimelinePage sessions={dashboardState.sessions} /> : null}
-          {currentPage === "weekly" ? (
-            <WeeklyReportPage sessions={dashboardState.sessions} summary={dashboardState.summary} />
+          {currentPage === "today" ? (
+            <TodayPage
+              sessions={dashboardState.todaySessions}
+              summary={dashboardState.todaySummary}
+              trendSessions={dashboardState.weekSessions}
+            />
           ) : null}
-          {currentPage === "review" ? <ReviewPage onRuleCreated={handleRuleCreated} sessions={dashboardState.sessions} /> : null}
+          {currentPage === "timeline" ? <TimelinePage sessions={dashboardState.todaySessions} /> : null}
+          {currentPage === "weekly" ? (
+            <WeeklyReportPage sessions={dashboardState.weekSessions} summary={dashboardState.todaySummary} />
+          ) : null}
+          {currentPage === "review" ? <ReviewPage onRuleCreated={handleRuleCreated} sessions={dashboardState.todaySessions} /> : null}
           {currentPage === "rules" ? <RulesPage refreshVersion={rulesRefreshVersion} /> : null}
         </>
       ) : null}

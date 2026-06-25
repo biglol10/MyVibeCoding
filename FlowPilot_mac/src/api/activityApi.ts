@@ -335,6 +335,13 @@ export async function getTodaySessions(): Promise<ActivitySession[]> {
   return invoke<ActivitySession[]>("get_today_sessions");
 }
 
+export async function getWeekSessions(): Promise<ActivitySession[]> {
+  if (!isDesktopRuntime()) {
+    return getDevSessions();
+  }
+  return invoke<ActivitySession[]>("get_week_sessions");
+}
+
 export async function exportTodayCsv(): Promise<string> {
   if (!isDesktopRuntime()) {
     return sessionsToCsv(getDevSessions());
