@@ -66,4 +66,52 @@ final class SelectionOverlayCursorTests: XCTestCase {
         XCTAssertEqual(segments[1].end.y, center.y + 13, accuracy: 0.1)
         XCTAssertGreaterThanOrEqual(SelectionOverlayReticle.strokeWidth, 2)
     }
+
+    func testEscapeKeyCancelsSelectionOverlay() throws {
+        let escape = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\u{1b}",
+            charactersIgnoringModifiers: "\u{1b}",
+            isARepeat: false,
+            keyCode: 53
+        ))
+
+        XCTAssertTrue(SelectionOverlayKeyboardPolicy.isCancelEvent(escape))
+    }
+
+    func testSelectionOverlayViewFrameUsesLocalCoordinatesForOffsetScreen() {
+        let screenFrame = CGRect(x: -1440, y: 120, width: 1440, height: 900)
+
+        XCTAssertEqual(
+            SelectionOverlayGeometry.viewFrame(forScreenFrame: screenFrame),
+            CGRect(x: 0, y: 0, width: 1440, height: 900)
+        )
+    }
+
+    func testSelectionOverlayConvertsLocalSelectionToGlobalScreenCoordinates() {
+        let screenFrame = CGRect(x: -1440, y: 120, width: 1440, height: 900)
+        let localRect = CGRect(x: 20, y: 30, width: 200, height: 100)
+
+        XCTAssertEqual(
+            SelectionOverlayGeometry.globalSelectionRect(localRect: localRect, screenFrame: screenFrame),
+            CGRect(x: -1420, y: 150, width: 200, height: 100)
+        )
+    }
+
+    func testSelectionOverlayCreatesWindowForEveryScreen() {
+        let screenFrames = [
+            CGRect(x: 0, y: 0, width: 1512, height: 982),
+            CGRect(x: -1440, y: 82, width: 1440, height: 900)
+        ]
+
+        XCTAssertEqual(
+            SelectionOverlayGeometry.overlayWindowFrames(forScreenFrames: screenFrames),
+            screenFrames
+        )
+    }
 }

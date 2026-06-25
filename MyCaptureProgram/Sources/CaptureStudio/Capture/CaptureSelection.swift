@@ -34,3 +34,16 @@ public struct CaptureSelection: Equatable, Sendable {
         max(1, Int((rect.height * scale).rounded(.up)))
     }
 }
+
+struct ScreenCaptureOutputGeometry: Equatable, Sendable {
+    let sourceRectInPoints: CGRect
+    let pixelWidth: Int
+    let pixelHeight: Int
+
+    init(selection: CaptureSelection, pointPixelScale: CGFloat) {
+        let effectiveScale = max(pointPixelScale, 1)
+        self.sourceRectInPoints = selection.sourceRectInPoints
+        self.pixelWidth = max(1, Int((selection.sourceRectInPoints.width * effectiveScale).rounded(.up)))
+        self.pixelHeight = max(1, Int((selection.sourceRectInPoints.height * effectiveScale).rounded(.up)))
+    }
+}

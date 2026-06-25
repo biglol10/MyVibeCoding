@@ -64,7 +64,7 @@ public final class OrphanFilesViewModel {
         selectedCandidates.reduce(Int64(0)) { $0 + $1.size }
     }
 
-    public func deleteSelectedLeftovers(confirmation: String) async {
+    public func deleteSelectedLeftovers(confirmation: String, force: Bool = false) async {
         let candidates = selectedCandidates
         guard !candidates.isEmpty else { return }
 
@@ -79,7 +79,7 @@ public final class OrphanFilesViewModel {
             lastOpenedAt: nil
         )
         let plan = DeletionPlan(app: app, candidates: candidates)
-        let results = await executor.execute(plan: plan, confirmation: confirmation)
+        let results = await executor.execute(plan: plan, confirmation: confirmation, force: force)
         let verificationResults = await verifier.verify(plan: plan)
         let receipt = DeletionReceipt(
             appName: "Orphan Files",

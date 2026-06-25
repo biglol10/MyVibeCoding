@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::app_state::TrackingStatus;
 #[cfg(target_os = "windows")]
 use crate::collector::active_window::WindowsActiveWindowReader;
-use crate::collector::session_merger::{should_merge, ActivitySample};
+use crate::collector::session_merger::{merged_sample, should_merge, ActivitySample};
 use crate::collector::snapshot::{ActivitySnapshot, ActivitySnapshotReader, WindowObservation};
 use crate::domain::activity::{ActivitySession, ActivitySource};
 use crate::storage::repository::{BrowserEvent, Repository};
@@ -101,7 +101,7 @@ impl ActivitySessionAccumulator {
     }
 
     fn observe(&mut self, sample: ActivitySample) -> Vec<ActivitySession> {
-        let Some(open_session) = &self.open_session else {
+        let Some(open_session) = self.open_session.as_mut() else {
             let open_session = open_session_from_sample(sample);
             let session = session_from_open(&open_session, open_session.started_at);
             self.open_session = Some(open_session);
@@ -109,6 +109,7 @@ impl ActivitySessionAccumulator {
         };
 
         if should_merge(&open_session.sample, &sample) {
+            open_session.sample = merged_sample(&open_session.sample, &sample);
             let session = session_from_open(open_session, sample.observed_at);
             return vec![session];
         }
@@ -374,6 +375,23 @@ mod tests {
         assert_ne!(switched[1].id, first[0].id);
         assert_eq!(switched[1].app_name, "idea64");
         assert_eq!(switched[1].duration_seconds, 1);
+    }
+
+    #[test]
+    fn merges_same_app_when_a_generic_fallback_title_flaps() {
+        let mut accumulator = ActivitySessionAccumulator::new();
+
+        let first = accumulator.observe(sample_at(0, "Calendar", "Calendar"));
+        let second = accumulator.observe(sample_at(5, "Calendar", "Holidays"));
+        let third = accumulator.observe(sample_at(10, "Calendar", "Calendar"));
+
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 1);
+        assert_eq!(third.len(), 1);
+        assert_eq!(first[0].id, second[0].id);
+        assert_eq!(second[0].id, third[0].id);
+        assert_eq!(third[0].duration_seconds, 10);
+        assert_eq!(third[0].window_title, "Holidays");
     }
 
     #[test]

@@ -93,7 +93,11 @@ public final class CaptureCoordinator: ObservableObject {
             }
         } catch {
             appState.currentDocument = nil
-            appState.statusMessage = "Screenshot failed: \(userMessage(for: error))"
+            if isSelectionCancelled(error) {
+                appState.statusMessage = "Screenshot cancelled."
+            } else {
+                appState.statusMessage = "Screenshot failed: \(userMessage(for: error))"
+            }
         }
     }
 
@@ -122,7 +126,9 @@ public final class CaptureCoordinator: ObservableObject {
             }
         } catch {
             appState.currentDocument = nil
-            if isRecordingStoppedByUser(error) {
+            if isSelectionCancelled(error) {
+                appState.statusMessage = "Recording cancelled."
+            } else if isRecordingStoppedByUser(error) {
                 appState.statusMessage = "Recording stopped."
             } else {
                 appState.statusMessage = "Recording failed: \(userMessage(for: error))"
@@ -398,5 +404,13 @@ public final class CaptureCoordinator: ObservableObject {
         }
 
         return recordingError == .stoppedByUser
+    }
+
+    private func isSelectionCancelled(_ error: Error) -> Bool {
+        guard let selectionError = error as? SelectionError else {
+            return false
+        }
+
+        return selectionError == .cancelled
     }
 }

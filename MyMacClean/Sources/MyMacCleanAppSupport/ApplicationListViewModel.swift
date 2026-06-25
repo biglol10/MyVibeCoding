@@ -101,10 +101,10 @@ public final class ApplicationListViewModel {
         return try planner.makePlan(app: selectedApp, candidates: candidates, selectedIDs: selectedCandidateIDs)
     }
 
-    public func deleteConfirmedItems(confirmation: String) async {
+    public func deleteConfirmedItems(confirmation: String, force: Bool = false) async {
         do {
             let plan = try makePlan()
-            let results = await executor.execute(plan: plan, confirmation: confirmation)
+            let results = await executor.execute(plan: plan, confirmation: confirmation, force: force)
             let verificationResults = await verifier.verify(plan: plan)
             let receipt = DeletionReceipt(
                 appName: plan.app.displayName,

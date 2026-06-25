@@ -25,18 +25,29 @@ public enum SelectionError: LocalizedError, Equatable {
 
 public final class AppKitSelectionService: SelectionServicing {
     private let windowVisibilityController: CaptureWindowVisibilityControlling
+    private let screenProvider: @MainActor () -> [NSScreen]
 
     public init(windowVisibilityController: CaptureWindowVisibilityControlling = AppKitCaptureWindowVisibilityController()) {
         self.windowVisibilityController = windowVisibilityController
+        self.screenProvider = { NSScreen.screens }
+    }
+
+    init(
+        windowVisibilityController: CaptureWindowVisibilityControlling = AppKitCaptureWindowVisibilityController(),
+        screenProvider: @escaping @MainActor () -> [NSScreen]
+    ) {
+        self.windowVisibilityController = windowVisibilityController
+        self.screenProvider = screenProvider
     }
 
     public func selectRectangle() async throws -> CaptureSelection {
-        guard let screen = NSScreen.main else {
+        let screens = screenProvider()
+        guard !screens.isEmpty else {
             throw SelectionError.noScreenAvailable
         }
 
         return try await SelectionOverlaySession(
-            screen: screen,
+            screens: screens,
             windowVisibilityController: windowVisibilityController
         ).select()
     }
@@ -44,54 +55,124 @@ public final class AppKitSelectionService: SelectionServicing {
 
 @MainActor
 private final class SelectionOverlaySession {
-    private let screen: NSScreen
+    private let screens: [NSScreen]
     private let windowVisibilityController: CaptureWindowVisibilityControlling
-    private var window: NSWindow?
+    private var windows: [NSWindow] = []
+    private var keyEventMonitor: Any?
     private var continuation: CheckedContinuation<CaptureSelection, Error>?
 
-    init(screen: NSScreen, windowVisibilityController: CaptureWindowVisibilityControlling) {
-        self.screen = screen
+    init(screens: [NSScreen], windowVisibilityController: CaptureWindowVisibilityControlling) {
+        self.screens = screens
         self.windowVisibilityController = windowVisibilityController
     }
 
     func select() async throws -> CaptureSelection {
         try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
-            let view = SelectionOverlayView(screen: screen) { [weak self] result in
-                self?.finish(result)
+            self.keyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard SelectionOverlayKeyboardPolicy.isCancelEvent(event) else {
+                    return event
+                }
+
+                self?.finish(.failure(SelectionError.cancelled))
+                return nil
             }
-            let window = NSWindow(
-                contentRect: screen.frame,
-                styleMask: [.borderless],
-                backing: .buffered,
-                defer: false,
-                screen: screen
-            )
-            window.level = .screenSaver
-            window.isOpaque = false
-            window.acceptsMouseMovedEvents = true
-            window.backgroundColor = .clear
-            window.ignoresMouseEvents = false
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-            window.contentView = view
-            window.makeKeyAndOrderFront(nil)
+
+            let windowFrames = SelectionOverlayGeometry.overlayWindowFrames(forScreenFrames: screens.map(\.frame))
+            let windows = zip(screens, windowFrames).map { screen, windowFrame in
+                let view = SelectionOverlayView(screen: screen) { [weak self] result in
+                    self?.finish(result)
+                }
+                let window = SelectionOverlayWindow(
+                    contentRect: windowFrame,
+                    styleMask: [.borderless],
+                    backing: .buffered,
+                    defer: false,
+                    screen: screen
+                )
+                window.cancelHandler = { [weak self] in
+                    self?.finish(.failure(SelectionError.cancelled))
+                }
+                window.level = .screenSaver
+                window.isOpaque = false
+                window.acceptsMouseMovedEvents = true
+                window.backgroundColor = .clear
+                window.ignoresMouseEvents = false
+                window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+                window.contentView = view
+                return window
+            }
+
+            self.windows = windows
             NSApp.activate(ignoringOtherApps: true)
-            windowVisibilityController.hideCaptureWindows(excluding: window)
-            self.window = window
+            windows.forEach { $0.orderFrontRegardless() }
+            windows.first?.makeKeyAndOrderFront(nil)
+            windowVisibilityController.hideCaptureWindows(excluding: windows.first)
         }
     }
 
     private func finish(_ result: Result<CaptureSelection, Error>) {
+        guard let continuation else {
+            return
+        }
+
         SelectionOverlayCursor.restoreDefaultCursor()
-        window?.orderOut(nil)
-        window = nil
+        if let keyEventMonitor {
+            NSEvent.removeMonitor(keyEventMonitor)
+            self.keyEventMonitor = nil
+        }
+        windows.forEach { $0.orderOut(nil) }
+        windows.removeAll()
         switch result {
         case .success(let selection):
-            continuation?.resume(returning: selection)
+            continuation.resume(returning: selection)
         case .failure(let error):
-            continuation?.resume(throwing: error)
+            continuation.resume(throwing: error)
         }
-        continuation = nil
+        self.continuation = nil
+    }
+}
+
+enum SelectionOverlayKeyboardPolicy {
+    static let escapeKeyCode: UInt16 = 53
+
+    static func isCancelEvent(_ event: NSEvent) -> Bool {
+        event.type == .keyDown
+            && (event.keyCode == escapeKeyCode || event.charactersIgnoringModifiers == "\u{1b}")
+    }
+}
+
+enum SelectionOverlayGeometry {
+    static func viewFrame(forScreenFrame screenFrame: CGRect) -> CGRect {
+        CGRect(origin: .zero, size: screenFrame.size)
+    }
+
+    static func overlayWindowFrames(forScreenFrames screenFrames: [CGRect]) -> [CGRect] {
+        screenFrames
+    }
+
+    static func globalSelectionRect(localRect: CGRect, screenFrame: CGRect) -> CGRect {
+        localRect.offsetBy(dx: screenFrame.minX, dy: screenFrame.minY)
+    }
+}
+
+private final class SelectionOverlayWindow: NSWindow {
+    var cancelHandler: (() -> Void)?
+
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        guard SelectionOverlayKeyboardPolicy.isCancelEvent(event) else {
+            super.keyDown(with: event)
+            return
+        }
+
+        cancelHandler?()
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        cancelHandler?()
     }
 }
 
@@ -236,7 +317,7 @@ private final class SelectionOverlayView: NSView {
     init(screen: NSScreen, completion: @escaping (Result<CaptureSelection, Error>) -> Void) {
         self.screen = screen
         self.completion = completion
-        super.init(frame: screen.frame)
+        super.init(frame: SelectionOverlayGeometry.viewFrame(forScreenFrame: screen.frame))
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.withAlphaComponent(0.28).cgColor
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
@@ -323,15 +404,18 @@ private final class SelectionOverlayView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 {
-            complete(.failure(SelectionError.cancelled))
+        guard SelectionOverlayKeyboardPolicy.isCancelEvent(event) else {
+            super.keyDown(with: event)
+            return
         }
+
+        cancelSelection()
     }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
 
-        if let rect = currentSelection?.rect {
+        if let rect = currentLocalSelectionRect {
             NSColor.clear.setFill()
             rect.fill(using: .copy)
             NSColor.systemBlue.setStroke()
@@ -354,18 +438,25 @@ private final class SelectionOverlayView: NSView {
         needsDisplay = true
     }
 
-    private var currentSelection: CaptureSelection? {
+    private var currentLocalSelectionRect: CGRect? {
         guard let startPoint, let currentPoint else {
             return nil
         }
 
-        let localRect = CGRect(
+        return CGRect(
             x: min(startPoint.x, currentPoint.x),
             y: min(startPoint.y, currentPoint.y),
             width: abs(currentPoint.x - startPoint.x),
             height: abs(currentPoint.y - startPoint.y)
         )
-        let globalRect = localRect.offsetBy(dx: screen.frame.minX, dy: screen.frame.minY)
+    }
+
+    private var currentSelection: CaptureSelection? {
+        guard let localRect = currentLocalSelectionRect else {
+            return nil
+        }
+
+        let globalRect = SelectionOverlayGeometry.globalSelectionRect(localRect: localRect, screenFrame: screen.frame)
         let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID ?? CGMainDisplayID()
         return CaptureSelection(
             displayID: displayID,
@@ -389,6 +480,10 @@ private final class SelectionOverlayView: NSView {
     private func stopCursorReassertionTimer() {
         cursorReassertionTimer?.invalidate()
         cursorReassertionTimer = nil
+    }
+
+    func cancelSelection() {
+        complete(.failure(SelectionError.cancelled))
     }
 
     private func complete(_ result: Result<CaptureSelection, Error>) {

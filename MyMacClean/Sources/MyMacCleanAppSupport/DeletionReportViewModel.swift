@@ -9,11 +9,11 @@ public struct DeletionReportViewModel: Equatable, Sendable {
     }
 
     public var statusTitle: String {
-        if receipt.verificationResults.contains(where: { $0.status == .stillExists || $0.status == .permissionDenied }) {
-            return "Deleted with remaining items"
-        }
         if receipt.executionResults.contains(where: { !$0.success }) {
             return "Deletion failed"
+        }
+        if receipt.verificationResults.contains(where: { $0.status == .stillExists || $0.status == .permissionDenied }) {
+            return "Deleted with remaining items"
         }
         return "Deleted and verified"
     }

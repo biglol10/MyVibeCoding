@@ -10,6 +10,7 @@ struct ContentView: View {
     @State private var confirmationText = ""
     @State private var showsConfirmation = false
     @State private var confirmationMode: DeletionConfirmationMode = .application
+    @State private var forceDelete = false
 
     var body: some View {
         NavigationSplitView {
@@ -475,14 +476,15 @@ struct ContentView: View {
                 .padding(.vertical, 2)
             }
 
-            DeleteActionButton(
-                selectedCount: orphanFilesViewModel.selectedCandidates.count,
-                selectedBytes: orphanFilesViewModel.selectedBytes
-            ) {
-                confirmationMode = .orphanFiles
-                confirmationText = ""
-                showsConfirmation = true
-            }
+                DeleteActionButton(
+                    selectedCount: orphanFilesViewModel.selectedCandidates.count,
+                    selectedBytes: orphanFilesViewModel.selectedBytes
+                ) {
+                    confirmationMode = .orphanFiles
+                    confirmationText = ""
+                    forceDelete = false
+                    showsConfirmation = true
+                }
         }
         .padding(22)
     }
@@ -542,6 +544,7 @@ struct ContentView: View {
                 ) {
                     confirmationMode = .application
                     confirmationText = ""
+                    forceDelete = false
                     showsConfirmation = true
                 }
             } else {
@@ -560,6 +563,9 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
             TextField(requiredConfirmation, text: $confirmationText)
                 .textFieldStyle(.roundedBorder)
+            Toggle("Force delete locked items", isOn: $forceDelete)
+                .toggleStyle(.checkbox)
+                .help("Clears file locks and restores write permission before retrying. This cannot bypass Full Disk Access or administrator-only paths.")
             HStack {
                 Button("Cancel") { showsConfirmation = false }
                 Spacer()
@@ -567,9 +573,9 @@ struct ContentView: View {
                     Task {
                         switch confirmationMode {
                         case .application:
-                            await viewModel.deleteConfirmedItems(confirmation: confirmationText)
+                            await viewModel.deleteConfirmedItems(confirmation: confirmationText, force: forceDelete)
                         case .orphanFiles:
-                            await orphanFilesViewModel.deleteSelectedLeftovers(confirmation: confirmationText)
+                            await orphanFilesViewModel.deleteSelectedLeftovers(confirmation: confirmationText, force: forceDelete)
                         }
                         showsConfirmation = false
                     }

@@ -49,6 +49,7 @@ RESOURCES_DIR="$CONTENTS_DIR/Resources"
 ZIP_PATH="$DIST_DIR/MyMacStats-test-build.zip"
 NOTARY_ZIP_PATH="$DIST_DIR/MyMacStats-notary-upload.zip"
 FIRST_RUN_SOURCE="$ROOT_DIR/scripts/first-run.command"
+INSTALLER_SOURCE="$ROOT_DIR/scripts/install.command"
 FIRST_RUN_COMMAND="$PACKAGE_DIR/처음 실행하기.command"
 INSTALL_COMMAND="$PACKAGE_DIR/Install MyMacStats.command"
 DOWNLOADS_DIR="$ROOT_DIR/../downloads/MyMacStats"
@@ -99,7 +100,7 @@ chmod +x "$MACOS_DIR/MyMacStatsApp"
 
 if [[ "$MODE" != "release" ]]; then
     cp "$FIRST_RUN_SOURCE" "$FIRST_RUN_COMMAND"
-    cp "$FIRST_RUN_SOURCE" "$INSTALL_COMMAND"
+    cp "$INSTALLER_SOURCE" "$INSTALL_COMMAND"
     chmod +x "$FIRST_RUN_COMMAND"
     chmod +x "$INSTALL_COMMAND"
 fi

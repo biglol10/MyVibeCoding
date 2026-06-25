@@ -13,7 +13,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "CaptureStudio",
-            path: "Sources/CaptureStudio"
+            path: "Sources/CaptureStudio",
+            linkerSettings: [
+                .linkedFramework("AVKit")
+            ]
         ),
         .testTarget(
             name: "CaptureStudioTests",

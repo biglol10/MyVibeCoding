@@ -26,6 +26,21 @@ final class CaptureSelectionTests: XCTestCase {
         XCTAssertEqual(selection.pixelHeight, 360)
     }
 
+    func testScreenCaptureKitOutputGeometryUsesFilterPointPixelScale() {
+        let selection = CaptureSelection(
+            displayID: 1,
+            screenFrame: CGRect(x: 100, y: 200, width: 1000, height: 800),
+            rect: CGRect(x: 150, y: 260, width: 320, height: 180),
+            scale: 2
+        )
+
+        let geometry = ScreenCaptureOutputGeometry(selection: selection, pointPixelScale: 1.5)
+
+        XCTAssertEqual(geometry.sourceRectInPoints, CGRect(x: 50, y: 560, width: 320, height: 180))
+        XCTAssertEqual(geometry.pixelWidth, 480)
+        XCTAssertEqual(geometry.pixelHeight, 270)
+    }
+
     func testTinySelectionIsRejected() {
         let selection = CaptureSelection(
             displayID: 1,

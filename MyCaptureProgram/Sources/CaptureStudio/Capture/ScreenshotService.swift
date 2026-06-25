@@ -31,16 +31,17 @@ public struct ScreenCaptureKitScreenshotService: ScreenshotServicing {
             window.owningApplication?.processID == currentProcessID
         }
         let filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
+        let geometry = ScreenCaptureOutputGeometry(selection: selection, pointPixelScale: CGFloat(filter.pointPixelScale))
         let configuration = SCStreamConfiguration()
-        configuration.sourceRect = selection.sourceRectInPoints
-        configuration.width = selection.pixelWidth
-        configuration.height = selection.pixelHeight
+        configuration.sourceRect = geometry.sourceRectInPoints
+        configuration.width = geometry.pixelWidth
+        configuration.height = geometry.pixelHeight
         configuration.showsCursor = true
 
         let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
-        let croppedImage = ScreenshotImageCropper.crop(image, to: selection) ?? image
+        let croppedImage = ScreenshotImageCropper.crop(image, to: geometry) ?? image
         let bitmap = NSBitmapImageRep(cgImage: croppedImage)
-        guard let pngData = bitmap.representation(using: .png, properties: [:]) else {
+        guard let pngData = bitmap.representation(using: NSBitmapImageRep.FileType.png, properties: [:]) else {
             throw ScreenshotError.pngEncodingFailed
         }
 
@@ -49,9 +50,9 @@ public struct ScreenCaptureKitScreenshotService: ScreenshotServicing {
 }
 
 enum ScreenshotImageCropper {
-    static func crop(_ image: CGImage, to selection: CaptureSelection) -> CGImage? {
-        let expectedWidth = selection.pixelWidth
-        let expectedHeight = selection.pixelHeight
+    static func crop(_ image: CGImage, to geometry: ScreenCaptureOutputGeometry) -> CGImage? {
+        let expectedWidth = geometry.pixelWidth
+        let expectedHeight = geometry.pixelHeight
 
         guard image.width != expectedWidth || image.height != expectedHeight else {
             return image

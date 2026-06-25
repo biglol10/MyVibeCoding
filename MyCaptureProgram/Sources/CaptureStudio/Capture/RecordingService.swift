@@ -54,6 +54,17 @@ private final class ScreenRecorder: NSObject, @preconcurrency SCStreamDelegate, 
             throw RecordingError.noDisplayAvailable
         }
 
+        let currentProcessID = pid_t(ProcessInfo.processInfo.processIdentifier)
+        let excludedWindows = content.windows.filter { window in
+            window.owningApplication?.processID == currentProcessID
+        }
+        let filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
+        let geometry = ScreenCaptureOutputGeometry(selection: selection, pointPixelScale: CGFloat(filter.pointPixelScale))
+        let videoBitRate = settings.recordingQuality.videoBitRate(
+            width: geometry.pixelWidth,
+            height: geometry.pixelHeight
+        )
+
         try? FileManager.default.removeItem(at: outputURL)
 
         let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
@@ -61,13 +72,10 @@ private final class ScreenRecorder: NSObject, @preconcurrency SCStreamDelegate, 
             mediaType: .video,
             outputSettings: [
                 AVVideoCodecKey: AVVideoCodecType.h264,
-                AVVideoWidthKey: selection.pixelWidth,
-                AVVideoHeightKey: selection.pixelHeight,
+                AVVideoWidthKey: geometry.pixelWidth,
+                AVVideoHeightKey: geometry.pixelHeight,
                 AVVideoCompressionPropertiesKey: [
-                    AVVideoAverageBitRateKey: settings.recordingQuality.videoBitRate(
-                        width: selection.pixelWidth,
-                        height: selection.pixelHeight
-                    )
+                    AVVideoAverageBitRateKey: videoBitRate
                 ]
             ]
         )
@@ -97,15 +105,10 @@ private final class ScreenRecorder: NSObject, @preconcurrency SCStreamDelegate, 
             }
         }
 
-        let currentProcessID = pid_t(ProcessInfo.processInfo.processIdentifier)
-        let excludedWindows = content.windows.filter { window in
-            window.owningApplication?.processID == currentProcessID
-        }
-        let filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
         let configuration = SCStreamConfiguration()
-        configuration.sourceRect = selection.sourceRectInPoints
-        configuration.width = selection.pixelWidth
-        configuration.height = selection.pixelHeight
+        configuration.sourceRect = geometry.sourceRectInPoints
+        configuration.width = geometry.pixelWidth
+        configuration.height = geometry.pixelHeight
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
         configuration.showsCursor = settings.showCursorInRecordings
         configuration.capturesAudio = settings.includeSystemAudio

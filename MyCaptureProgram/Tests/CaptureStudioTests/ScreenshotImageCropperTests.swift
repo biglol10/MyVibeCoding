@@ -10,6 +10,7 @@ final class ScreenshotImageCropperTests: XCTestCase {
             rect: CGRect(x: 0, y: 0, width: 120, height: 80),
             scale: 1
         )
+        let geometry = ScreenCaptureOutputGeometry(selection: selection, pointPixelScale: 1)
         let sourceImage = try makeImage(width: 300, height: 200) { context in
             context.setFillColor(NSColor.black.cgColor)
             context.fill(CGRect(x: 0, y: 0, width: 300, height: 200))
@@ -17,7 +18,7 @@ final class ScreenshotImageCropperTests: XCTestCase {
             context.fill(CGRect(x: 0, y: 0, width: 120, height: 80))
         }
 
-        let cropped = try XCTUnwrap(ScreenshotImageCropper.crop(sourceImage, to: selection))
+        let cropped = try XCTUnwrap(ScreenshotImageCropper.crop(sourceImage, to: geometry))
 
         XCTAssertEqual(cropped.width, 120)
         XCTAssertEqual(cropped.height, 80)
@@ -30,15 +31,37 @@ final class ScreenshotImageCropperTests: XCTestCase {
             rect: CGRect(x: 0, y: 0, width: 120, height: 80),
             scale: 1
         )
+        let geometry = ScreenCaptureOutputGeometry(selection: selection, pointPixelScale: 1)
         let sourceImage = try makeImage(width: 120, height: 80) { context in
             context.setFillColor(NSColor.systemBlue.cgColor)
             context.fill(CGRect(x: 0, y: 0, width: 120, height: 80))
         }
 
-        let cropped = try XCTUnwrap(ScreenshotImageCropper.crop(sourceImage, to: selection))
+        let cropped = try XCTUnwrap(ScreenshotImageCropper.crop(sourceImage, to: geometry))
 
         XCTAssertEqual(cropped.width, 120)
         XCTAssertEqual(cropped.height, 80)
+    }
+
+    func testCropsUsingScreenCaptureKitPointPixelScale() throws {
+        let selection = CaptureSelection(
+            displayID: 1,
+            screenFrame: CGRect(x: 0, y: 0, width: 300, height: 200),
+            rect: CGRect(x: 0, y: 0, width: 120, height: 80),
+            scale: 2
+        )
+        let geometry = ScreenCaptureOutputGeometry(selection: selection, pointPixelScale: 1.5)
+        let sourceImage = try makeImage(width: 300, height: 200) { context in
+            context.setFillColor(NSColor.black.cgColor)
+            context.fill(CGRect(x: 0, y: 0, width: 300, height: 200))
+            context.setFillColor(NSColor.systemRed.cgColor)
+            context.fill(CGRect(x: 0, y: 0, width: 180, height: 120))
+        }
+
+        let cropped = try XCTUnwrap(ScreenshotImageCropper.crop(sourceImage, to: geometry))
+
+        XCTAssertEqual(cropped.width, 180)
+        XCTAssertEqual(cropped.height, 120)
     }
 
     private func makeImage(

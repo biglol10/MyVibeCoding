@@ -58,6 +58,13 @@ final class AppBundleIconTests: XCTestCase {
         XCTAssertTrue(script.contains("codesign --force --deep --sign \"$SIGN_IDENTITY\" \"$APP_BUNDLE\""))
     }
 
+    func testPackageLinksAVKitForRecordingPreviewPlayback() throws {
+        let packageURL = repositoryRoot.appendingPathComponent("Package.swift")
+        let package = try String(contentsOf: packageURL, encoding: .utf8)
+
+        XCTAssertTrue(package.contains(".linkedFramework(\"AVKit\")"))
+    }
+
     private var repositoryRoot: URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

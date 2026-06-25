@@ -63,6 +63,22 @@ final class CaptureCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testScreenshotSelectionCancelReturnsToInitialState() async {
+        let appState = AppState()
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: makeSettingsStore("screenshotSelectionCancel"),
+            screenshotService: MockScreenshotService(),
+            selectionService: FailingSelectionService(error: SelectionError.cancelled)
+        )
+
+        await coordinator.startScreenshotCapture()
+
+        XCTAssertNil(appState.currentDocument)
+        XCTAssertEqual(appState.statusMessage, "Screenshot cancelled.")
+    }
+
+    @MainActor
     func testScreenshotCopiesImageToClipboardWhenEnabled() async {
         let appState = AppState()
         let settingsStore = makeSettingsStore("clipboardEnabled")
@@ -352,6 +368,24 @@ final class CaptureCoordinatorTests: XCTestCase {
         XCTAssertTrue(appState.currentDocument?.isDirty ?? false)
         XCTAssertEqual(appState.statusMessage, "Recording captured. Press Save to write the file.")
         XCTAssertNotEqual(recordingService.lastOutputURL?.deletingLastPathComponent().standardizedFileURL, temporaryDirectory.standardizedFileURL)
+    }
+
+    @MainActor
+    func testRecordingSelectionCancelReturnsToInitialState() async {
+        let appState = AppState(captureMode: .record)
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: makeSettingsStore("recordingSelectionCancel"),
+            screenshotService: MockScreenshotService(),
+            recordingService: MockRecordingService(),
+            selectionService: FailingSelectionService(error: SelectionError.cancelled),
+            delaySleeper: MockDelaySleeper()
+        )
+
+        await coordinator.startScreenRecording()
+
+        XCTAssertNil(appState.currentDocument)
+        XCTAssertEqual(appState.statusMessage, "Recording cancelled.")
     }
 
     @MainActor
@@ -817,6 +851,18 @@ private final class MockSelectionService: SelectionServicing {
     func selectRectangle() async throws -> CaptureSelection {
         selectionCallCount += 1
         return selection
+    }
+}
+
+private final class FailingSelectionService: SelectionServicing {
+    private let error: Error
+
+    init(error: Error) {
+        self.error = error
+    }
+
+    func selectRectangle() async throws -> CaptureSelection {
+        throw error
     }
 }
 
