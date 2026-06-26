@@ -106,7 +106,7 @@ README
 
 echo "Creating personal installer zip..."
 xattr -cr "$PACKAGE_ROOT" 2>/dev/null || true
-ditto -c -k --sequesterRsrc --keepParent "$PACKAGE_ROOT" "$FINAL_ZIP"
+ditto -c -k --norsrc --keepParent "$PACKAGE_ROOT" "$FINAL_ZIP"
 /usr/bin/unzip -tq "$FINAL_ZIP"
 
 echo "Created: $FINAL_ZIP"

@@ -1,3 +1,7 @@
 .build/
 build/
+dist/
 .DS_Store
+Resources/MyMacCalendar.iconset/
+Resources/.cache/
+.superpowers/

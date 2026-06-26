@@ -82,6 +82,18 @@ swift run MyMacCalendar
 open build/MyMacCalendar.app
 ```
 
+아이콘을 새로 만들려면:
+
+```bash
+./scripts/generate_app_icon.swift
+```
+
+또는
+
+```bash
+./scripts/generate_app_icon.sh
+```
+
 생성되는 앱 번들 위치:
 
 ```text
@@ -144,6 +156,9 @@ swift test
 ## 프로젝트 구조
 
 ```text
+Resources/
+  AppIcon.icns         앱 번들 아이콘
+
 Sources/MyMacCalendar
   App/                 macOS 앱 진입점과 AppDelegate
   Controllers/         메뉴바, 플로팅 위젯 controller
@@ -159,6 +174,8 @@ Tests/MyMacCalendarCoreTests
 
 scripts/build_app.sh
   release build 후 .app 번들 생성
+scripts/generate_app_icon.swift
+  앱 아이콘 생성
 scripts/package_personal.sh
   개인 Mac 설치용 zip 생성
 scripts/package_release.sh

@@ -20,7 +20,7 @@ struct MyMacCalendarApp: App {
             MainWindowView()
                 .modelContainer(container)
         }
-        .defaultSize(width: 1100, height: 720)
+        .defaultSize(width: 1240, height: 720)
 
         Settings {
             SettingsView()

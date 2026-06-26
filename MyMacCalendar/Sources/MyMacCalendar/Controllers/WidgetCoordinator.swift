@@ -39,7 +39,14 @@ final class WidgetCoordinator {
         controller.show(
             occurrences: occurrences,
             opacity: currentSettings.opacity,
-            alwaysOnTop: currentSettings.alwaysOnTop
+            alwaysOnTop: currentSettings.alwaysOnTop,
+            onSelect: { [weak self] occurrence in
+                guard let self,
+                      let event = self.currentEvents.first(where: { $0.id == occurrence.eventID }) else {
+                    return
+                }
+                self.controller.showDetail(for: event)
+            }
         )
     }
 }
