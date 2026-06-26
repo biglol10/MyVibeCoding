@@ -1,3 +1,4 @@
+#!/usr/bin/env swift
 import AppKit
 import Foundation
 
@@ -11,11 +12,67 @@ let iconPath = resourcesDir.appendingPathComponent("AppIcon.icns")
 enum IconRenderError: Error {
     case cannotCreateImage
     case cannotEncodePNG(Int)
-    case failedToCreateIconset
     case missingPNGFile(String)
 }
 
-func makeCanvas(side: CGFloat) -> Data {
+private struct Palette {
+    static let ink = NSColor(calibratedRed: 0.070, green: 0.075, blue: 0.090, alpha: 1)
+    static let ink2 = NSColor(calibratedRed: 0.130, green: 0.145, blue: 0.185, alpha: 1)
+    static let purple = NSColor(calibratedRed: 0.300, green: 0.185, blue: 0.760, alpha: 1)
+    static let blue = NSColor(calibratedRed: 0.090, green: 0.320, blue: 0.900, alpha: 1)
+    static let paper = NSColor(calibratedRed: 0.965, green: 0.970, blue: 0.990, alpha: 1)
+    static let paperShade = NSColor(calibratedRed: 0.855, green: 0.875, blue: 0.925, alpha: 1)
+    static let calendarRed = NSColor(calibratedRed: 1.000, green: 0.230, blue: 0.205, alpha: 1)
+    static let eventBlue = NSColor(calibratedRed: 0.250, green: 0.435, blue: 0.920, alpha: 1)
+    static let eventViolet = NSColor(calibratedRed: 0.810, green: 0.350, blue: 0.950, alpha: 1)
+}
+
+private func roundedRect(_ rect: NSRect, radius: CGFloat) -> NSBezierPath {
+    NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
+}
+
+private func oval(_ rect: NSRect) -> NSBezierPath {
+    NSBezierPath(ovalIn: rect)
+}
+
+private func fill(_ path: NSBezierPath, _ color: NSColor) {
+    color.setFill()
+    path.fill()
+}
+
+private func stroke(_ path: NSBezierPath, _ color: NSColor, width: CGFloat = 1) {
+    color.setStroke()
+    path.lineWidth = width
+    path.stroke()
+}
+
+private func drawShadow(color: NSColor, blur: CGFloat, x: CGFloat = 0, y: CGFloat = 0) {
+    let shadow = NSShadow()
+    shadow.shadowColor = color
+    shadow.shadowBlurRadius = blur
+    shadow.shadowOffset = NSSize(width: x, height: y)
+    shadow.set()
+}
+
+private func drawText(_ text: String, in rect: NSRect, size: CGFloat, weight: NSFont.Weight, color: NSColor) {
+    let paragraph = NSMutableParagraphStyle()
+    paragraph.alignment = .center
+    let attributes: [NSAttributedString.Key: Any] = [
+        .font: NSFont.systemFont(ofSize: size, weight: weight),
+        .foregroundColor: color,
+        .paragraphStyle: paragraph
+    ]
+    let attributed = NSAttributedString(string: text, attributes: attributes)
+    let textSize = attributed.size()
+    attributed.draw(in: NSRect(
+        x: rect.midX - textSize.width / 2,
+        y: rect.midY - textSize.height / 2 - size * 0.035,
+        width: textSize.width,
+        height: textSize.height
+    ))
+}
+
+private func makeCanvas(side: CGFloat) throws -> Data {
     let pixelSize = max(1, Int(ceil(side)))
     guard let bitmap = NSBitmapImageRep(
         bitmapDataPlanes: nil,
@@ -28,219 +85,194 @@ func makeCanvas(side: CGFloat) -> Data {
         colorSpaceName: .deviceRGB,
         bytesPerRow: 0,
         bitsPerPixel: 0
-    ) else { return Data() }
+    ) else {
+        throw IconRenderError.cannotCreateImage
+    }
     bitmap.size = NSSize(width: side, height: side)
 
-    guard let graphicsContext = NSGraphicsContext(bitmapImageRep: bitmap) else { return Data() }
+    guard let graphicsContext = NSGraphicsContext(bitmapImageRep: bitmap) else {
+        throw IconRenderError.cannotCreateImage
+    }
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = graphicsContext
     defer { NSGraphicsContext.restoreGraphicsState() }
 
-    let inset = side * 0.06
-    let bounds = NSRect(x: inset, y: inset, width: side - inset * 2, height: side - inset * 2)
-    let cornerRadius = side * 0.22
-    let rounded = NSBezierPath(roundedRect: bounds, xRadius: cornerRadius, yRadius: cornerRadius)
+    NSColor.clear.setFill()
+    NSRect(x: 0, y: 0, width: side, height: side).fill()
 
-    // Soft glow around the icon.
-    for i in 0..<5 {
-        let ringAlpha = 0.035 - Double(i) * 0.004
-        if ringAlpha <= 0 { continue }
-        NSColor(calibratedWhite: 1, alpha: ringAlpha).setStroke()
-        let ring = NSBezierPath(roundedRect: NSRect(
-            x: inset - CGFloat(i) * 0.6,
-            y: inset - CGFloat(i) * 0.6,
-            width: side - inset * 2 + CGFloat(i) * 1.2,
-            height: side - inset * 2 + CGFloat(i) * 1.2
-        ), xRadius: cornerRadius + CGFloat(i) * 0.6, yRadius: cornerRadius + CGFloat(i) * 0.6)
-        ring.lineWidth = max(0.5, 1.2 - CGFloat(i) * 0.15)
-        ring.stroke()
+    let outerInset = side * 0.060
+    let outerRect = NSRect(x: outerInset, y: outerInset, width: side - outerInset * 2, height: side - outerInset * 2)
+    let outerRadius = side * 0.214
+    let outerPath = roundedRect(outerRect, radius: outerRadius)
+
+    NSGraphicsContext.saveGraphicsState()
+    drawShadow(color: NSColor.black.withAlphaComponent(0.35), blur: side * 0.035, y: -side * 0.018)
+    let baseGradient = NSGradient(colors: [Palette.ink, Palette.ink2, Palette.purple, Palette.blue])
+    baseGradient?.draw(in: outerPath, angle: 135)
+    NSGraphicsContext.restoreGraphicsState()
+
+    let glowRect = outerRect.insetBy(dx: side * 0.012, dy: side * 0.012)
+    let glowPath = roundedRect(glowRect, radius: outerRadius * 0.92)
+    NSGradient(colors: [
+        NSColor.white.withAlphaComponent(0.26),
+        NSColor.white.withAlphaComponent(0.020)
+    ])?.draw(in: glowPath, angle: 70)
+    stroke(outerPath, NSColor.white.withAlphaComponent(0.28), width: max(1, side * 0.0022))
+
+    let glassOrb1 = oval(NSRect(x: side * 0.145, y: side * 0.660, width: side * 0.280, height: side * 0.280))
+    NSGradient(colors: [
+        NSColor.white.withAlphaComponent(0.150),
+        NSColor.white.withAlphaComponent(0.000)
+    ])?.draw(in: glassOrb1, angle: -45)
+
+    let paperRect = NSRect(x: side * 0.185, y: side * 0.175, width: side * 0.630, height: side * 0.665)
+    let paperPath = roundedRect(paperRect, radius: side * 0.112)
+    NSGraphicsContext.saveGraphicsState()
+    drawShadow(color: NSColor.black.withAlphaComponent(0.32), blur: side * 0.035, y: -side * 0.018)
+    NSGradient(colors: [Palette.paper, Palette.paperShade])?.draw(in: paperPath, angle: 92)
+    NSGraphicsContext.restoreGraphicsState()
+    stroke(paperPath, NSColor.white.withAlphaComponent(0.55), width: max(1, side * 0.002))
+
+    let headerRect = NSRect(x: paperRect.minX, y: paperRect.maxY - side * 0.175, width: paperRect.width, height: side * 0.175)
+    let headerPath = roundedRect(headerRect, radius: side * 0.110)
+    NSGradient(colors: [
+        NSColor(calibratedRed: 1.0, green: 0.335, blue: 0.305, alpha: 1),
+        Palette.calendarRed
+    ])?.draw(in: headerPath, angle: 90)
+
+    let headerClip = NSBezierPath(rect: NSRect(x: headerRect.minX, y: headerRect.minY, width: headerRect.width, height: headerRect.height * 0.58))
+    NSColor(calibratedRed: 0.760, green: 0.090, blue: 0.100, alpha: 0.24).setFill()
+    headerClip.fill()
+
+    let ringY = headerRect.maxY - side * 0.070
+    for x in [paperRect.minX + paperRect.width * 0.29, paperRect.minX + paperRect.width * 0.71] {
+        let ringRect = NSRect(x: x - side * 0.026, y: ringY - side * 0.026, width: side * 0.052, height: side * 0.052)
+        fill(oval(ringRect), NSColor.white.withAlphaComponent(0.92))
+        fill(oval(ringRect.insetBy(dx: side * 0.012, dy: side * 0.012)), Palette.calendarRed.withAlphaComponent(0.64))
     }
 
-    let background = NSGradient(
-        starting: NSColor(calibratedRed: 0.14, green: 0.17, blue: 0.58, alpha: 1),
-        ending: NSColor(calibratedRed: 0.36, green: 0.13, blue: 0.90, alpha: 1)
-    ) ?? NSGradient(starting: NSColor.systemBlue, ending: NSColor.systemPurple)
-    if let background {
-        background.draw(in: rounded, angle: 135)
-    }
-    let highlight = NSGradient(
-        starting: NSColor(calibratedWhite: 1, alpha: 0.22),
-        ending: NSColor(calibratedWhite: 1, alpha: 0.01)
-    ) ?? background
-    if let highlight {
-        highlight.draw(in: rounded, angle: -45)
-    }
-
-    NSColor(calibratedWhite: 1, alpha: 0.18).set()
-    rounded.stroke()
-
-    let contentInset = side * 0.17
-    let sheet = NSBezierPath(
-        roundedRect: NSRect(
-            x: contentInset,
-            y: contentInset,
-            width: side - contentInset * 2,
-            height: side - contentInset * 2
-        ),
-        xRadius: side * 0.12,
-        yRadius: side * 0.12
+    let gridRect = NSRect(
+        x: paperRect.minX + side * 0.072,
+        y: paperRect.minY + side * 0.164,
+        width: paperRect.width - side * 0.144,
+        height: paperRect.height - side * 0.296
     )
-    let sheetGradient = NSGradient(
-        starting: NSColor(calibratedWhite: 0.97, alpha: 0.98),
-        ending: NSColor(calibratedWhite: 0.94, alpha: 0.92)
-    ) ?? NSGradient(starting: NSColor.white, ending: NSColor(calibratedWhite: 0.93, alpha: 1))
-    if let sheetGradient {
-        sheetGradient.draw(in: sheet, angle: 90)
-    } else {
-        NSColor(calibratedWhite: 1, alpha: 0.95).setFill()
-        sheet.fill()
-    }
-    NSColor(calibratedWhite: 1, alpha: 0.8).set()
-    sheet.stroke()
+    let cols = 7
+    let rows = 5
+    let cellW = gridRect.width / CGFloat(cols)
+    let cellH = gridRect.height / CGFloat(rows)
+    let lineColor = NSColor(calibratedRed: 0.255, green: 0.300, blue: 0.395, alpha: 0.145)
 
-    let titleHeight = side * 0.12
-    let titleRect = NSRect(
-        x: contentInset + side * 0.03,
-        y: side - contentInset - titleHeight - side * 0.02,
-        width: side - contentInset * 2 - side * 0.06,
-        height: titleHeight
-    )
-    let title = NSBezierPath(
-        roundedRect: titleRect,
-        xRadius: titleHeight * 0.35,
-        yRadius: titleHeight * 0.35
-    )
-    NSColor(calibratedRed: 0.15, green: 0.20, blue: 0.50, alpha: 0.95).setFill()
-    title.fill()
-    let titleOverlay = NSGradient(
-        starting: NSColor(calibratedWhite: 1, alpha: 0.14),
-        ending: NSColor(calibratedWhite: 1, alpha: 0.02)
-    ) ?? sheetGradient
-    if let titleOverlay {
-        titleOverlay.draw(in: title, angle: 90)
+    for col in 0...cols {
+        let x = gridRect.minX + CGFloat(col) * cellW
+        let path = NSBezierPath()
+        path.move(to: CGPoint(x: x, y: gridRect.minY))
+        path.line(to: CGPoint(x: x, y: gridRect.maxY))
+        stroke(path, lineColor, width: max(0.5, side * 0.0011))
+    }
+    for row in 0...rows {
+        let y = gridRect.minY + CGFloat(row) * cellH
+        let path = NSBezierPath()
+        path.move(to: CGPoint(x: gridRect.minX, y: y))
+        path.line(to: CGPoint(x: gridRect.maxX, y: y))
+        stroke(path, lineColor, width: max(0.5, side * 0.0011))
     }
 
-    let pageInset = side * 0.24
-    let page = NSBezierPath(
-        roundedRect: NSRect(
-            x: pageInset,
-            y: pageInset - side * 0.03,
-            width: side - pageInset * 2,
-            height: side - pageInset * 2
-        ),
-        xRadius: side * 0.05,
-        yRadius: side * 0.05
+    let todayCenter = CGPoint(x: gridRect.minX + cellW * 4.50, y: gridRect.minY + cellH * 1.98)
+    let todaySize = side * 0.172
+    let todayRect = NSRect(
+        x: todayCenter.x - todaySize / 2,
+        y: todayCenter.y - todaySize / 2,
+        width: todaySize,
+        height: todaySize
     )
-    NSColor(calibratedWhite: 1, alpha: 0.86).setFill()
-    page.fill()
-    NSColor(calibratedWhite: 0.98, alpha: 0.5).setStroke()
-    page.lineWidth = 0.6
-    page.stroke()
+    NSGraphicsContext.saveGraphicsState()
+    drawShadow(color: Palette.calendarRed.withAlphaComponent(0.40), blur: side * 0.025)
+    fill(oval(todayRect), Palette.calendarRed)
+    NSGraphicsContext.restoreGraphicsState()
+    drawText("26", in: todayRect, size: side * 0.076, weight: .black, color: NSColor.white)
 
-    let markerColor = NSColor(calibratedRed: 0.18, green: 0.24, blue: 0.48, alpha: 0.86)
-    markerColor.set()
+    let eventHeight = side * 0.046
+    let event1 = roundedRect(NSRect(
+        x: gridRect.minX + cellW * 3.18,
+        y: gridRect.minY + cellH * 0.08,
+        width: cellW * 2.20,
+        height: eventHeight
+    ), radius: eventHeight * 0.50)
+    let event2 = roundedRect(NSRect(
+        x: gridRect.minX + cellW * 3.18,
+        y: gridRect.minY - cellH * 0.34,
+        width: cellW * 1.72,
+        height: eventHeight
+    ), radius: eventHeight * 0.50)
+    fill(event1, Palette.eventBlue.withAlphaComponent(0.92))
+    fill(event2, Palette.eventViolet.withAlphaComponent(0.90))
 
-    let dotSize = side * 0.05
-    let startY = side * 0.66
-    let lineStart = side * 0.31
-    for idx in 0..<4 {
-        let y = startY + CGFloat(idx) * side * 0.08 * -1
-        let lineLength = side * (0.28 + CGFloat(idx) * 0.03)
-        let lineRect = NSRect(x: lineStart, y: y, width: lineLength, height: dotSize * 0.9)
-        let line = NSBezierPath(roundedRect: lineRect, xRadius: dotSize * 0.45, yRadius: dotSize * 0.45)
-        line.fill()
+    let widgetRect = NSRect(x: side * 0.405, y: side * 0.095, width: side * 0.440, height: side * 0.255)
+    let widgetPath = roundedRect(widgetRect, radius: side * 0.067)
+    NSGraphicsContext.saveGraphicsState()
+    drawShadow(color: NSColor.black.withAlphaComponent(0.38), blur: side * 0.030, y: -side * 0.010)
+    NSGradient(colors: [
+        NSColor(calibratedRed: 0.095, green: 0.120, blue: 0.180, alpha: 0.97),
+        NSColor(calibratedRed: 0.040, green: 0.055, blue: 0.082, alpha: 0.97)
+    ])?.draw(in: widgetPath, angle: 92)
+    NSGraphicsContext.restoreGraphicsState()
+    stroke(widgetPath, NSColor.white.withAlphaComponent(0.18), width: max(0.7, side * 0.0017))
 
-        let dot = NSBezierPath(ovalIn: NSRect(
-            x: lineStart + lineLength + side * 0.04,
-            y: y - side * 0.005,
-            width: dotSize,
-            height: dotSize
-        ))
-        dot.fill()
-    }
+    let widgetAccent = roundedRect(NSRect(
+        x: widgetRect.minX + side * 0.045,
+        y: widgetRect.minY + side * 0.066,
+        width: side * 0.018,
+        height: side * 0.132
+    ), radius: side * 0.009)
+    fill(widgetAccent, Palette.calendarRed)
 
-    let dateWidth = side * 0.46
-    let dateHeight = side * 0.25
-    let dateY = side * 0.12
-    let dateX = side - contentInset - dateWidth
-    let dateBlock = NSBezierPath(
-        roundedRect: NSRect(x: dateX, y: dateY, width: dateWidth, height: dateHeight),
-        xRadius: side * 0.08,
-        yRadius: side * 0.08
-    )
-    let dateGradient = NSGradient(
-        starting: NSColor(calibratedRed: 0.18, green: 0.28, blue: 0.68, alpha: 0.95),
-        ending: NSColor(calibratedRed: 0.05, green: 0.12, blue: 0.30, alpha: 0.95)
-    ) ?? NSGradient(starting: NSColor(calibratedRed: 0.2, green: 0.25, blue: 0.6, alpha: 0.95), ending: NSColor(calibratedRed: 0.05, green: 0.1, blue: 0.25, alpha: 0.95))
-    if let dateGradient {
-        dateGradient.draw(in: dateBlock, angle: 45)
-    } else {
-        NSColor(calibratedRed: 0.17, green: 0.24, blue: 0.45, alpha: 0.95).setFill()
-        dateBlock.fill()
-    }
-    NSColor(calibratedWhite: 1, alpha: 0.35).setStroke()
-    dateBlock.lineWidth = 0.7
-    dateBlock.fill()
-    dateBlock.stroke()
+    let textLine1 = roundedRect(NSRect(
+        x: widgetRect.minX + side * 0.082,
+        y: widgetRect.minY + side * 0.156,
+        width: widgetRect.width * 0.55,
+        height: side * 0.026
+    ), radius: side * 0.013)
+    let textLine2 = roundedRect(NSRect(
+        x: widgetRect.minX + side * 0.082,
+        y: widgetRect.minY + side * 0.103,
+        width: widgetRect.width * 0.70,
+        height: side * 0.022
+    ), radius: side * 0.011)
+    fill(textLine1, NSColor.white.withAlphaComponent(0.84))
+    fill(textLine2, NSColor.white.withAlphaComponent(0.34))
 
-    NSColor.white.set()
-    let star = NSBezierPath()
-    let cx = dateX + dateWidth * 0.77
-    let cy = dateY + dateHeight * 0.5
-    let rOuter = side * 0.028
-    let rInner = rOuter * 0.46
-    for i in 0..<10 {
-        let angle = (Double(i) * .pi) / 5.0 - .pi / 2.0
-        let r = i % 2 == 0 ? rOuter : rInner
-        let x = cx + CGFloat(cos(angle)) * r
-        let y = cy + CGFloat(sin(angle)) * r
+    let sparkleCenter = CGPoint(x: widgetRect.maxX - side * 0.083, y: widgetRect.minY + side * 0.128)
+    let sparkle = NSBezierPath()
+    let outer = side * 0.040
+    let inner = outer * 0.42
+    for i in 0..<8 {
+        let angle = CGFloat(i) * .pi / 4 - .pi / 2
+        let r = i % 2 == 0 ? outer : inner
+        let point = CGPoint(x: sparkleCenter.x + cos(angle) * r, y: sparkleCenter.y + sin(angle) * r)
         if i == 0 {
-            star.move(to: CGPoint(x: x, y: y))
+            sparkle.move(to: point)
         } else {
-            star.line(to: CGPoint(x: x, y: y))
+            sparkle.line(to: point)
         }
     }
-    star.close()
-    star.fill()
+    sparkle.close()
+    fill(sparkle, NSColor.white.withAlphaComponent(0.95))
 
-    // Clock ring detail for extra polish
-    NSColor(calibratedWhite: 1, alpha: 0.9).setStroke()
-    let timeCenter = CGPoint(x: contentInset + side * 0.31, y: side - contentInset - side * 0.25)
-    let clockBase = NSBezierPath(ovalIn: NSRect(
-        x: timeCenter.x - side * 0.055,
-        y: timeCenter.y - side * 0.055,
-        width: side * 0.11,
-        height: side * 0.11
-    ))
-    NSColor(calibratedRed: 0.98, green: 0.98, blue: 1.0, alpha: 0.95).setFill()
-    clockBase.fill()
-    clockBase.lineWidth = side * 0.004
-    clockBase.stroke()
-
-    NSColor(calibratedRed: 0.2, green: 0.25, blue: 0.55, alpha: 0.9).setStroke()
-    let hand = NSBezierPath()
-    hand.move(to: timeCenter)
-    hand.line(to: CGPoint(x: timeCenter.x - side * 0.02, y: timeCenter.y + side * 0.02))
-    hand.lineWidth = side * 0.01
-    hand.stroke()
-
-    let hand2 = NSBezierPath()
-    hand2.move(to: timeCenter)
-    hand2.line(to: CGPoint(x: timeCenter.x + side * 0.03, y: timeCenter.y + side * 0.01))
-    hand2.lineWidth = side * 0.006
-    hand2.stroke()
-
-    return bitmap.representation(using: .png, properties: [:]) ?? Data()
+    guard let png = bitmap.representation(using: .png, properties: [:]), png.isEmpty == false else {
+        throw IconRenderError.cannotEncodePNG(pixelSize)
+    }
+    return png
 }
 
-func savePNG(_ data: Data, to url: URL) throws {
+private func savePNG(_ data: Data, to url: URL) throws {
     if data.isEmpty {
         throw IconRenderError.cannotEncodePNG(0)
     }
     try data.write(to: url, options: [.atomic])
 }
 
-func generateIconSet(at iconsetURL: URL) throws {
+private func generateIconSet(at iconsetURL: URL) throws {
     try? FileManager.default.removeItem(at: iconsetURL)
     try FileManager.default.createDirectory(at: iconsetURL, withIntermediateDirectories: true)
 
@@ -257,16 +289,16 @@ func generateIconSet(at iconsetURL: URL) throws {
         ("icon_256x256@2x.png", 512),
         ("icon_512x512.png", 512),
         ("icon_512x512@2x.png", 1024),
-        ("icon_1024x1024.png", 1024),
+        ("icon_1024x1024.png", 1024)
     ]
 
     for (name, side) in specs {
-        let imageData = makeCanvas(side: side)
+        let imageData = try makeCanvas(side: side)
         try savePNG(imageData, to: iconsetURL.appendingPathComponent(name))
     }
 }
 
-func writeIcns(from iconsetURL: URL, to outputURL: URL) throws {
+private func writeIcns(from iconsetURL: URL, to outputURL: URL) throws {
     let entries: [(String, String)] = [
         ("ic11", "icon_16x16@2x.png"),
         ("ic12", "icon_32x32@2x.png"),
@@ -275,7 +307,7 @@ func writeIcns(from iconsetURL: URL, to outputURL: URL) throws {
         ("ic08", "icon_256x256.png"),
         ("ic14", "icon_256x256@2x.png"),
         ("ic09", "icon_512x512.png"),
-        ("ic10", "icon_512x512@2x.png"),
+        ("ic10", "icon_512x512@2x.png")
     ]
 
     var payload = Data()
