@@ -16,7 +16,9 @@
     "package:macos:local": "node scripts/package-macos-local.mjs",
     "package:macos:personal": "node scripts/package-macos-personal.mjs",
     "package:macos:release": "node scripts/package-macos-release.mjs",
-    "package:macos:distribution": "node scripts/package-macos-distribution.mjs"
+    "package:macos:distribution": "node scripts/package-macos-distribution.mjs",
+    "package:macos:native": "macos-native/scripts/package-personal.sh",
+    "package:macos:native:dmg": "macos-native/scripts/package-personal-dmg.sh"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.3.0",

@@ -12,6 +12,7 @@ lerna-debug.log*
 node_modules/
 dist/
 build/
+**/.build/
 target/
 test-results/
 playwright-report/

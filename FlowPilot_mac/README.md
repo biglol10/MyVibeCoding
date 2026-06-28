@@ -1,22 +1,24 @@
 # FlowPilot_mac
 
-FlowPilot은 Tauri 기반 활동 추적, 생산성 분류, 리포트 앱입니다. 데스크톱 앱이 로컬에서 활동 데이터를 수집하고, 브라우저 확장은 탭 제목/URL 신호를 보조로 전달합니다.
+FlowPilot은 활동 추적, 생산성 분류, 리포트 앱입니다. macOS는 SwiftUI 네이티브 앱으로 전환 중이며, 기존 Tauri/React/Rust 앱과 Windows 빌드는 유지합니다. 데스크톱 앱이 로컬에서 활동 데이터를 수집하고, 브라우저 확장은 탭 제목/URL 신호를 보조로 전달합니다.
 
 ## 다운로드
 
-- macOS 개인 설치 zip (권장): [FlowPilot_personal_mac_arm64.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_personal_mac_arm64.zip)
-- macOS DMG: [FlowPilot_0.1.0_aarch64.dmg](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_0.1.0_aarch64.dmg)
+- macOS Swift Native 개인 설치 zip (권장): [FlowPilot_native_mac_arm64.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.zip)
+- macOS Swift Native DMG: [FlowPilot_native_mac_arm64.dmg](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.dmg)
+- macOS Tauri 개인 설치 zip: [FlowPilot_personal_mac_arm64.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_personal_mac_arm64.zip)
+- macOS Tauri DMG: [FlowPilot_0.1.0_aarch64.dmg](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_0.1.0_aarch64.dmg)
 - Windows setup: [FlowPilot_0.1.0_x64-setup.exe](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_0.1.0_x64-setup.exe)
 - Windows portable: [FlowPilot-0.1.0-portable.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot-0.1.0-portable.zip)
 
-현재 개인 설치 zip은 Apple Developer ID 서명과 공증이 없는 빌드입니다. GitHub에서 다운로드한 `FlowPilot.app`을 바로 실행하면 macOS Gatekeeper가 "손상되었으므로 휴지통으로 이동" 경고를 표시할 수 있습니다. 개인 Mac에서는 zip에 포함된 `install-flowpilot-personal.command`로 설치하세요.
+현재 개인 설치 zip은 Apple Developer ID 서명과 공증이 없는 빌드입니다. GitHub에서 다운로드한 `FlowPilot.app`을 바로 실행하면 macOS Gatekeeper가 "손상되었으므로 휴지통으로 이동" 경고를 표시할 수 있습니다. 개인 Mac에서는 zip에 포함된 `install-flowpilot-native.command` 또는 `install-flowpilot-personal.command`로 설치하세요.
 
 ### macOS 처음 실행 방법
 
-방법 1: 개인 설치 zip 사용 (권장)
+방법 1: Swift Native 개인 설치 zip 사용 (권장)
 
-1. `FlowPilot_personal_mac_arm64.zip` 압축을 풉니다.
-2. `install-flowpilot-personal.command`를 Finder에서 우클릭합니다.
+1. `FlowPilot_native_mac_arm64.zip` 압축을 풉니다.
+2. `install-flowpilot-native.command`를 Finder에서 우클릭합니다.
 3. `열기`를 선택합니다. 일반 더블클릭이 막히면 우클릭 `열기`를 사용해야 합니다.
 4. 설치 스크립트가 `/Applications/FlowPilot.app`을 교체하고 격리 속성을 제거한 뒤 실행합니다.
 5. 다음부터는 Applications에서 `FlowPilot`을 바로 실행합니다.
@@ -40,8 +42,8 @@ open ~/Downloads/FlowPilot_personal_mac_arm64/App/FlowPilot.app
 ```bash
 git clone https://github.com/biglol10/MyVibeCoding.git
 cd MyVibeCoding/FlowPilot_mac
-npm ci
-npm run tauri -- dev
+cd macos-native
+swift run FlowPilotNative
 ```
 
 ## 개발 환경
@@ -50,9 +52,18 @@ npm run tauri -- dev
 - npm
 - Rust stable toolchain
 - Tauri CLI
-- macOS 앱 빌드 시 Xcode Command Line Tools
+- macOS Swift 앱 빌드 시 Xcode Command Line Tools 또는 Xcode
 
 ## 실행
+
+SwiftUI 네이티브 macOS 앱:
+
+```bash
+cd macos-native
+swift run FlowPilotNative
+```
+
+기존 Tauri 앱:
 
 ```bash
 npm ci
@@ -63,6 +74,8 @@ npm run tauri -- dev
 
 ```bash
 npm test
+cd macos-native
+swift test
 ```
 
 브라우저 확장:
@@ -85,6 +98,15 @@ Tauri 앱 빌드:
 
 ```bash
 npm run tauri -- build
+```
+
+Swift Native 개인 설치 zip/DMG 다시 만들기:
+
+```bash
+npm run package:macos:native
+npm run package:macos:native:dmg
+cp release/FlowPilot_native_mac_arm64.zip ../downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.zip
+cp release/FlowPilot_native_mac_arm64.dmg ../downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.dmg
 ```
 
 macOS 개인 설치 zip 다시 만들기:
@@ -116,6 +138,7 @@ npm run package:macos:distribution
 
 - `src`: React UI
 - `src-tauri`: Tauri/Rust 데스크톱 앱
+- `macos-native`: SwiftUI 네이티브 macOS 앱
 - `browser-extension`: Chrome 확장
 - `scripts`: 배포 패키징 스크립트
 - `docs`: 설계 문서와 작업 계획

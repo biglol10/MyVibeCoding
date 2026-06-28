@@ -99,6 +99,25 @@ chmod +x install-flowpilot-personal.command
 
 이 개인용 ZIP은 본인 Mac 사이에서만 사용합니다. 공개 다운로드 링크나 불특정 사용자 배포에는 Developer ID 서명과 공증된 DMG를 사용합니다.
 
+## Swift Native Personal Package
+
+SwiftUI 네이티브 macOS 앱은 별도 Swift Package로 빌드합니다. 개인 Mac 간 설치용 ZIP과 DMG를 만들 수 있습니다.
+
+```bash
+npm run package:macos:native
+npm run package:macos:native:dmg
+```
+
+성공 산출물:
+
+```text
+release/FlowPilot_native_mac_arm64.zip
+release/FlowPilot_native_mac_arm64.dmg
+```
+
+ZIP 또는 DMG 안의 `install-flowpilot-native.command`를 실행하면 기존 `/Applications/FlowPilot.app`을 삭제하고 Swift 네이티브 앱으로 교체합니다.
+DMG에는 `FlowPilot.app`과 `Applications` 바로가기도 포함되어 있지만, 권한 대상이 명확하도록 설치 스크립트 사용을 권장합니다.
+
 macOS 권한은 설치 스크립트나 Terminal에 주는 것이 아닙니다. 설치 스크립트는 `/Applications/FlowPilot.app`을 설치한 뒤
 `open /Applications/FlowPilot.app`으로 앱 번들을 실행합니다. Accessibility 또는 Screen Recording 권한을 줄 때는 시스템 설정에서
 `FlowPilot` 또는 `/Applications/FlowPilot.app`을 선택하세요. `Contents/MacOS/flowpilot` 실행 파일을 직접 실행하면 권한 대상이

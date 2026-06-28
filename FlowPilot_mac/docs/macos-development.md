@@ -54,7 +54,10 @@ and restart FlowPilot. A Developer ID signed and notarized build is still requir
 
 Chrome and Edge use the existing `browser-extension` package. The extension reports active tab domains to `http://127.0.0.1:17321/browser-event`.
 
-Safari domain tracking requires a Safari Web Extension packaged through Xcode. The future Safari extension should send the same payload shape as the Chromium bridge:
+The SwiftUI native macOS app reads the active Safari tab URL/title through macOS Automation when Safari is frontmost,
+then stores the canonical domain. If macOS prompts for Automation permission, allow FlowPilot to control Safari.
+
+A future Safari Web Extension can still use the same payload shape as the Chromium bridge:
 
 ```json
 {
@@ -64,7 +67,7 @@ Safari domain tracking requires a Safari Web Extension packaged through Xcode. T
 }
 ```
 
-Until that package exists, Safari sessions are classified by app name and window title.
+The app falls back to Safari app/window tracking when Automation permission is denied or the active tab URL is unavailable.
 
 ## Unsigned Local Packaging
 
@@ -89,6 +92,25 @@ codesign -dr - src-tauri/target/release/bundle/macos/FlowPilot.app
 ```
 
 The script pins `LANG` and `LC_ALL` to `en_US.UTF-8`. This avoids a macOS `bundle_dmg.sh` failure where the generated DMG script invokes `perl` while the shell is configured with the Linux-style `C.UTF-8` locale.
+
+## SwiftUI Native Packaging
+
+The SwiftUI native macOS app lives under `macos-native/`. Build personal ZIP and DMG packages with:
+
+```bash
+npm run package:macos:native
+npm run package:macos:native:dmg
+```
+
+Expected outputs:
+
+```text
+release/FlowPilot_native_mac_arm64.zip
+release/FlowPilot_native_mac_arm64.dmg
+```
+
+These packages are ad-hoc signed and intended for personal Mac-to-Mac testing. Use `install-flowpilot-native.command`
+from the ZIP or DMG to replace `/Applications/FlowPilot.app` and remove quarantine.
 
 ## Developer ID Signing and Notarization
 
