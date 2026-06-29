@@ -470,13 +470,16 @@ final class FileTableViewReuseTests: XCTestCase {
         )
 
         let regularColumns = fileTable.columnDefinitions
+        let nameColumn = try XCTUnwrap(regularColumns.first { $0.key == "name" })
         let dateColumn = try XCTUnwrap(regularColumns.first { $0.key == "modified" })
         let kindColumn = try XCTUnwrap(regularColumns.first { $0.key == "kind" })
 
+        XCTAssertGreaterThanOrEqual(nameColumn.width, 220)
+        XCTAssertGreaterThanOrEqual(nameColumn.minWidth, 180)
         XCTAssertGreaterThanOrEqual(dateColumn.minWidth, 132)
         XCTAssertGreaterThanOrEqual(kindColumn.minWidth, 90)
-        XCTAssertLessThanOrEqual(regularColumns.reduce(0) { $0 + $1.minWidth }, 480)
-        XCTAssertLessThanOrEqual(regularColumns.reduce(0) { $0 + $1.width }, 480)
+        XCTAssertLessThanOrEqual(regularColumns.reduce(0) { $0 + $1.minWidth }, 560)
+        XCTAssertLessThanOrEqual(regularColumns.reduce(0) { $0 + $1.width }, 600)
     }
 
     func testTableColumnsApplyReadableMinimumWidths() throws {

@@ -86,7 +86,7 @@ struct FileTableView: NSViewRepresentable {
 
     var columnDefinitions: [FileTableColumnDefinition] {
         var columns = [
-            FileTableColumnDefinition(key: "name", title: "Name", width: 118, minWidth: 118),
+            FileTableColumnDefinition(key: "name", title: "Name", width: 220, minWidth: 180),
             FileTableColumnDefinition(key: "size", title: "Size", width: 50, minWidth: 50),
             FileTableColumnDefinition(key: "modified", title: "Date Modified", width: 132, minWidth: 132),
             FileTableColumnDefinition(key: "kind", title: "Kind", width: 90, minWidth: 90),
