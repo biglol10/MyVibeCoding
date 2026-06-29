@@ -27,7 +27,10 @@ enum FilePreviewContentLoader {
         byteLimit: Int = defaultByteLimit,
         fileReader: @escaping FileReader = readPreviewData
     ) async -> FilePreviewContent {
-        await Task.detached(priority: .utility) {
+        let readTask = Task.detached(priority: .utility) {
+            guard !Task.isCancelled else {
+                return FilePreviewContent.visual
+            }
             guard shouldAttemptTextPreview(for: entry) else {
                 return .visual
             }
@@ -35,6 +38,9 @@ enum FilePreviewContentLoader {
             do {
                 let readLimit = max(byteLimit, 0)
                 let result = try fileReader(entry.url.standardizedFileURL, readLimit)
+                guard !Task.isCancelled else {
+                    return .visual
+                }
                 guard !result.data.contains(0) else {
                     return .unsupported(message: "Binary file preview is not available.")
                 }
@@ -56,7 +62,13 @@ enum FilePreviewContentLoader {
             } catch {
                 return .unsupported(message: "Cannot read text preview.")
             }
-        }.value
+        }
+
+        return await withTaskCancellationHandler {
+            await readTask.value
+        } onCancel: {
+            readTask.cancel()
+        }
     }
 
     private static func readPreviewData(for url: URL, readLimit: Int) throws -> FilePreviewReadResult {

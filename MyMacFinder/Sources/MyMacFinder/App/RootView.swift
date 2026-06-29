@@ -324,6 +324,7 @@ private struct ExplorerShortcutMonitor: NSViewRepresentable {
                     let command = ExplorerShortcutRouting.command(
                         for: shortcut,
                         isToolbarTextInputFocused: isToolbarTextInputFocused,
+                        isTextEditingResponderFocused: Self.isTextEditingResponderFocused(in: event.window),
                         isCommandEnabled: isCommandEnabled
                     )
                 else {
@@ -366,6 +367,13 @@ private struct ExplorerShortcutMonitor: NSViewRepresentable {
                 return nil
             }
             return ExplorerShortcut(key: key, modifiers: modifiers)
+        }
+
+        private static func isTextEditingResponderFocused(in window: NSWindow?) -> Bool {
+            guard let responder = window?.firstResponder else {
+                return false
+            }
+            return responder is NSTextView || responder is NSTextField
         }
     }
 }

@@ -49,7 +49,12 @@ public struct ZipCompressionService: ZipCompressing, @unchecked Sendable {
             return FileOperationResult(skippedURLs: sourceURLs)
         }
 
-        try await createArchive(from: sourceURLs, to: archiveURL, progress: progress)
+        do {
+            try await createArchive(from: sourceURLs, to: archiveURL, progress: progress)
+        } catch {
+            rollbackReplacement(resolution.replacedItem, partialDestination: archiveURL)
+            throw error
+        }
         return FileOperationResult(
             createdURLs: [archiveURL],
             replacedItems: resolution.replacedItem.map { [$0] } ?? []
@@ -205,6 +210,24 @@ public struct ZipCompressionService: ZipCompressing, @unchecked Sendable {
             throw ExplorerError.readFailed("Item could not be moved to Trash: \(url.path)")
         }
         return FileTrashRecord(original: url, trashed: result as URL)
+    }
+
+    private func rollbackReplacement(_ record: FileTrashRecord?, partialDestination: URL) {
+        guard let record else {
+            return
+        }
+        if fileManager.fileExists(atPath: partialDestination.path) {
+            try? fileManager.removeItem(at: partialDestination)
+        }
+        guard !fileManager.fileExists(atPath: record.original.path),
+              fileManager.fileExists(atPath: record.trashed.path) else {
+            return
+        }
+        try? fileManager.createDirectory(
+            at: record.original.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? fileManager.moveItem(at: record.trashed, to: record.original)
     }
 
     private func uniqueArchiveURL(for url: URL) -> URL {

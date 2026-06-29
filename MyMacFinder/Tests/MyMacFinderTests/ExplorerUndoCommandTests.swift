@@ -64,4 +64,35 @@ final class ExplorerUndoCommandTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: destFolder.appendingPathComponent("move.txt").path))
     }
+
+    @MainActor
+    func testUndoCopyReplaceRemovesCopiedItemBeforeRestoringReplacedDestination() async throws {
+        let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
+        let destFolder = tempDirectory.appendingPathComponent("dest", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceFolder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destFolder, withIntermediateDirectories: true)
+        let sourceFile = sourceFolder.appendingPathComponent("note.txt")
+        let destinationFile = destFolder.appendingPathComponent("note.txt")
+        try "new".write(to: sourceFile, atomically: true, encoding: .utf8)
+        try "old".write(to: destinationFile, atomically: true, encoding: .utf8)
+        let store = ExplorerStore(
+            initialURL: sourceFolder,
+            fileOperationService: FileOperationService(
+                conflictResolver: DefaultFileConflictResolver(decision: .replace)
+            ),
+            directoryWatcher: nil
+        )
+        await store.refresh()
+        store.updateSelection([sourceFile.standardizedFileURL])
+
+        await store.perform(.copy)
+        await store.navigate(to: destFolder)
+        await store.perform(.paste)
+        XCTAssertEqual(try String(contentsOf: destinationFile, encoding: .utf8), "new")
+
+        await store.perform(.undo)
+
+        XCTAssertEqual(try String(contentsOf: sourceFile, encoding: .utf8), "new")
+        XCTAssertEqual(try String(contentsOf: destinationFile, encoding: .utf8), "old")
+    }
 }

@@ -42,7 +42,12 @@ public struct FileOperationService: @unchecked Sendable {
         guard let resolvedDestination = resolution.url else {
             return FileOperationResult(skippedURLs: [url])
         }
-        try fileManager.moveItem(at: url, to: resolvedDestination)
+        do {
+            try fileManager.moveItem(at: url, to: resolvedDestination)
+        } catch {
+            rollbackReplacement(resolution.replacedItem, partialDestination: resolvedDestination)
+            throw error
+        }
         return FileOperationResult(
             renamedItem: FileMoveRecord(source: url, destination: resolvedDestination),
             replacedItems: resolution.replacedItem.map { [$0] } ?? []
@@ -75,6 +80,8 @@ public struct FileOperationService: @unchecked Sendable {
         to destinationFolder: URL,
         progress: FileOperationProgressReporter? = nil
     ) async throws -> FileOperationResult {
+        try validateSourcesExist(urls)
+
         var createdURLs: [URL] = []
         var replacedItems: [FileTrashRecord] = []
         var skippedURLs: [URL] = []
@@ -104,7 +111,12 @@ public struct FileOperationService: @unchecked Sendable {
                 skippedURLs.append(source)
                 continue
             }
-            try fileManager.copyItem(at: source, to: destination)
+            do {
+                try fileManager.copyItem(at: source, to: destination)
+            } catch {
+                rollbackReplacement(resolution.replacedItem, partialDestination: destination)
+                throw error
+            }
             createdURLs.append(destination)
             if let replacedItem = resolution.replacedItem {
                 replacedItems.append(replacedItem)
@@ -130,6 +142,8 @@ public struct FileOperationService: @unchecked Sendable {
         to destinationFolder: URL,
         progress: FileOperationProgressReporter? = nil
     ) async throws -> FileOperationResult {
+        try validateSourcesExist(urls)
+
         let normalizedDestinationFolder = destinationFolder.standardizedFileURL.resolvingSymlinksInPath()
         var movedItems: [FileMoveRecord] = []
         var replacedItems: [FileTrashRecord] = []
@@ -169,7 +183,12 @@ public struct FileOperationService: @unchecked Sendable {
                 skippedURLs.append(source)
                 continue
             }
-            try fileManager.moveItem(at: source, to: destination)
+            do {
+                try fileManager.moveItem(at: source, to: destination)
+            } catch {
+                rollbackReplacement(resolution.replacedItem, partialDestination: destination)
+                throw error
+            }
             movedItems.append(FileMoveRecord(source: source, destination: destination))
             if let replacedItem = resolution.replacedItem {
                 replacedItems.append(replacedItem)
@@ -194,6 +213,8 @@ public struct FileOperationService: @unchecked Sendable {
         _ urls: [URL],
         progress: FileOperationProgressReporter? = nil
     ) async throws -> FileOperationResult {
+        try validateSourcesExist(urls)
+
         var trashedItems: [FileTrashRecord] = []
         for (index, url) in urls.enumerated() {
             try await progress?.checkCancellation()
@@ -265,6 +286,24 @@ public struct FileOperationService: @unchecked Sendable {
         return FileTrashRecord(original: url, trashed: result as URL)
     }
 
+    private func rollbackReplacement(_ record: FileTrashRecord?, partialDestination: URL) {
+        guard let record else {
+            return
+        }
+        if fileManager.fileExists(atPath: partialDestination.path) {
+            try? fileManager.removeItem(at: partialDestination)
+        }
+        guard !fileManager.fileExists(atPath: record.original.path),
+              fileManager.fileExists(atPath: record.trashed.path) else {
+            return
+        }
+        try? fileManager.createDirectory(
+            at: record.original.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? fileManager.moveItem(at: record.trashed, to: record.original)
+    }
+
     private func copyName(for url: URL) -> URL {
         let parent = url.deletingLastPathComponent()
         let ext = url.pathExtension.isEmpty ? nil : url.pathExtension
@@ -288,6 +327,14 @@ public struct FileOperationService: @unchecked Sendable {
             index += 1
         }
         return current
+    }
+
+    private func validateSourcesExist(_ urls: [URL]) throws {
+        for url in urls.map(\.standardizedFileURL) {
+            guard fileManager.fileExists(atPath: url.path) else {
+                throw ExplorerError.pathDoesNotExist(url.path)
+            }
+        }
     }
 
     private func isDescendant(_ possibleChild: URL, of possibleParent: URL) -> Bool {

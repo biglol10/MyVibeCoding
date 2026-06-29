@@ -96,6 +96,7 @@ public final class ExplorerStore: ObservableObject {
     private var searchTask: Task<Void, Never>?
     private var activeOperationReporter: FileOperationProgressReporter?
     private var activeFolderAccesses: [FolderAccessGrantID: ResolvedFolderAccess]
+    private var unavailableFolderGrantIDs: Set<FolderAccessGrantID>
     private var sidebarState: SidebarState
     private static let maxRecentFolders = 5
 
@@ -177,7 +178,7 @@ public final class ExplorerStore: ObservableObject {
         self.recentFolders = sidebarState.recentFolders
         self.activeOperationProgress = nil
         self.isToolbarTextInputFocused = false
-        self.grantedFolderSummaries = bookmarkStore.load().map { FolderAccessGrantSummary(grant: $0) }
+        self.grantedFolderSummaries = []
         self.pendingPermissionRecoveryPath = nil
         self.sandboxPolicy = sandboxPolicy
         self.fileSystemService = fileSystemService
@@ -211,8 +212,10 @@ public final class ExplorerStore: ObservableObject {
         self.searchTask = nil
         self.activeOperationReporter = nil
         self.activeFolderAccesses = [:]
+        self.unavailableFolderGrantIDs = []
         self.sidebarState = sidebarState
 
+        loadPersistedFolderGrants()
         if sidebarState != loadedSidebarState {
             persistSidebarState()
         }
@@ -548,6 +551,26 @@ public final class ExplorerStore: ObservableObject {
         await navigate(to: targetURL)
     }
 
+    public func navigateToMountedVolume(_ volume: MountedVolume) async {
+        requestToolbarFocusClear()
+        let url = volume.url.standardizedFileURL
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            mountedVolumes.removeAll { $0.url.standardizedFileURL == url }
+            volumeError = .pathDoesNotExist(url.path)
+            return
+        }
+        guard volume.isReadable, FileManager.default.isReadableFile(atPath: url.path) else {
+            volumeError = .permissionDenied(url.path)
+            return
+        }
+
+        await navigate(to: url)
+        if activePane.currentURL == url {
+            volumeError = nil
+        }
+    }
+
     public func navigateToRecentFolder(_ folder: SidebarRecentFolder) async {
         requestToolbarFocusClear()
         let url = folder.url.standardizedFileURL
@@ -809,11 +832,22 @@ public final class ExplorerStore: ObservableObject {
 
     public func setDefaultSort(_ descriptor: EntrySortDescriptor) {
         defaultSort = descriptor
+        applySort(descriptor, to: &panes)
+        for index in tabs.indices {
+            if index == activeTabIndex {
+                tabs[index].panes = panes
+            } else {
+                applySort(descriptor, to: &tabs[index].panes)
+            }
+        }
+        persistSettings()
+    }
+
+    private func applySort(_ descriptor: EntrySortDescriptor, to panes: inout [PaneState]) {
         for index in panes.indices {
             panes[index].sort = descriptor
             panes[index].entries = SortEngine.sorted(panes[index].entries, descriptor: descriptor)
         }
-        persistSettings()
     }
 
     public func sortActivePane(by key: SortKey) {
@@ -1114,8 +1148,10 @@ public final class ExplorerStore: ObservableObject {
                 return
             }
 
+            stopSupersededFolderAccesses(for: grant)
             try bookmarkStore.save(grant)
             activeFolderAccesses[grant.id] = access
+            unavailableFolderGrantIDs.remove(grant.id)
             refreshGrantedFolderSummaries()
             await retryPermissionRecoveryIfSafe(path: retryingPermissionPath)
         } catch let error as ExplorerError {
@@ -1158,7 +1194,79 @@ public final class ExplorerStore: ObservableObject {
     }
 
     private func refreshGrantedFolderSummaries() {
-        grantedFolderSummaries = bookmarkStore.load().map { FolderAccessGrantSummary(grant: $0) }
+        grantedFolderSummaries = bookmarkStore.load().map { grant in
+            if let access = activeFolderAccesses[grant.id] {
+                return FolderAccessGrantSummary(
+                    grant: grant,
+                    availability: .available,
+                    isStale: access.isStale
+                )
+            }
+            if unavailableFolderGrantIDs.contains(grant.id) {
+                return FolderAccessGrantSummary(
+                    grant: grant,
+                    availability: .unavailable
+                )
+            }
+            return FolderAccessGrantSummary(grant: grant)
+        }
+    }
+
+    private func loadPersistedFolderGrants() {
+        let grants = bookmarkStore.load()
+        guard sandboxPolicy.isSandboxed else {
+            grantedFolderSummaries = grants.map { FolderAccessGrantSummary(grant: $0) }
+            return
+        }
+
+        grantedFolderSummaries = grants.map { grant in
+            do {
+                let access = try folderAccessService.resolve(grant)
+                activeFolderAccesses[grant.id] = access
+                unavailableFolderGrantIDs.remove(grant.id)
+
+                var resolvedGrant = grant
+                resolvedGrant.url = access.url
+                resolvedGrant.lastResolvedAt = Date()
+                try? bookmarkStore.save(resolvedGrant)
+
+                return FolderAccessGrantSummary(
+                    grant: resolvedGrant,
+                    availability: .available,
+                    isStale: access.isStale
+                )
+            } catch {
+                unavailableFolderGrantIDs.insert(grant.id)
+                return FolderAccessGrantSummary(
+                    grant: grant,
+                    availability: .unavailable
+                )
+            }
+        }
+    }
+
+    private func stopSupersededFolderAccesses(for grant: FolderAccessGrant) {
+        let standardizedURL = grant.url.standardizedFileURL
+        let supersededIDs = Set(
+            bookmarkStore.load()
+                .filter { existing in
+                    existing.id == grant.id || existing.url.standardizedFileURL == standardizedURL
+                }
+                .map(\.id)
+        )
+        let activeIDs = activeFolderAccesses.compactMap { id, access -> FolderAccessGrantID? in
+            if id == grant.id || supersededIDs.contains(id) || access.url.standardizedFileURL == standardizedURL {
+                return id
+            }
+            return nil
+        }
+
+        for id in activeIDs {
+            if let access = activeFolderAccesses.removeValue(forKey: id) {
+                folderAccessService.stopAccessing(access)
+            }
+            unavailableFolderGrantIDs.remove(id)
+        }
     }
 
     private func addFavorite(url: URL, title: String) {
@@ -1227,6 +1335,26 @@ public final class ExplorerStore: ObservableObject {
 
     private static func normalizedSidebarState(_ state: SidebarState) -> SidebarState {
         var normalized = state
+
+        var seenFavoriteURLs: Set<URL> = []
+        normalized.favorites = normalized.favorites.compactMap { favorite in
+            var favorite = favorite
+            favorite.url = favorite.url.standardizedFileURL
+            guard seenFavoriteURLs.insert(favorite.url).inserted else {
+                return nil
+            }
+            return favorite
+        }
+
+        var seenRecentURLs: Set<URL> = []
+        normalized.recentFolders = normalized.recentFolders.compactMap { folder in
+            let standardizedURL = folder.url.standardizedFileURL
+            guard seenRecentURLs.insert(standardizedURL).inserted else {
+                return nil
+            }
+            return SidebarRecentFolder(url: standardizedURL, title: folder.title)
+        }
+
         if normalized.recentFolders.count > maxRecentFolders {
             normalized.recentFolders = Array(normalized.recentFolders.prefix(maxRecentFolders))
         }
@@ -1739,6 +1867,7 @@ public final class ExplorerStore: ObservableObject {
         await refresh()
         updateFinderTags(tags, for: entry.url)
         updateSelection([entry.url.standardizedFileURL])
+        trimSelectionToVisibleEntries()
     }
 
     private func updateFinderTags(_ tags: [FinderTag], for url: URL) {
@@ -1828,7 +1957,7 @@ public final class ExplorerStore: ObservableObject {
     }
 
     private func startWatchingVisibleDirectories() {
-        let visibleDirectoryURLs = Set(panes.compactMap { $0.location.fileSystemURL?.standardizedFileURL })
+        let visibleDirectoryURLs = Set(panes.compactMap { watchedDirectoryURL(for: $0.location) })
         guard !visibleDirectoryURLs.isEmpty else {
             directoryWatcher?.stopWatching()
             watchedDirectoryURLs = []
@@ -1845,6 +1974,15 @@ public final class ExplorerStore: ObservableObject {
             Task { @MainActor [weak self] in
                 self?.scheduleExternalRefresh()
             }
+        }
+    }
+
+    private func watchedDirectoryURL(for location: PaneLocation) -> URL? {
+        switch location {
+        case .fileSystem(let url):
+            return url.standardizedFileURL
+        case .archive(let archiveLocation):
+            return archiveLocation.archiveURL.deletingLastPathComponent().standardizedFileURL
         }
     }
 
@@ -1888,7 +2026,7 @@ public final class ExplorerStore: ObservableObject {
 
     private func reloadWatchedPanes() async {
         let targets = panes.indices.compactMap { index -> (Int, PaneLocation)? in
-            guard let url = panes[index].location.fileSystemURL?.standardizedFileURL,
+            guard let url = watchedDirectoryURL(for: panes[index].location),
                   watchedDirectoryURLs.contains(url) else {
                 return nil
             }

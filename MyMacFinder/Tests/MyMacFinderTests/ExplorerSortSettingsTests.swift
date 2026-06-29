@@ -51,6 +51,23 @@ final class ExplorerSortSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testSettingDefaultSortUpdatesInactiveTabs() async throws {
+        try "small".write(to: tempDirectory.appendingPathComponent("a-small.txt"), atomically: true, encoding: .utf8)
+        try "large file".write(to: tempDirectory.appendingPathComponent("z-large.txt"), atomically: true, encoding: .utf8)
+        let store = ExplorerStore(initialURL: tempDirectory, settingsStore: settingsStore)
+        await store.loadInitialDirectory()
+        await store.newTab()
+
+        let descriptor = EntrySortDescriptor(key: .size, direction: .descending, folderFileOrdering: .mixed)
+        store.setDefaultSort(descriptor)
+
+        await store.selectTab(at: 0)
+
+        XCTAssertEqual(store.activePane.sort, descriptor)
+        XCTAssertEqual(store.activePane.entries.map(\.name), ["z-large.txt", "a-small.txt"])
+    }
+
+    @MainActor
     func testSortingActivePaneBySameColumnTogglesDirection() async throws {
         try "a".write(to: tempDirectory.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
         try "z".write(to: tempDirectory.appendingPathComponent("z.txt"), atomically: true, encoding: .utf8)

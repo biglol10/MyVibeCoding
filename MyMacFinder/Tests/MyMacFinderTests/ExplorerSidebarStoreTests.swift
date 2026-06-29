@@ -204,6 +204,27 @@ final class ExplorerSidebarStoreTests: XCTestCase {
         XCTAssertEqual(store.favoriteSidebarItems, [SidebarFavoriteItem(favorite: favorite, isMissing: true)])
     }
 
+    func testStoredFavoritesAreDeduplicatedByURLOnLoad() throws {
+        let root = try makeFixture()
+        let selected = root.appendingPathComponent("Selected", isDirectory: true)
+        let first = SidebarFavorite(title: "First", url: selected)
+        let duplicate = SidebarFavorite(title: "Duplicate", url: selected)
+        let second = SidebarFavorite(title: "Second", url: root)
+        let sidebarStore = InMemorySidebarFavoritesStore(
+            state: SidebarState(favorites: [first, duplicate, second], recentFolders: [])
+        )
+        let store = ExplorerStore(
+            initialURL: root,
+            settingsStore: InMemoryExplorerSettingsStore(),
+            sidebarFavoritesStore: sidebarStore,
+            directoryWatcher: nil,
+            volumeService: StubSidebarVolumeService()
+        )
+
+        XCTAssertEqual(store.favoriteSidebarItems.map(\.favorite.id), [first.id, second.id])
+        XCTAssertEqual(sidebarStore.savedStates.last?.favorites.map(\.id), [first.id, second.id])
+    }
+
     func testSuccessfulFilesystemNavigationRecordsRecentFolders() async throws {
         let root = try makeFixture()
         let selected = root.appendingPathComponent("Selected", isDirectory: true)
@@ -306,6 +327,41 @@ final class ExplorerSidebarStoreTests: XCTestCase {
             state: SidebarState(
                 favorites: [],
                 recentFolders: folders.map { SidebarRecentFolder(url: $0) }
+            )
+        )
+        let store = ExplorerStore(
+            initialURL: root,
+            settingsStore: InMemoryExplorerSettingsStore(),
+            sidebarFavoritesStore: sidebarStore,
+            directoryWatcher: nil,
+            volumeService: StubSidebarVolumeService()
+        )
+
+        XCTAssertEqual(store.recentFolders.map(\.url), expected)
+        XCTAssertEqual(sidebarStore.savedStates.last?.recentFolders.map(\.url), expected)
+    }
+
+    func testStoredRecentFoldersAreDeduplicatedBeforeTrimmingOnLoad() throws {
+        let root = try makeFixture()
+        let folders = try (0..<6).map { index in
+            let folder = root.appendingPathComponent("DuplicateRecent-\(index)", isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            return folder
+        }
+        let storedFolders = [
+            folders[0],
+            folders[1],
+            folders[0],
+            folders[2],
+            folders[3],
+            folders[4],
+            folders[5]
+        ]
+        let expected = Array(folders.prefix(5)).map(\.standardizedFileURL)
+        let sidebarStore = InMemorySidebarFavoritesStore(
+            state: SidebarState(
+                favorites: [],
+                recentFolders: storedFolders.map { SidebarRecentFolder(url: $0) }
             )
         )
         let store = ExplorerStore(

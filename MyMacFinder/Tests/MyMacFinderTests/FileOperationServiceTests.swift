@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import XCTest
 @testable import MyMacFinder
@@ -123,6 +124,27 @@ final class FileOperationServiceTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("source.txt").path))
     }
 
+    func testCopyItemsPreflightsSourcesBeforeCopyingAnyItem() async throws {
+        let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
+        let destFolder = tempDirectory.appendingPathComponent("dest", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceFolder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destFolder, withIntermediateDirectories: true)
+        let first = sourceFolder.appendingPathComponent("first.txt")
+        let missing = sourceFolder.appendingPathComponent("missing.txt")
+        try "first".write(to: first, atomically: true, encoding: .utf8)
+        let service = FileOperationService()
+
+        do {
+            _ = try await service.copyItems([first, missing], to: destFolder)
+            XCTFail("Expected copy to fail before copying any item")
+        } catch let error as ExplorerError {
+            XCTAssertEqual(error, .pathDoesNotExist(missing.path))
+        }
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destFolder.appendingPathComponent("first.txt").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: first.path))
+    }
+
     func testCopyItemsReportsProgressPerSource() async throws {
         let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
         let destFolder = tempDirectory.appendingPathComponent("dest", isDirectory: true)
@@ -193,6 +215,27 @@ final class FileOperationServiceTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: child.path))
     }
 
+    func testMoveItemsPreflightsSourcesBeforeMovingAnyItem() async throws {
+        let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
+        let destFolder = tempDirectory.appendingPathComponent("dest", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceFolder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destFolder, withIntermediateDirectories: true)
+        let first = sourceFolder.appendingPathComponent("first.txt")
+        let missing = sourceFolder.appendingPathComponent("missing.txt")
+        try "first".write(to: first, atomically: true, encoding: .utf8)
+        let service = FileOperationService()
+
+        do {
+            _ = try await service.moveItems([first, missing], to: destFolder)
+            XCTFail("Expected move to fail before moving any item")
+        } catch let error as ExplorerError {
+            XCTAssertEqual(error, .pathDoesNotExist(missing.path))
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: first.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destFolder.appendingPathComponent("first.txt").path))
+    }
+
     func testMoveToTrashRemovesOriginalAndReturnsTrashLocation() async throws {
         let sourceFile = tempDirectory.appendingPathComponent("trash-me.txt")
         try "trash".write(to: sourceFile, atomically: true, encoding: .utf8)
@@ -209,6 +252,31 @@ final class FileOperationServiceTests: XCTestCase {
         XCTAssertEqual(trashedURLs.count, 1)
         XCTAssertFalse(FileManager.default.fileExists(atPath: sourceFile.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: trashedURLs[0].path))
+    }
+
+    func testMoveToTrashPreflightsSourcesBeforeTrashingAnyItem() async throws {
+        let first = tempDirectory.appendingPathComponent("trash-preflight-\(UUID().uuidString).txt")
+        let missing = tempDirectory.appendingPathComponent("missing-trash.txt")
+        try "first".write(to: first, atomically: true, encoding: .utf8)
+        let trashCandidate = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".Trash", isDirectory: true)
+            .appendingPathComponent(first.lastPathComponent)
+        defer {
+            if !FileManager.default.fileExists(atPath: first.path),
+               FileManager.default.fileExists(atPath: trashCandidate.path) {
+                try? FileManager.default.moveItem(at: trashCandidate, to: first)
+            }
+        }
+        let service = FileOperationService()
+
+        do {
+            _ = try await service.moveToTrash([first, missing])
+            XCTFail("Expected trash to fail before moving any item")
+        } catch let error as ExplorerError {
+            XCTAssertEqual(error, .pathDoesNotExist(missing.path))
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: first.path))
     }
 
     func testCopyItemsReplacesExistingFileWhenResolverChoosesReplace() async throws {
@@ -233,6 +301,46 @@ final class FileOperationServiceTests: XCTestCase {
         XCTAssertEqual(result.replacedItems.map(\.original), [existingDest.standardizedFileURL])
         XCTAssertEqual(try String(contentsOf: existingDest, encoding: .utf8), "new")
         XCTAssertEqual(try String(contentsOf: result.replacedItems[0].trashed, encoding: .utf8), "old")
+    }
+
+    func testCopyReplaceRestoresExistingDestinationWhenCopyFailsAfterTrash() async throws {
+        let itemName = "replace-copy-failure-\(UUID().uuidString)"
+        let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
+        let destFolder = tempDirectory.appendingPathComponent("dest", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceFolder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destFolder, withIntermediateDirectories: true)
+        let sourceDir = sourceFolder.appendingPathComponent(itemName, isDirectory: true)
+        let unreadableFile = sourceDir.appendingPathComponent("unreadable.txt")
+        let existingDest = destFolder.appendingPathComponent(itemName, isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+        try "new".write(to: unreadableFile, atomically: true, encoding: .utf8)
+        XCTAssertEqual(chmod(unreadableFile.path, 0), 0)
+        try FileManager.default.createDirectory(at: existingDest, withIntermediateDirectories: true)
+        try "old".write(to: existingDest.appendingPathComponent("old.txt"), atomically: true, encoding: .utf8)
+        let trashCandidate = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".Trash", isDirectory: true)
+            .appendingPathComponent(itemName, isDirectory: true)
+        defer {
+            _ = chmod(unreadableFile.path, S_IRUSR | S_IWUSR)
+            if !FileManager.default.fileExists(atPath: existingDest.path),
+               FileManager.default.fileExists(atPath: trashCandidate.path) {
+                try? FileManager.default.moveItem(at: trashCandidate, to: existingDest)
+            }
+            try? FileManager.default.removeItem(at: trashCandidate)
+        }
+        let service = FileOperationService(conflictResolver: DefaultFileConflictResolver(decision: .replace))
+
+        do {
+            _ = try await service.copyItems([sourceDir], to: destFolder)
+            XCTFail("Expected copy to fail after replacement trash step")
+        } catch {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: existingDest.path))
+            XCTAssertEqual(
+                try String(contentsOf: existingDest.appendingPathComponent("old.txt"), encoding: .utf8),
+                "old"
+            )
+            XCTAssertFalse(FileManager.default.fileExists(atPath: existingDest.appendingPathComponent("unreadable.txt").path))
+        }
     }
 
     func testCopyItemsSkipsExistingFileWhenResolverChoosesSkip() async throws {

@@ -82,17 +82,68 @@ final class ArchiveBrowsingServiceTests: XCTestCase {
         }
     }
 
-    private func makeArchive() throws -> URL {
-        let source = tempDirectory.appendingPathComponent("source", isDirectory: true)
-        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: source.appendingPathComponent("docs", isDirectory: true), withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: source.appendingPathComponent("hidden", isDirectory: true), withIntermediateDirectories: true)
-        try "hello".write(to: source.appendingPathComponent("docs/readme.txt"), atomically: true, encoding: .utf8)
-        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: source.appendingPathComponent("image.png"))
-        try "secret".write(to: source.appendingPathComponent("hidden/.secret"), atomically: true, encoding: .utf8)
+    func testListSkipsUnsafeArchiveEntryPaths() async throws {
+        let archiveURL = try makeArchive(
+            entries: [
+                ("safe.txt", "safe"),
+                ("../evil.txt", "evil"),
+                ("/absolute.txt", "absolute"),
+                ("C:/windows.txt", "windows")
+            ]
+        )
+        let service = ArchiveBrowsingService()
 
+        let entries = try await service.list(
+            ArchiveLocation(archiveURL: archiveURL, internalPath: ""),
+            showHiddenFiles: true
+        )
+
+        XCTAssertEqual(entries.map(\.name), ["safe.txt"])
+    }
+
+    func testTemporaryExtractRejectsUnsafeArchiveEntryPaths() async throws {
+        let archiveURL = try makeArchive(entries: [("../evil.txt", "evil")])
+        let service = ArchiveBrowsingService()
+
+        do {
+            _ = try await service.temporaryExtract(
+                ArchiveLocation(archiveURL: archiveURL, internalPath: "../evil.txt")
+            )
+            XCTFail("Expected unsafe archive entry preview to fail")
+        } catch let error as ExplorerError {
+            XCTAssertTrue(error.localizedDescription.contains("outside destination"))
+        }
+    }
+
+    private func makeArchive() throws -> URL {
+        try makeArchive(
+            entries: [
+                ("docs/readme.txt", "hello"),
+                ("image.png", String(decoding: Data([0x89, 0x50, 0x4E, 0x47]), as: UTF8.self)),
+                ("hidden/.secret", "secret")
+            ]
+        )
+    }
+
+    private func makeArchive(entries: [(path: String, contents: String)]) throws -> URL {
+        let source = tempDirectory.appendingPathComponent("source", isDirectory: true)
         let archiveURL = tempDirectory.appendingPathComponent("fixture.zip")
-        try FileManager.default.zipItem(at: source, to: archiveURL, shouldKeepParent: false, compressionMethod: .deflate)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        let archive = try Archive(url: archiveURL, accessMode: .create)
+        for entry in entries {
+            let data = Data(entry.contents.utf8)
+            try archive.addEntry(
+                with: entry.path,
+                type: .file,
+                uncompressedSize: Int64(data.count),
+                compressionMethod: .deflate,
+                bufferSize: max(data.count, 1)
+            ) { position, size in
+                let start = Int(position)
+                let end = min(start + size, data.count)
+                return data.subdata(in: start..<end)
+            }
+        }
         return archiveURL
     }
 }

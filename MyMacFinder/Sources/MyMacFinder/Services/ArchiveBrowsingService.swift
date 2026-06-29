@@ -54,6 +54,9 @@ public struct ArchiveBrowsingService: ArchiveBrowsing, @unchecked Sendable {
             var files: [ArchiveEntry] = []
 
             for entry in archive {
+                guard ArchivePathSafety.isSafeEntryPath(entry.path) else {
+                    continue
+                }
                 guard entry.path.hasPrefix(prefix) else {
                     continue
                 }
@@ -113,6 +116,7 @@ public struct ArchiveBrowsingService: ArchiveBrowsing, @unchecked Sendable {
 
     public func temporaryExtract(_ location: ArchiveLocation) async throws -> URL {
         try await Task.detached(priority: .userInitiated) {
+            try ArchivePathSafety.validateEntryPath(location.internalPath)
             let archive = try self.openArchive(location.archiveURL)
             guard let entry = archive[location.internalPath], entry.type != .directory else {
                 throw ExplorerError.readFailed("ZIP entry cannot be previewed: \(location.displayPath)")

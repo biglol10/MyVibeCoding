@@ -82,6 +82,33 @@ final class FilePreviewContentLoaderTests: XCTestCase {
         XCTAssertTrue(preview.isTruncated)
     }
 
+    func testCancellationPropagatesToBackgroundTextReadTask() async throws {
+        let file = tempDirectory.appendingPathComponent("slow.log")
+        try "slow preview".write(to: file, atomically: true, encoding: .utf8)
+        let probe = CancellationProbe()
+        let entry = makeEntry(url: file, extension: "log")
+
+        let task = Task {
+            await FilePreviewContentLoader.loadContent(
+                for: entry,
+                fileReader: { _, _ in
+                    probe.recordStarted()
+                    while !Task.isCancelled, !probe.hasTimedOut {
+                        Thread.sleep(forTimeInterval: 0.005)
+                    }
+                    probe.recordCancellation(isCancelled: Task.isCancelled)
+                    return FilePreviewReadResult(data: Data("slow preview".utf8), fileSize: 12)
+                }
+            )
+        }
+
+        XCTAssertTrue(probe.waitUntilStarted(timeout: 1), "Preview read did not start.")
+        task.cancel()
+        _ = await task.value
+
+        XCTAssertTrue(probe.observedCancellation, "Stale preview reads should receive cancellation.")
+    }
+
     func testBinaryPayloadInTextFileShowsUnsupportedPreview() async throws {
         let file = tempDirectory.appendingPathComponent("maybe.txt")
         try Data([0x66, 0x6f, 0x00, 0x6f]).write(to: file)
@@ -138,6 +165,37 @@ private final class ThreadObservation: @unchecked Sendable {
     func record(isMainThread: Bool) {
         lock.withLock {
             recordedValues.append(isMainThread)
+        }
+    }
+}
+
+private final class CancellationProbe: @unchecked Sendable {
+    private let started = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private let timeoutDate = Date().addingTimeInterval(1)
+    private var cancellationValues: [Bool] = []
+
+    var hasTimedOut: Bool {
+        Date() >= timeoutDate
+    }
+
+    var observedCancellation: Bool {
+        lock.withLock {
+            cancellationValues.contains(true)
+        }
+    }
+
+    func recordStarted() {
+        started.signal()
+    }
+
+    func waitUntilStarted(timeout: TimeInterval) -> Bool {
+        started.wait(timeout: .now() + timeout) == .success
+    }
+
+    func recordCancellation(isCancelled: Bool) {
+        lock.withLock {
+            cancellationValues.append(isCancelled)
         }
     }
 }

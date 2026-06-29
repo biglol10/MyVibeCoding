@@ -10,6 +10,14 @@ struct FileTableColumnDefinition {
 }
 
 struct FileTableView: NSViewRepresentable {
+    private static let sortableColumnKeys: Set<String> = [
+        "name",
+        "size",
+        "modified",
+        "kind",
+        "path"
+    ]
+
     var entries: [FileEntry]
     var selectedURLs: Set<URL>
     var canPaste: Bool
@@ -100,7 +108,9 @@ struct FileTableView: NSViewRepresentable {
         tableColumn.width = column.width
         tableColumn.minWidth = column.minWidth
         tableColumn.resizingMask = [.userResizingMask, .autoresizingMask]
-        tableColumn.sortDescriptorPrototype = NSSortDescriptor(key: column.key, ascending: true)
+        if Self.sortableColumnKeys.contains(column.key) {
+            tableColumn.sortDescriptorPrototype = NSSortDescriptor(key: column.key, ascending: true)
+        }
         return tableColumn
     }
 
@@ -171,7 +181,11 @@ struct FileTableView: NSViewRepresentable {
                 guard index >= 0, index < parent.entries.count else {
                     return nil
                 }
-                return parent.entries[index].url as NSURL
+                let entry = parent.entries[index]
+                guard !entry.isArchiveBacked else {
+                    return nil
+                }
+                return entry.url as NSURL
             }
             guard !urls.isEmpty else {
                 return false

@@ -6,8 +6,28 @@ import XCTest
 
 @MainActor
 final class ExternalAppLauncherTests: XCTestCase {
-    func testOpenTerminalIgnoresDuplicateWorkspaceCompletionCallbacks() async throws {
+    func testOpenTerminalDoesNotWaitForWorkspaceCompletionCallbacks() async throws {
         let workspace = DuplicateCompletionWorkspaceOpener()
+        let terminalURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FakeTerminal-\(UUID().uuidString).app", isDirectory: true)
+        try FileManager.default.createDirectory(at: terminalURL, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: terminalURL)
+        }
+        let directory = URL(fileURLWithPath: "/Users/example/Project", isDirectory: true)
+        let launcher = AppKitExternalAppLauncher(
+            workspace: workspace,
+            terminalApplicationURL: terminalURL
+        )
+
+        try await launcher.openTerminal(at: directory)
+
+        XCTAssertEqual(workspace.openCalls.map(\.urls), [[directory.standardizedFileURL]])
+        XCTAssertEqual(workspace.openCalls.map(\.applicationURL), [terminalURL.standardizedFileURL])
+    }
+
+    func testOpenTerminalDoesNotSurfaceWorkspaceCompletionErrors() async throws {
+        let workspace = CompletionErrorWorkspaceOpener()
         let terminalURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("FakeTerminal-\(UUID().uuidString).app", isDirectory: true)
         try FileManager.default.createDirectory(at: terminalURL, withIntermediateDirectories: true)
@@ -88,6 +108,38 @@ private final class DuplicateCompletionWorkspaceOpener: WorkspaceApplicationOpen
 
     func urlForApplication(withBundleIdentifier bundleIdentifier: String) -> URL? {
         applicationURLsByBundleIdentifier[bundleIdentifier]?.standardizedFileURL
+    }
+
+    func urlsForApplications(toOpen contentType: UTType) -> [URL] {
+        []
+    }
+}
+
+@MainActor
+private final class CompletionErrorWorkspaceOpener: WorkspaceApplicationOpening {
+    struct OpenCall: Equatable {
+        let urls: [URL]
+        let applicationURL: URL
+    }
+
+    var openCalls: [OpenCall] = []
+
+    func open(_ url: URL) -> Bool {
+        true
+    }
+
+    func open(
+        _ urls: [URL],
+        withApplicationAt applicationURL: URL,
+        configuration: NSWorkspace.OpenConfiguration,
+        completionHandler: ((NSRunningApplication?, (any Error)?) -> Void)?
+    ) {
+        openCalls.append(OpenCall(urls: urls.map(\.standardizedFileURL), applicationURL: applicationURL.standardizedFileURL))
+        completionHandler?(nil, NSError(domain: "terminal-open", code: 1))
+    }
+
+    func urlForApplication(withBundleIdentifier bundleIdentifier: String) -> URL? {
+        nil
     }
 
     func urlsForApplications(toOpen contentType: UTType) -> [URL] {

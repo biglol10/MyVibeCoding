@@ -98,7 +98,7 @@ struct SidebarView: View {
 
                     ForEach(explorerStore.mountedVolumes) { volume in
                         sidebarButton(volume.displayName, systemImage: volume.systemImageName, rowWidth: rowWidth) {
-                            Task { await explorerStore.navigateFromSidebar(to: volume.url) }
+                            Task { await explorerStore.navigateToMountedVolume(volume) }
                         }
                     }
 

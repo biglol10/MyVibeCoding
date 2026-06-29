@@ -23,4 +23,12 @@ final class FilePreviewThumbnailLoaderTests: XCTestCase {
 
         _ = await FilePreviewThumbnailLoader.loadPreviewImage(for: file, scale: 1)
     }
+
+    @MainActor
+    func testThumbnailLoaderCanRunFromMainActorWithoutCrashing() async throws {
+        let file = tempDirectory.appendingPathComponent("main-actor-note.txt")
+        try "thumbnail".write(to: file, atomically: true, encoding: .utf8)
+
+        _ = await FilePreviewThumbnailLoader.loadPreviewImage(for: file, scale: 1)
+    }
 }

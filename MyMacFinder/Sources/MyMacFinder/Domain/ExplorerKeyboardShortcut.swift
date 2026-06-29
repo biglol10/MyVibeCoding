@@ -89,13 +89,28 @@ public enum ExplorerShortcutRouting {
         isToolbarTextInputFocused: Bool,
         isCommandEnabled: (ExplorerCommand) -> Bool
     ) -> ExplorerCommand? {
+        command(
+            for: shortcut,
+            isToolbarTextInputFocused: isToolbarTextInputFocused,
+            isTextEditingResponderFocused: false,
+            isCommandEnabled: isCommandEnabled
+        )
+    }
+
+    public static func command(
+        for shortcut: ExplorerShortcut,
+        isToolbarTextInputFocused: Bool,
+        isTextEditingResponderFocused: Bool,
+        isCommandEnabled: (ExplorerCommand) -> Bool
+    ) -> ExplorerCommand? {
         guard shortcut.modifiers.contains(.command) || shortcut.modifiers.contains(.control) else {
             return nil
         }
         guard let command = ExplorerKeyboardShortcut.command(for: shortcut) else {
             return nil
         }
-        guard !isToolbarTextInputFocused || command.routesWhileToolbarTextInputFocused else {
+        let shouldYieldToTextEditing = isToolbarTextInputFocused || isTextEditingResponderFocused
+        guard !shouldYieldToTextEditing || command.routesWhileToolbarTextInputFocused else {
             return nil
         }
         guard isCommandEnabled(command) else {

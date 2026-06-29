@@ -51,6 +51,8 @@ public struct ZipExtractionService: ZipExtracting, @unchecked Sendable {
             } catch {
                 throw ExplorerError.readFailed("ZIP archive could not be read: \(zipURL.path)")
             }
+            let entries = Array(archive)
+            try validateEntryPaths(entries)
 
             let resolution = try await resolvedExtractionFolder(
                 zipURL: zipURL,
@@ -63,43 +65,47 @@ public struct ZipExtractionService: ZipExtracting, @unchecked Sendable {
                 continue
             }
 
-            try fileManager.createDirectory(at: extractionFolder, withIntermediateDirectories: true)
-            let entries = Array(archive)
-            let progressEntries = entries.filter { $0.type != .directory }
-            await progress?.update(
-                phase: .running,
-                currentItemName: zipURL.lastPathComponent,
-                completedUnitCount: 0,
-                totalUnitCount: progressEntries.count
-            )
+            do {
+                try fileManager.createDirectory(at: extractionFolder, withIntermediateDirectories: true)
+                let progressEntries = entries.filter { $0.type != .directory }
+                await progress?.update(
+                    phase: .running,
+                    currentItemName: zipURL.lastPathComponent,
+                    completedUnitCount: 0,
+                    totalUnitCount: progressEntries.count
+                )
 
-            var completedEntryCount = 0
-            for entry in entries {
-                try await progress?.checkCancellation()
-                let destination = extractionFolder.appendingPathComponent(entry.path)
-                guard isContained(destination, in: extractionFolder) else {
-                    throw ExplorerError.readFailed("ZIP entry attempted to extract outside destination: \(entry.path)")
-                }
+                var completedEntryCount = 0
+                for entry in entries {
+                    try await progress?.checkCancellation()
+                    let destination = extractionFolder.appendingPathComponent(entry.path)
+                    guard isContained(destination, in: extractionFolder) else {
+                        throw ExplorerError.readFailed("ZIP entry attempted to extract outside destination: \(entry.path)")
+                    }
 
-                if entry.type == .directory {
-                    try fileManager.createDirectory(at: destination, withIntermediateDirectories: true)
-                } else {
-                    try fileManager.createDirectory(
-                        at: destination.deletingLastPathComponent(),
-                        withIntermediateDirectories: true
-                    )
-                    _ = try archive.extract(entry, to: destination)
-                }
+                    if entry.type == .directory {
+                        try fileManager.createDirectory(at: destination, withIntermediateDirectories: true)
+                    } else {
+                        try fileManager.createDirectory(
+                            at: destination.deletingLastPathComponent(),
+                            withIntermediateDirectories: true
+                        )
+                        _ = try archive.extract(entry, to: destination)
+                    }
 
-                if entry.type != .directory {
-                    completedEntryCount += 1
-                    await progress?.update(
-                        phase: .running,
-                        currentItemName: entry.path,
-                        completedUnitCount: completedEntryCount,
-                        totalUnitCount: progressEntries.count
-                    )
+                    if entry.type != .directory {
+                        completedEntryCount += 1
+                        await progress?.update(
+                            phase: .running,
+                            currentItemName: entry.path,
+                            completedUnitCount: completedEntryCount,
+                            totalUnitCount: progressEntries.count
+                        )
+                    }
                 }
+            } catch {
+                rollbackReplacement(resolution.replacedItem, partialDestination: extractionFolder)
+                throw error
             }
 
             createdURLs.append(extractionFolder.standardizedFileURL)
@@ -165,6 +171,24 @@ public struct ZipExtractionService: ZipExtracting, @unchecked Sendable {
         return FileTrashRecord(original: url, trashed: result as URL)
     }
 
+    private func rollbackReplacement(_ record: FileTrashRecord?, partialDestination: URL) {
+        guard let record else {
+            return
+        }
+        if fileManager.fileExists(atPath: partialDestination.path) {
+            try? fileManager.removeItem(at: partialDestination)
+        }
+        guard !fileManager.fileExists(atPath: record.original.path),
+              fileManager.fileExists(atPath: record.trashed.path) else {
+            return
+        }
+        try? fileManager.createDirectory(
+            at: record.original.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? fileManager.moveItem(at: record.trashed, to: record.original)
+    }
+
     private func uniqueURL(in parent: URL, baseName: String) -> URL {
         var candidate = parent.appendingPathComponent("\(baseName) copy", isDirectory: true)
         var index = 2
@@ -173,6 +197,12 @@ public struct ZipExtractionService: ZipExtracting, @unchecked Sendable {
             index += 1
         }
         return candidate
+    }
+
+    private func validateEntryPaths(_ entries: [Entry]) throws {
+        for entry in entries {
+            try ArchivePathSafety.validateEntryPath(entry.path)
+        }
     }
 
     private func isContained(_ url: URL, in folder: URL) -> Bool {

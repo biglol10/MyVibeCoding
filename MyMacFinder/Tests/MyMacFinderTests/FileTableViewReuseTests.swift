@@ -292,6 +292,30 @@ final class FileTableViewReuseTests: XCTestCase {
         XCTAssertNotNil(cell.imageView?.image)
     }
 
+    func testArchiveBackedRowsAreNotWrittenToDragPasteboard() {
+        let entry = makeArchiveBackedTableEntry(name: "readme.txt")
+        let harness = makeTableHarness(
+            entries: [entry],
+            selectedRowIndexes: IndexSet(integer: 0),
+            canPaste: false,
+            canUndo: false,
+            onCommand: { _ in }
+        )
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("MyMacFinderArchiveDrag-\(UUID().uuidString)"))
+        pasteboard.clearContents()
+        pasteboard.setString("keep", forType: .string)
+
+        let didWrite = harness.coordinator.tableView(
+            harness.tableView,
+            writeRowsWith: IndexSet(integer: 0),
+            to: pasteboard
+        )
+
+        XCTAssertFalse(didWrite)
+        XCTAssertEqual(FileDropPasteboardReader.fileURLs(from: pasteboard), [])
+        XCTAssertEqual(pasteboard.string(forType: .string), "keep")
+    }
+
     func testCellsClipLongColumnTextToBounds() throws {
         let entry = FileEntry(
             url: URL(fileURLWithPath: "/tmp/report.txt"),
@@ -480,6 +504,38 @@ final class FileTableViewReuseTests: XCTestCase {
         XCTAssertTrue(tableColumn.resizingMask.contains(.autoresizingMask))
     }
 
+    func testOnlySupportedColumnsExposeSortDescriptors() throws {
+        let fileTable = FileTableView(
+            entries: [],
+            selectedURLs: [],
+            canPaste: false,
+            canUndo: false,
+            canCloseTab: false,
+            currentURL: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            currentLocation: .fileSystem(URL(fileURLWithPath: "/tmp", isDirectory: true)),
+            currentSort: EntrySortDescriptor(),
+            showsPathColumn: true,
+            onSelectionChange: { _ in },
+            onOpen: { _ in },
+            onCommand: { _ in },
+            onDropItems: { _, _, _ in },
+            onSortChange: { _ in }
+        )
+
+        let columnsByKey = Dictionary(
+            uniqueKeysWithValues: fileTable.columnDefinitions.map { definition in
+                (definition.key, fileTable.makeTableColumn(definition))
+            }
+        )
+
+        XCTAssertEqual(columnsByKey["name"]?.sortDescriptorPrototype?.key, "name")
+        XCTAssertEqual(columnsByKey["size"]?.sortDescriptorPrototype?.key, "size")
+        XCTAssertEqual(columnsByKey["modified"]?.sortDescriptorPrototype?.key, "modified")
+        XCTAssertEqual(columnsByKey["kind"]?.sortDescriptorPrototype?.key, "kind")
+        XCTAssertEqual(columnsByKey["path"]?.sortDescriptorPrototype?.key, "path")
+        XCTAssertNil(columnsByKey["tags"]?.sortDescriptorPrototype)
+    }
+
     func testLastColumnReceivesRemainingWidthInNarrowDualPaneLayouts() {
         let fileTable = FileTableView(
             entries: [],
@@ -516,6 +572,28 @@ private func makeTableEntry(name: String) -> FileEntry {
         isHidden: false,
         isDirectoryLike: false,
         isReadable: true
+    )
+}
+
+private func makeArchiveBackedTableEntry(name: String) -> FileEntry {
+    let archiveLocation = ArchiveLocation(
+        archiveURL: URL(fileURLWithPath: "/tmp/archive.zip"),
+        internalPath: name
+    )
+    return FileEntry(
+        url: archiveLocation.virtualURL,
+        name: name,
+        kind: .zipVirtualFile,
+        typeDescription: "ZIP Item",
+        fileExtension: URL(fileURLWithPath: name).pathExtension,
+        size: 12,
+        dateModified: nil,
+        dateCreated: nil,
+        dateAccessed: nil,
+        isHidden: false,
+        isDirectoryLike: false,
+        isReadable: true,
+        source: .archive(archiveLocation)
     )
 }
 

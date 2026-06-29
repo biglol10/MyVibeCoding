@@ -21,6 +21,22 @@ private final class TestDirectoryWatcher: DirectoryWatching {
     }
 }
 
+private final class MutableArchiveBrowser: ArchiveBrowsing, @unchecked Sendable {
+    var entriesByLocation: [ArchiveLocation: [ArchiveEntry]] = [:]
+
+    func canOpen(_ url: URL) -> Bool {
+        url.pathExtension == "zip"
+    }
+
+    func list(_ location: ArchiveLocation, showHiddenFiles: Bool) async throws -> [ArchiveEntry] {
+        entriesByLocation[location] ?? []
+    }
+
+    func temporaryExtract(_ location: ArchiveLocation) async throws -> URL {
+        URL(fileURLWithPath: "/tmp/extracted-\(location.internalPath)")
+    }
+}
+
 final class ExplorerStoreWatcherTests: XCTestCase {
     private var tempDirectory: URL!
 
@@ -114,6 +130,37 @@ final class ExplorerStoreWatcherTests: XCTestCase {
         try await Task.sleep(nanoseconds: 50_000_000)
 
         XCTAssertTrue(store.panes[1].entries.contains { $0.name == "external-in-child.txt" })
+    }
+
+    @MainActor
+    func testWatcherChangeRefreshesOpenArchiveWhenHostZipChanges() async throws {
+        let zip = tempDirectory.appendingPathComponent("sample.zip")
+        try Data().write(to: zip)
+        let archive = MutableArchiveBrowser()
+        let root = ArchiveLocation(archiveURL: zip, internalPath: "")
+        archive.entriesByLocation[root] = [
+            ArchiveEntry(location: root.appending("old.txt"), name: "old.txt", isDirectory: false, size: 3, modifiedAt: nil)
+        ]
+        let watcher = TestDirectoryWatcher()
+        let store = ExplorerStore(
+            initialURL: tempDirectory,
+            archiveBrowser: archive,
+            settingsStore: InMemoryExplorerWatcherSettingsStore(),
+            directoryWatcher: watcher,
+            watcherDebounceNanoseconds: 0
+        )
+        await store.loadInitialDirectory()
+        await store.open(zip.standardizedFileURL)
+        XCTAssertEqual(store.activePane.entries.map { $0.name }, ["old.txt"])
+
+        archive.entriesByLocation[root] = [
+            ArchiveEntry(location: root.appending("new.txt"), name: "new.txt", isDirectory: false, size: 3, modifiedAt: nil)
+        ]
+        watcher.triggerChange()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(store.activePane.location, PaneLocation.archive(root))
+        XCTAssertEqual(store.activePane.entries.map { $0.name }, ["new.txt"])
     }
 }
 

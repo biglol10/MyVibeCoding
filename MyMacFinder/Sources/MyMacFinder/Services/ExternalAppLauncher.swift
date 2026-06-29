@@ -55,7 +55,10 @@ public final class AppKitExternalAppLauncher: ExternalAppLaunching {
         guard FileManager.default.fileExists(atPath: terminalApplicationURL.path) else {
             throw ExplorerError.readFailed("Terminal.app was not found.")
         }
-        try await open([directory.standardizedFileURL], withApplicationAt: terminalApplicationURL)
+        openWithoutWaitingForCompletion(
+            [directory.standardizedFileURL],
+            withApplicationAt: terminalApplicationURL
+        )
     }
 
     public func openVSCode(at target: URL) async throws {
@@ -86,9 +89,7 @@ public final class AppKitExternalAppLauncher: ExternalAppLaunching {
     }
 
     private func open(_ urls: [URL], withApplicationAt applicationURL: URL) async throws {
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = true
-        configuration.promptsUserIfNeeded = true
+        let configuration = makeOpenConfiguration()
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let completion = OneShotWorkspaceOpenCompletion()
@@ -108,6 +109,22 @@ public final class AppKitExternalAppLauncher: ExternalAppLaunching {
                 }
             }
         }
+    }
+
+    private func openWithoutWaitingForCompletion(_ urls: [URL], withApplicationAt applicationURL: URL) {
+        workspace.open(
+            urls,
+            withApplicationAt: applicationURL,
+            configuration: makeOpenConfiguration(),
+            completionHandler: nil
+        )
+    }
+
+    private func makeOpenConfiguration() -> NSWorkspace.OpenConfiguration {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        configuration.promptsUserIfNeeded = true
+        return configuration
     }
 
     private func vscodeApplicationURL() -> URL? {

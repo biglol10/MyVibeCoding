@@ -54,6 +54,76 @@ final class ExplorerPermissionRecoveryTests: XCTestCase {
         XCTAssertEqual(store.grantedFolderSummaries.map(\.displayPath), [url.standardizedFileURL.path])
     }
 
+    func testSandboxedInitResolvesPersistedGrantsAndPublishesAvailability() {
+        let url = URL(fileURLWithPath: "/tmp/persisted-grant", isDirectory: true)
+        let grant = FolderAccessGrant(url: url, bookmarkData: Data([1]))
+        let bookmarkStore = InMemoryBookmarkStore(grants: [grant])
+        let folderAccessService = StubFolderAccessService(
+            result: .cancelled,
+            resolvedAccesses: [
+                grant.id: ResolvedFolderAccess(url: url, isStale: true, didStartAccessing: true)
+            ]
+        )
+
+        let store = ExplorerStore(
+            initialURL: FileManager.default.temporaryDirectory,
+            directoryWatcher: nil,
+            sandboxPolicy: SandboxPolicySummary(isSandboxed: true),
+            bookmarkStore: bookmarkStore,
+            folderAccessService: folderAccessService
+        )
+
+        XCTAssertEqual(folderAccessService.resolvedGrantIDs, [grant.id])
+        XCTAssertEqual(store.grantedFolderSummaries.map(\.availability), [.available])
+        XCTAssertEqual(store.grantedFolderSummaries.map(\.isStale), [true])
+        XCTAssertEqual(bookmarkStore.grants.first?.lastResolvedAt != nil, true)
+    }
+
+    func testSandboxedInitMarksUnresolvablePersistedGrantsUnavailable() {
+        let url = URL(fileURLWithPath: "/tmp/missing-grant", isDirectory: true)
+        let grant = FolderAccessGrant(url: url, bookmarkData: Data([1]))
+        let folderAccessService = StubFolderAccessService(
+            result: .cancelled,
+            resolveErrors: [grant.id: ExplorerError.permissionDenied(url.path)]
+        )
+
+        let store = ExplorerStore(
+            initialURL: FileManager.default.temporaryDirectory,
+            directoryWatcher: nil,
+            sandboxPolicy: SandboxPolicySummary(isSandboxed: true),
+            bookmarkStore: InMemoryBookmarkStore(grants: [grant]),
+            folderAccessService: folderAccessService
+        )
+
+        XCTAssertEqual(folderAccessService.resolvedGrantIDs, [grant.id])
+        XCTAssertEqual(store.grantedFolderSummaries.map(\.availability), [.unavailable])
+        XCTAssertEqual(store.grantedFolderSummaries.map(\.isStale), [false])
+    }
+
+    func testChoosingExistingGrantedFolderStopsSupersededAccess() async {
+        let url = URL(fileURLWithPath: "/tmp/regranted-folder", isDirectory: true)
+        let oldGrant = FolderAccessGrant(url: url, bookmarkData: Data([1]))
+        let newGrant = FolderAccessGrant(url: url, bookmarkData: Data([2]))
+        let oldAccess = ResolvedFolderAccess(url: url, isStale: false, didStartAccessing: true)
+        let newAccess = ResolvedFolderAccess(url: url, isStale: false, didStartAccessing: true)
+        let folderAccessService = StubFolderAccessService(
+            result: .granted(newGrant, newAccess),
+            resolvedAccesses: [oldGrant.id: oldAccess]
+        )
+        let store = ExplorerStore(
+            initialURL: FileManager.default.temporaryDirectory,
+            directoryWatcher: nil,
+            sandboxPolicy: SandboxPolicySummary(isSandboxed: true),
+            bookmarkStore: InMemoryBookmarkStore(grants: [oldGrant]),
+            folderAccessService: folderAccessService
+        )
+
+        await store.chooseFolderForAccess(startingAt: url)
+
+        XCTAssertEqual(folderAccessService.stoppedAccesses, [oldAccess])
+        XCTAssertEqual(store.grantedFolderSummaries.map(\.id), [newGrant.id])
+    }
+
     func testRemoveAndResetGrantedFoldersUpdateSummaries() async {
         let firstURL = URL(fileURLWithPath: "/tmp/granted-one", isDirectory: true)
         let secondURL = URL(fileURLWithPath: "/tmp/granted-two", isDirectory: true)
@@ -163,9 +233,19 @@ private final class InMemoryBookmarkStore: SecurityScopedBookmarkStoring {
 
 private final class StubFolderAccessService: UserSelectedFolderAccessing, @unchecked Sendable {
     var result: FolderAccessSelectionResult
+    var resolvedAccesses: [FolderAccessGrantID: ResolvedFolderAccess]
+    var resolveErrors: [FolderAccessGrantID: Error]
+    var resolvedGrantIDs: [FolderAccessGrantID] = []
+    var stoppedAccesses: [ResolvedFolderAccess] = []
 
-    init(result: FolderAccessSelectionResult) {
+    init(
+        result: FolderAccessSelectionResult,
+        resolvedAccesses: [FolderAccessGrantID: ResolvedFolderAccess] = [:],
+        resolveErrors: [FolderAccessGrantID: Error] = [:]
+    ) {
         self.result = result
+        self.resolvedAccesses = resolvedAccesses
+        self.resolveErrors = resolveErrors
     }
 
     func chooseFolder(startingAt url: URL?, sandboxed: Bool) async throws -> FolderAccessSelectionResult {
@@ -173,8 +253,15 @@ private final class StubFolderAccessService: UserSelectedFolderAccessing, @unche
     }
 
     func resolve(_ grant: FolderAccessGrant) throws -> ResolvedFolderAccess {
-        ResolvedFolderAccess(url: grant.url, isStale: false, didStartAccessing: false)
+        resolvedGrantIDs.append(grant.id)
+        if let error = resolveErrors[grant.id] {
+            throw error
+        }
+        return resolvedAccesses[grant.id]
+            ?? ResolvedFolderAccess(url: grant.url, isStale: false, didStartAccessing: false)
     }
 
-    func stopAccessing(_ access: ResolvedFolderAccess) {}
+    func stopAccessing(_ access: ResolvedFolderAccess) {
+        stoppedAccesses.append(access)
+    }
 }

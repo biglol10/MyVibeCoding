@@ -76,6 +76,26 @@ final class ExplorerShortcutRoutingTests: XCTestCase {
         }
     }
 
+    func testActualTextEditingFocusYieldsEditingShortcutsWhenToolbarFocusStateIsStale() {
+        let shortcuts: [ExplorerShortcut] = [
+            ExplorerShortcut(key: "a", modifiers: [.command]),
+            ExplorerShortcut(key: "c", modifiers: [.command]),
+            ExplorerShortcut(key: "v", modifiers: [.command])
+        ]
+
+        for shortcut in shortcuts {
+            XCTAssertNil(
+                ExplorerShortcutRouting.command(
+                    for: shortcut,
+                    isToolbarTextInputFocused: false,
+                    isTextEditingResponderFocused: true,
+                    isCommandEnabled: { _ in true }
+                ),
+                "\(shortcut) should stay with the actual focused text editor even if stored focus is stale"
+            )
+        }
+    }
+
     func testToolbarTextInputFocusAllowsAppGlobalShortcuts() {
         let expectations: [(ExplorerShortcut, ExplorerCommand)] = [
             (ExplorerShortcut(key: "t", modifiers: [.command]), .newTab),

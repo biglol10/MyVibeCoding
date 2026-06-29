@@ -54,6 +54,36 @@ final class ExplorerFinderTagCommandTests: XCTestCase {
         XCTAssertEqual(store.activePane.selectedURLs, [fileURL])
     }
 
+    func testEditTagsClearsSelectionWhenEditedTagsNoLongerMatchActiveTagFilter() async throws {
+        let tempDirectory = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+        let fileURL = tempDirectory.appendingPathComponent("tagged.txt").standardizedFileURL
+        try "tagged".write(to: fileURL, atomically: true, encoding: .utf8)
+        let tagService = CapturingFinderTagService()
+        tagService.writtenTagsByURL[fileURL] = [FinderTag("Work")]
+        let store = ExplorerStore(
+            initialURL: tempDirectory,
+            fileSystemService: FileSystemService(finderTagService: tagService),
+            settingsStore: InMemoryFinderTagCommandSettingsStore(),
+            directoryWatcher: nil,
+            finderTagService: tagService,
+            finderTagPrompt: { entry in
+                XCTAssertEqual(entry.finderTags.map(\.name), ["Work"])
+                return [FinderTag("Personal")]
+            }
+        )
+        await store.loadInitialDirectory()
+        store.setSearchFinderTagQuery("work")
+        store.updateSelection([fileURL])
+
+        await store.perform(.editTags)
+
+        XCTAssertEqual(tagService.writtenTagsByURL[fileURL]?.map(\.name), ["Personal"])
+        XCTAssertEqual(store.activePaneVisibleEntries.map(\.name), [])
+        XCTAssertEqual(store.activePane.selectedURLs, [])
+        XCTAssertEqual(store.activeSelectedEntries, [])
+    }
+
     private func makeTempDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("MyMacFinderExplorerFinderTagCommand-\(UUID().uuidString)", isDirectory: true)

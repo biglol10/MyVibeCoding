@@ -57,6 +57,36 @@ final class ZipCompressionServiceTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: existingArchive, encoding: .utf8), "existing")
     }
 
+    func testReplaceRestoresExistingArchiveWhenCompressionFailsAfterTrash() async throws {
+        let note = tempDirectory.appendingPathComponent("replace-compress-failure-\(UUID().uuidString).txt")
+        try "note".write(to: note, atomically: true, encoding: .utf8)
+        let existingArchive = tempDirectory
+            .appendingPathComponent(note.deletingPathExtension().lastPathComponent)
+            .appendingPathExtension("zip")
+        try "existing archive".write(to: existingArchive, atomically: true, encoding: .utf8)
+        let trashCandidate = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".Trash", isDirectory: true)
+            .appendingPathComponent(existingArchive.lastPathComponent)
+        defer {
+            if !FileManager.default.fileExists(atPath: existingArchive.path),
+               FileManager.default.fileExists(atPath: trashCandidate.path) {
+                try? FileManager.default.moveItem(at: trashCandidate, to: existingArchive)
+            }
+            try? FileManager.default.removeItem(at: trashCandidate)
+        }
+        let service = ZipCompressionService(
+            conflictResolver: DeletingSourceConflictResolver(urlToDelete: note)
+        )
+
+        do {
+            _ = try await service.compress([note], to: tempDirectory)
+            XCTFail("Expected compression to fail after replacement trash step")
+        } catch {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: existingArchive.path))
+            XCTAssertEqual(try String(contentsOf: existingArchive, encoding: .utf8), "existing archive")
+        }
+    }
+
     func testCompressionReportsArchiveWritingPhase() async throws {
         let source = tempDirectory.appendingPathComponent("source.txt")
         try "source".write(to: source, atomically: true, encoding: .utf8)
@@ -85,5 +115,14 @@ private actor ZipCompressionProgressRecorder {
 
     func append(_ snapshot: FileOperationProgressSnapshot) {
         snapshots.append(snapshot)
+    }
+}
+
+private struct DeletingSourceConflictResolver: FileConflictResolving {
+    var urlToDelete: URL
+
+    func resolve(_ conflict: FileConflict) async throws -> FileConflictDecision {
+        try? FileManager.default.removeItem(at: urlToDelete)
+        return .replace
     }
 }

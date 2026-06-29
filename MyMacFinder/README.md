@@ -35,23 +35,31 @@ MyMacFinder는 macOS Finder를 Windows 파일 탐색기와 ForkLift에 가까운
 - Return / Command-Down으로 폴더 진입, 파일은 Open 동작
 - 상위 폴더 이동은 root(`/`)에서 비활성화되고 path input을 canonical path로 유지
 - Date Modified와 Tags 열이 좁은 화면에서도 잘리지 않도록 표시
+- 실제 정렬 가능한 컬럼만 정렬 affordance를 표시하며, Tags처럼 아직 정렬 엔진이 없는 컬럼은 fake sort UI를 노출하지 않음
 - Finder Tags 편집 후 table과 inspector가 즉시 갱신
+- Finder Tag 필터 중 태그 편집으로 항목이 필터에서 사라지면 selection도 함께 정리
 - 텍스트/code/JSON/Markdown/log/csv 파일은 inspector 안에서 내용 일부를 바로 미리보기
 - 큰 텍스트 파일 preview는 16KB까지만 읽고 truncated 상태를 표시
-- preview 파일 읽기/디코딩은 백그라운드에서 실행하고, selection 변경 직후 짧게 debounce해 클릭 반응성을 유지
+- preview 파일 읽기/디코딩은 백그라운드에서 실행하고, selection 변경 직후 짧게 debounce하며 stale read 취소로 클릭 반응성을 유지
 - binary 또는 읽을 수 없는 텍스트 preview는 아이콘과 상태 메시지로 fallback
 - 일반 검색과 고급 Tag 필터가 Finder Tags를 기준으로 필터링
 - 기본 파일 listing은 Finder tag metadata 지연으로 막히지 않으며, tag 검색/편집 시 필요한 항목만 tag를 읽음
 - ZIP 내부 가상 항목에서는 파일 시스템 변경 명령과 Edit Tags 비노출
+- ZIP 내부 가상 항목은 drag pasteboard에 실제 파일 URL처럼 기록하지 않음
+- 열려 있는 ZIP의 host 파일이 외부에서 변경되면 watcher가 archive pane을 다시 읽음
 - 잘못된 ZIP 압축 해제 실패 시 빈 폴더를 남기거나 기존 폴더를 교체하지 않음
 - Sidebar Favorites 추가, 삭제, 이동, 누락 경로 처리
+- Locations의 mounted volume 클릭 시 사라진 볼륨은 목록에서 제거하고, 읽을 수 없는 볼륨은 이동하지 않고 권한 오류 표시
 - 파일 작업 컨텍스트 메뉴와 단축키 동작
 - 경로 입력창의 `cmd`, `terminal`, `code .`, `open .` 명령 해석
+- `cmd` / `terminal`은 Terminal 실행 요청 후 MyMacFinder를 유지하고, Terminal completion error를 앱 오류로 표시하지 않음
+- 경로 입력창에 포커스가 있을 때 `Cmd+A/C/V` 같은 텍스트 편집 단축키는 파일 작업 단축키로 새지 않음
 - 파일 컨텍스트 메뉴 Open With와 폴더 Open in Terminal / Open in VS Code
+- Settings의 기본 정렬 변경은 현재 pane뿐 아니라 열려 있는 비활성 tab에도 적용
 - 폴더를 자기 하위 경로로 copy/move/paste/drop 하는 edge case 차단
 - 같은 폴더에 같은 이름으로 copy할 때 원본을 replace하지 않고 `copy` 이름으로 분기
-- 충돌 처리, Undo, 대용량 작업 progress banner
-- 권한 안내, 선택 폴더 grant 저장/초기화
+- 충돌 처리, replace 실패 rollback, Undo, 대용량 작업 progress banner
+- 권한 안내, 선택 폴더 grant 저장/초기화, sandboxed launch 시 persisted grant resolve와 stale/unavailable 표시
 - 외부에서 Finder tag 변경 후 Refresh로 table과 inspector 동기화
 
 ## 요구사항
@@ -143,19 +151,20 @@ swift test
 현재 테스트 범위:
 
 - 파일 시스템 listing, hidden file, symlink, Finder tag lazy loading/read fallback
-- 파일 작업 copy/move/rename/duplicate/trash와 conflict decision
+- 파일 작업 copy/move/rename/duplicate/trash, source preflight, conflict decision, replace rollback
 - copy/move descendant guard, same-folder copy naming, rename separator validation
-- drag and drop pasteboard/validator/store flow와 descendant drop guard
+- drag and drop pasteboard/validator/store flow, descendant drop guard, archive-backed drag 차단
 - undo action과 undo command
-- 정렬, 검색, 고급 검색, Finder tag 검색, 탭별 검색 상태 복원
+- 정렬, 검색, 고급 검색, Finder tag 검색, 태그 편집 후 필터/selection 동기화, 탭별 검색 상태 복원
 - ZIP 탐색, 압축, 압축 해제
-- invalid ZIP extraction side-effect 방지
-- preview content loader: 텍스트 판별, byte limit, main-thread read 방지, binary fallback, read error fallback
-- tabs, layout settings, sidebar favorites add/reorder/remove, full-row sidebar hit targets, mounted volumes
+- invalid/unsafe ZIP extraction side-effect 방지, unsafe archive entry path filtering
+- preview content loader: 텍스트 판별, byte limit, main-thread read 방지, stale read cancellation, binary fallback, read error fallback
+- tabs, layout settings, sidebar favorites add/reorder/remove/load dedupe, recent folder load dedupe, full-row sidebar hit targets, mounted volume sorting/stale/unreadable handling
 - root 상위 폴더 이동 비활성화와 path input focus clear
-- path input command resolver, Open With menu routing, external app launcher duplicate-completion guard
-- permission guidance, security-scoped bookmark store
-- AppKit table bridge, column sizing, context menu command availability, responder-chain shortcuts, system pasteboard file copy/paste
+- directory watcher 기반 active/visible pane refresh, ZIP host 변경 시 archive pane refresh
+- path input command resolver, Terminal fire-and-forget launch, Open With menu routing, external app launcher duplicate-completion guard
+- permission guidance, security-scoped bookmark store, persisted grant resolution/access lifecycle
+- AppKit table bridge, column sizing, supported-column sort affordance, context menu command availability, responder-chain shortcuts, system pasteboard file copy/paste
 - inspector model, thumbnail/Quick Look wiring
 
 수동 QA 기록:
@@ -171,6 +180,7 @@ docs/qa/file-table-icons-manual-qa.md
 docs/qa/finder-tags-manual-qa.md
 docs/qa/path-command-open-with-manual-qa.md
 docs/qa/inspector-preview-manual-qa.md
+docs/qa/regression-audit-2026-06-29.md
 ```
 
 ## 프로젝트 구조
@@ -211,6 +221,8 @@ swift test --enable-code-coverage
 swift build
 git diff --check
 ./scripts/build_app.sh
+./scripts/verify-app-icon.sh
+./scripts/package_personal.sh
 ```
 
-최근 검증 기준으로 `swift test --enable-code-coverage`는 289 tests / 0 failures로 통과했습니다. `./scripts/build_app.sh`로 생성한 `build/MyMacFinder.app`도 직접 실행해 홈 폴더 목록 렌더링과 root(`/`)에서 Up 버튼 비활성화를 확인했습니다.
+최근 검증 기준으로 `swift test --enable-code-coverage`는 316 tests / 0 failures로 통과했습니다. `./scripts/build_app.sh`, `./scripts/verify-app-icon.sh`, `./scripts/package_personal.sh`도 통과했고, 개인 설치 zip은 `dist/MyMacFinder-personal-mac.zip`에 생성됩니다. 이전 수동 QA에서는 `build/MyMacFinder.app`을 직접 실행해 `Cmd+L` 후 `cmd` 경로 명령이 Terminal을 열고 MyMacFinder를 유지하는 것을 확인했습니다.
