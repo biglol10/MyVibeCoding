@@ -153,7 +153,7 @@ swift test
 - preview content loader: 텍스트 판별, byte limit, main-thread read 방지, binary fallback, read error fallback
 - tabs, layout settings, sidebar favorites add/reorder/remove, full-row sidebar hit targets, mounted volumes
 - root 상위 폴더 이동 비활성화와 path input focus clear
-- path input command resolver, Open With menu routing, external app launcher injection
+- path input command resolver, Open With menu routing, external app launcher duplicate-completion guard
 - permission guidance, security-scoped bookmark store
 - AppKit table bridge, column sizing, context menu command availability, responder-chain shortcuts, system pasteboard file copy/paste
 - inspector model, thumbnail/Quick Look wiring
@@ -213,4 +213,4 @@ git diff --check
 ./scripts/build_app.sh
 ```
 
-최근 검증 기준으로 `swift test --enable-code-coverage`는 286 tests / 0 failures로 통과했습니다. `./scripts/build_app.sh`로 생성한 `build/MyMacFinder.app`도 직접 실행해 홈 폴더 목록 렌더링과 root(`/`)에서 Up 버튼 비활성화를 확인했습니다.
+최근 검증 기준으로 `swift test --enable-code-coverage`는 289 tests / 0 failures로 통과했습니다. `./scripts/build_app.sh`로 생성한 `build/MyMacFinder.app`도 직접 실행해 홈 폴더 목록 렌더링과 root(`/`)에서 Up 버튼 비활성화를 확인했습니다.

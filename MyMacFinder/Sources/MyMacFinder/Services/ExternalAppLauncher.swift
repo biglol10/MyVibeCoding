@@ -3,6 +3,22 @@ import Foundation
 import UniformTypeIdentifiers
 
 @MainActor
+public protocol WorkspaceApplicationOpening: AnyObject {
+    @discardableResult
+    func open(_ url: URL) -> Bool
+    func open(
+        _ urls: [URL],
+        withApplicationAt applicationURL: URL,
+        configuration: NSWorkspace.OpenConfiguration,
+        completionHandler: ((NSRunningApplication?, (any Error)?) -> Void)?
+    )
+    func urlForApplication(withBundleIdentifier bundleIdentifier: String) -> URL?
+    func urlsForApplications(toOpen contentType: UTType) -> [URL]
+}
+
+extension NSWorkspace: WorkspaceApplicationOpening {}
+
+@MainActor
 public protocol ExternalAppLaunching: AnyObject {
     func openDefault(_ url: URL)
     func open(_ urls: [URL], with application: OpenWithApplication) async throws
@@ -13,10 +29,18 @@ public protocol ExternalAppLaunching: AnyObject {
 
 @MainActor
 public final class AppKitExternalAppLauncher: ExternalAppLaunching {
-    private let workspace: NSWorkspace
+    private let workspace: any WorkspaceApplicationOpening
+    private let terminalApplicationURL: URL
 
-    public init(workspace: NSWorkspace = .shared) {
+    public init(
+        workspace: any WorkspaceApplicationOpening = NSWorkspace.shared,
+        terminalApplicationURL: URL = URL(
+            fileURLWithPath: "/System/Applications/Utilities/Terminal.app",
+            isDirectory: true
+        )
+    ) {
         self.workspace = workspace
+        self.terminalApplicationURL = terminalApplicationURL.standardizedFileURL
     }
 
     public func openDefault(_ url: URL) {
@@ -28,11 +52,10 @@ public final class AppKitExternalAppLauncher: ExternalAppLaunching {
     }
 
     public func openTerminal(at directory: URL) async throws {
-        let terminalURL = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app", isDirectory: true)
-        guard FileManager.default.fileExists(atPath: terminalURL.path) else {
+        guard FileManager.default.fileExists(atPath: terminalApplicationURL.path) else {
             throw ExplorerError.readFailed("Terminal.app was not found.")
         }
-        try await open([directory.standardizedFileURL], withApplicationAt: terminalURL)
+        try await open([directory.standardizedFileURL], withApplicationAt: terminalApplicationURL)
     }
 
     public func openVSCode(at target: URL) async throws {
@@ -68,11 +91,16 @@ public final class AppKitExternalAppLauncher: ExternalAppLaunching {
         configuration.promptsUserIfNeeded = true
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let completion = OneShotWorkspaceOpenCompletion()
             workspace.open(
                 urls,
                 withApplicationAt: applicationURL,
                 configuration: configuration
             ) { _, error in
+                guard completion.shouldResume() else {
+                    return
+                }
+
                 if let error {
                     continuation.resume(throwing: error)
                 } else {
@@ -129,5 +157,23 @@ public final class AppKitExternalAppLauncher: ExternalAppLaunching {
             title: title,
             bundleIdentifier: bundle?.bundleIdentifier
         )
+    }
+}
+
+private final class OneShotWorkspaceOpenCompletion: @unchecked Sendable {
+    private let lock = NSLock()
+    private var didResume = false
+
+    func shouldResume() -> Bool {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+
+        guard !didResume else {
+            return false
+        }
+        didResume = true
+        return true
     }
 }
