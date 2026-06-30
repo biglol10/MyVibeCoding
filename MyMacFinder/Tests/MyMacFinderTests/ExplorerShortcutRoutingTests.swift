@@ -31,17 +31,47 @@ final class ExplorerShortcutRoutingTests: XCTestCase {
         )
     }
 
-    func testDoesNotRouteUnmodifiedShortcutsThroughGlobalMonitor() {
-        XCTAssertNil(
+    func testRoutesEnabledUnmodifiedActionShortcutsWhenTextEditingIsNotFocused() {
+        XCTAssertEqual(
             ExplorerShortcutRouting.command(
                 for: ExplorerShortcut(key: "return", modifiers: []),
                 isToolbarTextInputFocused: false,
+                isCommandEnabled: { $0 == .open }
+            ),
+            .open
+        )
+        XCTAssertEqual(
+            ExplorerShortcutRouting.command(
+                for: ExplorerShortcut(key: "space", modifiers: []),
+                isToolbarTextInputFocused: false,
+                isCommandEnabled: { $0 == .quickLook }
+            ),
+            .quickLook
+        )
+    }
+
+    func testDoesNotRouteUnmodifiedActionShortcutsWhileTextEditing() {
+        XCTAssertNil(
+            ExplorerShortcutRouting.command(
+                for: ExplorerShortcut(key: "return", modifiers: []),
+                isToolbarTextInputFocused: true,
                 isCommandEnabled: { _ in true }
             )
         )
         XCTAssertNil(
             ExplorerShortcutRouting.command(
                 for: ExplorerShortcut(key: "space", modifiers: []),
+                isToolbarTextInputFocused: false,
+                isTextEditingResponderFocused: true,
+                isCommandEnabled: { _ in true }
+            )
+        )
+    }
+
+    func testDoesNotRouteUnmodifiedTextKeysThroughGlobalMonitor() {
+        XCTAssertNil(
+            ExplorerShortcutRouting.command(
+                for: ExplorerShortcut(key: "a", modifiers: []),
                 isToolbarTextInputFocused: false,
                 isCommandEnabled: { _ in true }
             )

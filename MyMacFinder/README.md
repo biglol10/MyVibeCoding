@@ -32,9 +32,9 @@ MyMacFinder는 macOS Finder를 Windows 파일 탐색기와 ForkLift에 가까운
 최근 자동/수동 검증에서 확인한 흐름입니다.
 
 - 앱 번들 실행 후 홈 폴더 목록 렌더링
-- Return / Command-Down으로 폴더 진입, 파일은 Open 동작
+- Return / Command-Down으로 폴더 진입, 파일은 Open 동작. 검색 결과나 테이블 선택 직후 focus가 창에 남아도 Return은 선택 항목 Open으로 라우팅
 - 상위 폴더 이동은 root(`/`)에서 비활성화되고 path input을 canonical path로 유지
-- Date Modified와 Tags 열이 좁은 화면에서도 잘리지 않도록 표시
+- Name, Date Modified, Kind 열이 좁은 화면에서도 우선적으로 읽히도록 기본 폭과 자동 리사이즈를 조정
 - 실제 정렬 가능한 컬럼만 정렬 affordance를 표시하며, Tags처럼 아직 정렬 엔진이 없는 컬럼은 fake sort UI를 노출하지 않음
 - Finder Tags 편집 후 table과 inspector가 즉시 갱신
 - Finder Tag 필터 중 태그 편집으로 항목이 필터에서 사라지면 selection도 함께 정리
@@ -56,6 +56,7 @@ MyMacFinder는 macOS Finder를 Windows 파일 탐색기와 ForkLift에 가까운
 - 경로 입력창에 포커스가 있을 때 `Cmd+A/C/V` 같은 텍스트 편집 단축키는 파일 작업 단축키로 새지 않음
 - 파일 컨텍스트 메뉴 Open With와 폴더 Open in Terminal / Open in VS Code
 - Settings의 기본 정렬 변경은 현재 pane뿐 아니라 열려 있는 비활성 tab에도 적용
+- 폴더 이동 시 table scroll position을 좌상단으로 초기화해서 이전 폴더의 가로/세로 스크롤이 새 폴더에 남지 않음
 - 폴더를 자기 하위 경로로 copy/move/paste/drop 하는 edge case 차단
 - 같은 폴더에 같은 이름으로 copy할 때 원본을 replace하지 않고 `copy` 이름으로 분기
 - 충돌 처리, replace 실패 rollback, Undo, 대용량 작업 progress banner
@@ -164,7 +165,7 @@ swift test
 - directory watcher 기반 active/visible pane refresh, ZIP host 변경 시 archive pane refresh
 - path input command resolver, Terminal fire-and-forget launch, Open With menu routing, external app launcher duplicate-completion guard
 - permission guidance, security-scoped bookmark store, persisted grant resolution/access lifecycle
-- AppKit table bridge, column sizing, supported-column sort affordance, context menu command availability, responder-chain shortcuts, system pasteboard file copy/paste
+- AppKit table bridge, column sizing, location-change scroll reset, supported-column sort affordance, context menu command availability, responder-chain shortcuts, system pasteboard file copy/paste
 - inspector model, thumbnail/Quick Look wiring
 
 수동 QA 기록:
@@ -181,6 +182,7 @@ docs/qa/finder-tags-manual-qa.md
 docs/qa/path-command-open-with-manual-qa.md
 docs/qa/inspector-preview-manual-qa.md
 docs/qa/regression-audit-2026-06-29.md
+docs/qa/e2e-ui-ux-audit-2026-06-30.md
 ```
 
 ## 프로젝트 구조
@@ -225,4 +227,4 @@ git diff --check
 ./scripts/package_personal.sh
 ```
 
-최근 검증 기준으로 `swift test --enable-code-coverage`는 316 tests / 0 failures로 통과했습니다. `./scripts/build_app.sh`, `./scripts/verify-app-icon.sh`, `./scripts/package_personal.sh`도 통과했고, 개인 설치 zip은 `dist/MyMacFinder-personal-mac.zip`에 생성됩니다. 이전 수동 QA에서는 `build/MyMacFinder.app`을 직접 실행해 `Cmd+L` 후 `cmd` 경로 명령이 Terminal을 열고 MyMacFinder를 유지하는 것을 확인했습니다.
+최근 검증 기준으로 `swift test --enable-code-coverage`는 326 tests / 0 failures로 통과했습니다. `./scripts/build_app.sh`, `./scripts/verify-app-icon.sh`, `./scripts/package_personal.sh`도 통과했고, 개인 설치 zip은 `dist/MyMacFinder-personal-mac.zip`에 생성됩니다. 최근 수동 QA에서는 `build/MyMacFinder.app`을 직접 실행해 선택 후 Return 탐색, 검색 결과 Return 탐색과 search clear, Recent Folders 경로 갱신, 대량 목록 스크롤, 컬럼 읽기성, range selection, 빠른 더블클릭 폴더 이동을 확인했습니다.

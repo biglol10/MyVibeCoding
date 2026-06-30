@@ -105,7 +105,7 @@ final class FileTableViewReuseTests: XCTestCase {
         var focusCount = 0
         let harness = makeTableHarness(
             entries: [entry],
-            selectedRowIndexes: IndexSet(integer: 0),
+            selectedRowIndexes: [],
             canPaste: false,
             canUndo: false,
             onFocus: { focusCount += 1 },
@@ -115,6 +115,103 @@ final class FileTableViewReuseTests: XCTestCase {
         harness.coordinator.handleTableFocus()
 
         XCTAssertEqual(focusCount, 1)
+    }
+
+    func testSelectionChangeClearsToolbarFocusThroughTableFocusCallback() {
+        let entry = makeTableEntry(name: "report.txt")
+        var focusCount = 0
+        let harness = makeTableHarness(
+            entries: [entry],
+            selectedRowIndexes: [],
+            canPaste: false,
+            canUndo: false,
+            onFocus: { focusCount += 1 },
+            onCommand: { _ in }
+        )
+        harness.tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+
+        XCTAssertEqual(focusCount, 1)
+    }
+
+    func testRangeSelectionChangePublishesEverySelectedRow() {
+        let entries = (0..<5).map { makeTableEntry(name: "file-\($0).txt") }
+        var selections: [Set<URL>] = []
+        let harness = makeTableHarness(
+            entries: entries,
+            selectedRowIndexes: IndexSet(integer: 1),
+            canPaste: false,
+            canUndo: false,
+            onSelectionChange: { selections.append($0) },
+            onCommand: { _ in }
+        )
+
+        harness.tableView.selectRowIndexes(IndexSet(integersIn: 1..<4), byExtendingSelection: false)
+
+        XCTAssertEqual(selections.last, Set(entries[1...3].map(\.url)))
+    }
+
+    func testDoubleClickPublishesClickedSelectionBeforeOpening() {
+        let entries = [
+            makeTableEntry(name: "Alpha"),
+            makeTableEntry(name: "Beta")
+        ]
+        var selections: [Set<URL>] = []
+        var openedURLs: [URL] = []
+        let harness = makeTableHarness(
+            entries: entries,
+            selectedRowIndexes: IndexSet(integer: 0),
+            canPaste: false,
+            canUndo: false,
+            onSelectionChange: { selections.append($0) },
+            onOpen: { openedURLs.append($0) },
+            onCommand: { _ in }
+        )
+        let clickedTableView = ClickedRowTableView(clickedRow: 1)
+        clickedTableView.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name")))
+        clickedTableView.dataSource = harness.coordinator
+        clickedTableView.delegate = harness.coordinator
+        harness.coordinator.tableView = clickedTableView
+        clickedTableView.reloadData()
+        clickedTableView.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
+        selections.removeAll()
+
+        harness.coordinator.doubleClicked(clickedTableView)
+
+        XCTAssertEqual(selections, [Set([entries[1].url])])
+        XCTAssertEqual(openedURLs, [entries[1].url])
+    }
+
+    func testInsertNewlineRoutesOpenCommandForSelectedRow() {
+        let entry = makeTableEntry(name: "Projects")
+        var commands: [ExplorerCommand] = []
+        let harness = makeTableHarness(
+            entries: [entry],
+            selectedRowIndexes: IndexSet(integer: 0),
+            canPaste: false,
+            canUndo: false,
+            onCommand: { commands.append($0) }
+        )
+
+        harness.tableView.insertNewline(nil as Any?)
+
+        XCTAssertEqual(commands, [.open])
+        XCTAssertEqual(harness.tableView.selectedRowIndexes, IndexSet(integer: 0))
+    }
+
+    func testInsertNewlineDoesNotRouteOpenWithoutSelection() {
+        let entry = makeTableEntry(name: "Projects")
+        var commands: [ExplorerCommand] = []
+        let harness = makeTableHarness(
+            entries: [entry],
+            selectedRowIndexes: [],
+            canPaste: false,
+            canUndo: false,
+            onCommand: { commands.append($0) }
+        )
+
+        harness.tableView.insertNewline(nil as Any?)
+
+        XCTAssertTrue(commands.isEmpty)
     }
 
     func testCellsHaveStableReuseIdentifiersPerColumn() {
@@ -471,15 +568,18 @@ final class FileTableViewReuseTests: XCTestCase {
 
         let regularColumns = fileTable.columnDefinitions
         let nameColumn = try XCTUnwrap(regularColumns.first { $0.key == "name" })
+        let sizeColumn = try XCTUnwrap(regularColumns.first { $0.key == "size" })
         let dateColumn = try XCTUnwrap(regularColumns.first { $0.key == "modified" })
         let kindColumn = try XCTUnwrap(regularColumns.first { $0.key == "kind" })
 
-        XCTAssertGreaterThanOrEqual(nameColumn.width, 220)
-        XCTAssertGreaterThanOrEqual(nameColumn.minWidth, 180)
-        XCTAssertGreaterThanOrEqual(dateColumn.minWidth, 132)
-        XCTAssertGreaterThanOrEqual(kindColumn.minWidth, 90)
-        XCTAssertLessThanOrEqual(regularColumns.reduce(0) { $0 + $1.minWidth }, 560)
-        XCTAssertLessThanOrEqual(regularColumns.reduce(0) { $0 + $1.width }, 600)
+        XCTAssertGreaterThanOrEqual(nameColumn.width, 300)
+        XCTAssertGreaterThanOrEqual(nameColumn.minWidth, 220)
+        XCTAssertGreaterThanOrEqual(sizeColumn.minWidth, 50)
+        XCTAssertGreaterThanOrEqual(dateColumn.minWidth, 140)
+        XCTAssertGreaterThanOrEqual(kindColumn.width, 170)
+        XCTAssertGreaterThanOrEqual(kindColumn.minWidth, 150)
+        XCTAssertLessThanOrEqual(regularColumns.reduce(0) { $0 + $1.minWidth }, 620)
+        XCTAssertLessThanOrEqual(regularColumns.reduce(0) { $0 + $1.width }, 740)
     }
 
     func testTableColumnsApplyReadableMinimumWidths() throws {
@@ -539,7 +639,7 @@ final class FileTableViewReuseTests: XCTestCase {
         XCTAssertNil(columnsByKey["tags"]?.sortDescriptorPrototype)
     }
 
-    func testLastColumnReceivesRemainingWidthInNarrowDualPaneLayouts() {
+    func testNameColumnReceivesRemainingWidthInWideLayouts() {
         let fileTable = FileTableView(
             entries: [],
             selectedURLs: [],
@@ -557,7 +657,44 @@ final class FileTableViewReuseTests: XCTestCase {
             onSortChange: { _ in }
         )
 
-        XCTAssertEqual(fileTable.columnAutoresizingStyle, .lastColumnOnlyAutoresizingStyle)
+        XCTAssertEqual(fileTable.columnAutoresizingStyle, .firstColumnOnlyAutoresizingStyle)
+    }
+
+    func testLocationChangeResetsScrollPositionButSameLocationKeepsIt() {
+        let entries = (0..<50).map { makeTableEntry(name: "file-\($0).txt") }
+        let oldLocation = PaneLocation.fileSystem(URL(fileURLWithPath: "/tmp/old", isDirectory: true))
+        let newLocation = PaneLocation.fileSystem(URL(fileURLWithPath: "/tmp/new", isDirectory: true))
+        let harness = makeTableHarness(
+            entries: entries,
+            selectedRowIndexes: [],
+            canPaste: false,
+            canUndo: false,
+            currentLocation: oldLocation,
+            onCommand: { _ in }
+        )
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 240, height: 120))
+        harness.tableView.frame = NSRect(x: 0, y: 0, width: 900, height: 900)
+        scrollView.documentView = harness.tableView
+
+        scrollView.contentView.scroll(to: NSPoint(x: 120, y: 80))
+        harness.coordinator.resetScrollIfLocationChanged(in: scrollView)
+        XCTAssertEqual(scrollView.contentView.bounds.origin, .zero)
+
+        scrollView.contentView.scroll(to: NSPoint(x: 120, y: 80))
+        harness.coordinator.resetScrollIfLocationChanged(in: scrollView)
+        XCTAssertEqual(scrollView.contentView.bounds.origin, NSPoint(x: 120, y: 80))
+
+        let updatedHarness = makeTableHarness(
+            entries: entries,
+            selectedRowIndexes: [],
+            canPaste: false,
+            canUndo: false,
+            currentLocation: newLocation,
+            onCommand: { _ in }
+        )
+        harness.coordinator.parent = updatedHarness.fileTable
+        harness.coordinator.resetScrollIfLocationChanged(in: scrollView)
+        XCTAssertEqual(scrollView.contentView.bounds.origin, .zero)
     }
 }
 
@@ -606,8 +743,11 @@ private func makeTableHarness(
     selectedRowIndexes: IndexSet,
     canPaste: Bool,
     canUndo: Bool,
+    currentLocation: PaneLocation = .fileSystem(URL(fileURLWithPath: "/tmp", isDirectory: true)),
     openWithApplications: [OpenWithApplication] = [],
     onFocus: @escaping () -> Void = {},
+    onSelectionChange: @escaping (Set<URL>) -> Void = { _ in },
+    onOpen: @escaping (URL) -> Void = { _ in },
     onOpenWithApplication: @escaping (OpenWithApplication) -> Void = { _ in },
     onCommand: @escaping (ExplorerCommand) -> Void
 ) -> (fileTable: FileTableView, coordinator: FileTableView.Coordinator, tableView: FileTableView.ContextMenuTableView) {
@@ -620,13 +760,13 @@ private func makeTableHarness(
         canPaste: canPaste,
         canUndo: canUndo,
         canCloseTab: false,
-        currentURL: URL(fileURLWithPath: "/tmp", isDirectory: true),
-        currentLocation: .fileSystem(URL(fileURLWithPath: "/tmp", isDirectory: true)),
+        currentURL: currentLocation.fileSystemURL ?? URL(fileURLWithPath: "/tmp", isDirectory: true),
+        currentLocation: currentLocation,
         currentSort: EntrySortDescriptor(),
         showsPathColumn: false,
         onFocus: onFocus,
-        onSelectionChange: { _ in },
-        onOpen: { _ in },
+        onSelectionChange: onSelectionChange,
+        onOpen: onOpen,
         onCommand: onCommand,
         openWithApplications: openWithApplications,
         onOpenWithApplication: onOpenWithApplication,
@@ -643,4 +783,22 @@ private func makeTableHarness(
     tableView.reloadData()
     tableView.selectRowIndexes(selectedRowIndexes, byExtendingSelection: false)
     return (fileTable, coordinator, tableView)
+}
+
+@MainActor
+private final class ClickedRowTableView: NSTableView {
+    var clickedRowOverride: Int
+
+    init(clickedRow: Int) {
+        self.clickedRowOverride = clickedRow
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var clickedRow: Int {
+        clickedRowOverride
+    }
 }

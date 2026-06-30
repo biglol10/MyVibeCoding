@@ -154,7 +154,7 @@ struct PathInputField: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSTextField {
-        let textField = NSTextField()
+        let textField = PathInputTextField()
         textField.placeholderString = "Path"
         textField.stringValue = text
         textField.delegate = context.coordinator
@@ -190,6 +190,7 @@ struct PathInputField: NSViewRepresentable {
         private weak var monitoredTextField: NSTextField?
         private var returnKeyMonitor: Any?
         private var appliedFocusClearSequence: Int
+        private var lastSubmittedText: String?
 
         init(parent: PathInputField) {
             self.parent = parent
@@ -198,10 +199,19 @@ struct PathInputField: NSViewRepresentable {
 
         func attach(_ textField: NSTextField) {
             monitoredTextField = textField
+            if let pathInputTextField = textField as? PathInputTextField {
+                pathInputTextField.accessibilityValueDidChange = { [weak self] value in
+                    self?.lastSubmittedText = nil
+                    self?.parent.text = value
+                }
+            }
             installReturnKeyMonitor(for: textField)
         }
 
         func detach() {
+            if let pathInputTextField = monitoredTextField as? PathInputTextField {
+                pathInputTextField.accessibilityValueDidChange = nil
+            }
             removeReturnKeyMonitor()
             monitoredTextField = nil
         }
@@ -222,6 +232,7 @@ struct PathInputField: NSViewRepresentable {
             guard !isApplyingFocus else {
                 return
             }
+            lastSubmittedText = nil
             if let textField = notification.object as? NSTextField {
                 installReturnKeyMonitor(for: textField)
             }
@@ -232,10 +243,19 @@ struct PathInputField: NSViewRepresentable {
             guard let textField = notification.object as? NSTextField else {
                 return
             }
+            lastSubmittedText = nil
+            (textField as? PathInputTextField)?.clearPendingAccessibilityText()
             parent.text = visibleText(for: textField)
         }
 
         func controlTextDidEndEditing(_ notification: Notification) {
+            if let textField = notification.object as? NSTextField {
+                let text = submittedText(for: textField)
+                parent.text = text
+                if Self.isReturnMovement(notification), lastSubmittedText != text {
+                    submit(text)
+                }
+            }
             parent.onFocusChange(false)
         }
 
@@ -245,6 +265,7 @@ struct PathInputField: NSViewRepresentable {
             }
 
             let editor = activeEditor(for: textField)
+            (textField as? PathInputTextField)?.clearPendingAccessibilityText()
             textField.stringValue = text
             editor?.string = text
         }
@@ -281,11 +302,22 @@ struct PathInputField: NSViewRepresentable {
 
         private func submit(_ submittedText: String) {
             parent.text = submittedText
+            lastSubmittedText = submittedText
             parent.onSubmit(submittedText)
         }
 
         private func visibleText(for textField: NSTextField) -> String {
             activeEditor(for: textField)?.string ?? textField.stringValue
+        }
+
+        private func submittedText(for textField: NSTextField) -> String {
+            if let editorText = activeEditor(for: textField)?.string {
+                return editorText
+            }
+            if let accessibilityText = (textField as? PathInputTextField)?.pendingAccessibilityText {
+                return accessibilityText
+            }
+            return textField.stringValue
         }
 
         private func resignFocus(for textField: NSTextField) {
@@ -332,6 +364,14 @@ struct PathInputField: NSViewRepresentable {
                 || event.charactersIgnoringModifiers == "\n"
         }
 
+        private static func isReturnMovement(_ notification: Notification) -> Bool {
+            guard let rawMovement = notification.userInfo?[NSText.movementUserInfoKey] as? Int,
+                  let movement = NSTextMovement(rawValue: rawMovement) else {
+                return false
+            }
+            return movement == .return
+        }
+
         private func activeEditor(for textField: NSTextField) -> NSText? {
             if let currentEditor = textField.currentEditor() {
                 return currentEditor
@@ -344,6 +384,27 @@ struct PathInputField: NSViewRepresentable {
             }
             return fieldEditor
         }
+    }
+}
+
+final class PathInputTextField: NSTextField {
+    var accessibilityValueDidChange: ((String) -> Void)?
+    private(set) var pendingAccessibilityText: String?
+
+    override func setAccessibilityValue(_ accessibilityValue: Any?) {
+        guard let accessibilityValue = accessibilityValue as? String else {
+            super.setAccessibilityValue(accessibilityValue)
+            return
+        }
+
+        pendingAccessibilityText = accessibilityValue
+        stringValue = accessibilityValue
+        currentEditor()?.string = accessibilityValue
+        accessibilityValueDidChange?(accessibilityValue)
+    }
+
+    func clearPendingAccessibilityText() {
+        pendingAccessibilityText = nil
     }
 }
 

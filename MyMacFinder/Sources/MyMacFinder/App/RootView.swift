@@ -357,8 +357,16 @@ private struct ExplorerShortcutMonitor: NSViewRepresentable {
 
             let key: String
             switch event.keyCode {
+            case 36, 76:
+                key = "return"
+            case 49:
+                key = "space"
+            case 53:
+                key = "escape"
             case 48:
                 key = "tab"
+            case 120:
+                key = "f2"
             default:
                 key = event.charactersIgnoringModifiers?.lowercased() ?? ""
             }

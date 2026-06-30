@@ -78,6 +78,7 @@ struct FileTableView: NSViewRepresentable {
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         context.coordinator.parent = self
         context.coordinator.syncColumns()
+        context.coordinator.resetScrollIfLocationChanged(in: nsView)
         context.coordinator.reloadDataIfNeeded()
         context.coordinator.applySelection(selectedURLs)
         context.coordinator.syncSortDescriptor()
@@ -86,20 +87,20 @@ struct FileTableView: NSViewRepresentable {
 
     var columnDefinitions: [FileTableColumnDefinition] {
         var columns = [
-            FileTableColumnDefinition(key: "name", title: "Name", width: 220, minWidth: 180),
-            FileTableColumnDefinition(key: "size", title: "Size", width: 50, minWidth: 50),
-            FileTableColumnDefinition(key: "modified", title: "Date Modified", width: 132, minWidth: 132),
-            FileTableColumnDefinition(key: "kind", title: "Kind", width: 90, minWidth: 90),
-            FileTableColumnDefinition(key: "tags", title: "Tags", width: 86, minWidth: 70)
+            FileTableColumnDefinition(key: "name", title: "Name", width: 300, minWidth: 220),
+            FileTableColumnDefinition(key: "size", title: "Size", width: 60, minWidth: 50),
+            FileTableColumnDefinition(key: "modified", title: "Date Modified", width: 150, minWidth: 140),
+            FileTableColumnDefinition(key: "kind", title: "Kind", width: 170, minWidth: 150),
+            FileTableColumnDefinition(key: "tags", title: "Tags", width: 60, minWidth: 50)
         ]
         if showsPathColumn {
-            columns.append(FileTableColumnDefinition(key: "path", title: "Path", width: 260, minWidth: 180))
+            columns.append(FileTableColumnDefinition(key: "path", title: "Path", width: 280, minWidth: 220))
         }
         return columns
     }
 
     var columnAutoresizingStyle: NSTableView.ColumnAutoresizingStyle {
-        .lastColumnOnlyAutoresizingStyle
+        .firstColumnOnlyAutoresizingStyle
     }
 
     func makeTableColumn(_ column: FileTableColumnDefinition) -> NSTableColumn {
@@ -119,6 +120,7 @@ struct FileTableView: NSViewRepresentable {
         var parent: FileTableView
         weak var tableView: NSTableView?
         private var renderedEntries: [FileEntry] = []
+        private var renderedLocation: PaneLocation?
         private var isSyncingSortDescriptor = false
         private var didRequestInitialFocus = false
 
@@ -148,6 +150,7 @@ struct FileTableView: NSViewRepresentable {
         }
 
         func tableViewSelectionDidChange(_ notification: Notification) {
+            handleTableFocus()
             publishSelection()
         }
 
@@ -243,6 +246,10 @@ struct FileTableView: NSViewRepresentable {
             guard row >= 0, row < parent.entries.count else {
                 return
             }
+            if !sender.selectedRowIndexes.contains(row) {
+                sender.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            }
+            publishSelection()
             parent.onOpen(parent.entries[row].url)
         }
 
@@ -341,6 +348,16 @@ struct FileTableView: NSViewRepresentable {
 
             renderedEntries = parent.entries
             tableView?.reloadData()
+        }
+
+        func resetScrollIfLocationChanged(in scrollView: NSScrollView) {
+            guard renderedLocation != parent.currentLocation else {
+                return
+            }
+
+            renderedLocation = parent.currentLocation
+            scrollView.contentView.scroll(to: .zero)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
         }
 
         func syncColumns() {
@@ -833,9 +850,8 @@ struct FileTableView: NSViewRepresentable {
         }
 
         override func mouseDown(with event: NSEvent) {
-            window?.makeFirstResponder(self)
-            menuProvider?.handleTableFocus()
             super.mouseDown(with: event)
+            menuProvider?.handleTableFocus()
         }
 
         override func rightMouseDown(with event: NSEvent) {
@@ -857,6 +873,12 @@ struct FileTableView: NSViewRepresentable {
                 return
             }
             super.keyDown(with: event)
+        }
+
+        @objc override func insertNewline(_ sender: Any?) {
+            if menuProvider?.performCommand(.open) == true {
+                return
+            }
         }
 
         @objc(copy:)

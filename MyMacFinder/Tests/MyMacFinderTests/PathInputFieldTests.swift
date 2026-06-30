@@ -62,6 +62,69 @@ final class PathInputFieldTests: XCTestCase {
         XCTAssertEqual(submittedTexts, ["/Users/biglol/Documents"])
     }
 
+    func testReturnEndEditingSubmitsAccessibilityEditedText() {
+        var boundText = "/Users/biglol"
+        var focusStates: [Bool] = []
+        var submittedTexts: [String] = []
+        let field = PathInputField(
+            text: Binding(
+                get: { boundText },
+                set: { boundText = $0 }
+            ),
+            isFocused: false,
+            onFocusChange: { focusStates.append($0) },
+            onSubmit: { submittedTexts.append($0) }
+        )
+        let coordinator = field.makeCoordinator()
+        let textField = PathInputTextField()
+        textField.stringValue = boundText
+        coordinator.attach(textField)
+        textField.setAccessibilityValue("/tmp/mfe/source")
+
+        coordinator.controlTextDidEndEditing(Notification(
+            name: NSControl.textDidEndEditingNotification,
+            object: textField,
+            userInfo: [NSText.movementUserInfoKey: NSTextMovement.return.rawValue]
+        ))
+
+        XCTAssertEqual(focusStates, [false])
+        XCTAssertEqual(boundText, "/tmp/mfe/source")
+        XCTAssertEqual(submittedTexts, ["/tmp/mfe/source"])
+    }
+
+    func testManualTextChangeClearsStaleAccessibilityTextBeforeReturnEndEditing() {
+        var boundText = "/Users/biglol"
+        var submittedTexts: [String] = []
+        let field = PathInputField(
+            text: Binding(
+                get: { boundText },
+                set: { boundText = $0 }
+            ),
+            isFocused: false,
+            onFocusChange: { _ in },
+            onSubmit: { submittedTexts.append($0) }
+        )
+        let coordinator = field.makeCoordinator()
+        let textField = PathInputTextField()
+        textField.stringValue = boundText
+        coordinator.attach(textField)
+        textField.setAccessibilityValue("/tmp/mfe/source")
+
+        textField.stringValue = "/tmp/mfe/preview"
+        coordinator.controlTextDidChange(Notification(
+            name: NSControl.textDidChangeNotification,
+            object: textField
+        ))
+        coordinator.controlTextDidEndEditing(Notification(
+            name: NSControl.textDidEndEditingNotification,
+            object: textField,
+            userInfo: [NSText.movementUserInfoKey: NSTextMovement.return.rawValue]
+        ))
+
+        XCTAssertEqual(boundText, "/tmp/mfe/preview")
+        XCTAssertEqual(submittedTexts, ["/tmp/mfe/preview"])
+    }
+
     func testExternalPathUpdateReplacesActiveEditorText() throws {
         var boundText = "/Users/biglol"
         let field = PathInputField(

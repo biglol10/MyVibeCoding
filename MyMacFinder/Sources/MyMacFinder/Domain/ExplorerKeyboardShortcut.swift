@@ -103,7 +103,9 @@ public enum ExplorerShortcutRouting {
         isTextEditingResponderFocused: Bool,
         isCommandEnabled: (ExplorerCommand) -> Bool
     ) -> ExplorerCommand? {
-        guard shortcut.modifiers.contains(.command) || shortcut.modifiers.contains(.control) else {
+        let isModifiedAppShortcut = shortcut.modifiers.contains(.command) || shortcut.modifiers.contains(.control)
+        let isUnmodifiedActionShortcut = shortcut.modifiers.isEmpty
+        guard isModifiedAppShortcut || isUnmodifiedActionShortcut else {
             return nil
         }
         guard let command = ExplorerKeyboardShortcut.command(for: shortcut) else {
