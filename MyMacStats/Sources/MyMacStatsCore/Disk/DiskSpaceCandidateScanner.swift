@@ -33,7 +33,7 @@ public struct DiskSpaceCandidateScanner {
     }
 
     public func scan(targets: [DiskSpaceCandidateTarget]? = nil) -> [DiskSpaceCandidate] {
-        let scanTargets = targets ?? defaultTargets()
+        let scanTargets = targets ?? Self.defaultTargets(home: fileManager.homeDirectoryForCurrentUser)
         return scanTargets.compactMap { target in
             guard fileManager.fileExists(atPath: target.url.path) else { return nil }
             let size = folderSize(at: target.url)
@@ -119,13 +119,7 @@ public struct DiskSpaceCandidateScanner {
         return total
     }
 
-    private func defaultTargets() -> [DiskSpaceCandidateTarget] {
-        let home = fileManager.homeDirectoryForCurrentUser
-        return [
-            DiskSpaceCandidateTarget(title: "Downloads", url: home.appendingPathComponent("Downloads", isDirectory: true)),
-            DiskSpaceCandidateTarget(title: "Trash", url: home.appendingPathComponent(".Trash", isDirectory: true)),
-            DiskSpaceCandidateTarget(title: "Caches", url: home.appendingPathComponent("Library/Caches", isDirectory: true)),
-            DiskSpaceCandidateTarget(title: "Xcode DerivedData", url: home.appendingPathComponent("Library/Developer/Xcode/DerivedData", isDirectory: true))
-        ]
+    static func defaultTargets(home _: URL) -> [DiskSpaceCandidateTarget] {
+        []
     }
 }

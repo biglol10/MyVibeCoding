@@ -7,20 +7,30 @@ final class ReleasePackagingTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let helperURL = packageRoot.appendingPathComponent("scripts/first-run.command")
+        let installerURL = packageRoot.appendingPathComponent("scripts/install.command")
         let buildScriptURL = packageRoot.appendingPathComponent("scripts/build-app-bundle.sh")
 
         let helperAttributes = try FileManager.default.attributesOfItem(atPath: helperURL.path)
         let helperMode = try XCTUnwrap(helperAttributes[.posixPermissions] as? NSNumber).intValue
         XCTAssertNotEqual(helperMode & 0o111, 0)
+        let installerAttributes = try FileManager.default.attributesOfItem(atPath: installerURL.path)
+        let installerMode = try XCTUnwrap(installerAttributes[.posixPermissions] as? NSNumber).intValue
+        XCTAssertNotEqual(installerMode & 0o111, 0)
 
         let helper = try String(contentsOf: helperURL, encoding: .utf8)
         XCTAssertTrue(helper.contains("MyMacStats.app"))
-        XCTAssertTrue(helper.contains("MYMACSTATS_INSTALL_DIR:-/Applications"))
-        XCTAssertTrue(helper.contains("ditto --rsrc --extattr"))
         XCTAssertTrue(helper.contains("xattr -dr com.apple.quarantine"))
-        XCTAssertTrue(helper.contains("open \"$INSTALLED_APP_PATH\""))
-        XCTAssertTrue(helper.contains("pkill -x MyMacStatsApp"))
+        XCTAssertTrue(helper.contains("open \"$APP_PATH\""))
         XCTAssertFalse(helper.contains("osascript"))
+
+        let installer = try String(contentsOf: installerURL, encoding: .utf8)
+        XCTAssertTrue(installer.contains("MyMacStats.app"))
+        XCTAssertTrue(installer.contains("MYMACSTATS_INSTALL_DIR:-/Applications"))
+        XCTAssertTrue(installer.contains("ditto --rsrc --extattr"))
+        XCTAssertTrue(installer.contains("xattr -dr com.apple.quarantine"))
+        XCTAssertTrue(installer.contains("open \"$INSTALLED_APP_PATH\""))
+        XCTAssertTrue(installer.contains("pkill -x MyMacStatsApp"))
+        XCTAssertFalse(installer.contains("osascript"))
 
         let buildScript = try String(contentsOf: buildScriptURL, encoding: .utf8)
         XCTAssertTrue(buildScript.contains("MACOS_SIGN_IDENTITY"))
@@ -59,11 +69,17 @@ final class ReleasePackagingTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let checkScriptURL = packageRoot.appendingPathComponent("scripts/check-distribution.sh")
+        let installerURL = packageRoot.appendingPathComponent("scripts/install.command")
         let checkScript = try String(contentsOf: checkScriptURL, encoding: .utf8)
+        let installer = try String(contentsOf: installerURL, encoding: .utf8)
 
         XCTAssertTrue(checkScript.contains("com.apple.quarantine"))
         XCTAssertTrue(checkScript.contains("ditto -x -k"))
+        XCTAssertTrue(checkScript.contains("MYMACSTATS_INSTALL_DIR"))
+        XCTAssertTrue(checkScript.contains("MYMACSTATS_SKIP_OPEN=1"))
         XCTAssertTrue(checkScript.contains("codesign --verify --deep --strict"))
         XCTAssertTrue(checkScript.contains("spctl --assess --type execute"))
+        XCTAssertTrue(checkScript.contains("--release"))
+        XCTAssertTrue(installer.contains("MYMACSTATS_SKIP_OPEN"))
     }
 }

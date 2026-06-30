@@ -25,4 +25,11 @@ final class DiskSpaceCandidateScannerTests: XCTestCase {
         XCTAssertGreaterThan(candidates[0].sizeBytes, candidates[1].sizeBytes)
         XCTAssertGreaterThan(candidates[1].sizeBytes, 0)
     }
+
+    func testDefaultTargetsAvoidAutomaticTCCPrompts() {
+        let home = URL(fileURLWithPath: "/Users/example", isDirectory: true)
+        let targets = DiskSpaceCandidateScanner.defaultTargets(home: home)
+
+        XCTAssertEqual(targets, [])
+    }
 }

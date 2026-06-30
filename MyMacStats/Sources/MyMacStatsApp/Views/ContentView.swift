@@ -31,9 +31,6 @@ struct ContentView: View {
         .task {
             viewModel.start()
         }
-        .onDisappear {
-            viewModel.stop()
-        }
     }
 
     private var terminationAlertBinding: Binding<Bool> {

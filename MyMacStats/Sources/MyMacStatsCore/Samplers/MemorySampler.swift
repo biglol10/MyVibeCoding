@@ -25,13 +25,33 @@ public struct MemorySampler {
 
         let total = ProcessInfo.processInfo.physicalMemory
         let pageBytes = UInt64(pageSize)
-        let free = UInt64(stats.free_count) * pageBytes
-        let compressed = UInt64(stats.compressor_page_count) * pageBytes
-        let cached = UInt64(stats.inactive_count + stats.speculative_count) * pageBytes
-        let used = total > free ? total - free : 0
+
+        return Self.snapshot(
+            totalBytes: total,
+            pageBytes: pageBytes,
+            freePages: UInt64(stats.free_count),
+            inactivePages: UInt64(stats.inactive_count),
+            speculativePages: UInt64(stats.speculative_count),
+            compressorPages: UInt64(stats.compressor_page_count)
+        )
+    }
+
+    static func snapshot(
+        totalBytes: UInt64,
+        pageBytes: UInt64,
+        freePages: UInt64,
+        inactivePages: UInt64,
+        speculativePages: UInt64,
+        compressorPages: UInt64
+    ) -> MemorySnapshot {
+        let free = freePages * pageBytes
+        let compressed = compressorPages * pageBytes
+        let cached = (inactivePages + speculativePages) * pageBytes
+        let unavailable = free + cached
+        let used = totalBytes > unavailable ? totalBytes - unavailable : 0
 
         return MemorySnapshot(
-            totalBytes: total,
+            totalBytes: totalBytes,
             usedBytes: used,
             freeBytes: free,
             compressedBytes: compressed,

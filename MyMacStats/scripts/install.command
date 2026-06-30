@@ -53,8 +53,12 @@ fi
 echo "설치된 앱 서명을 확인합니다..."
 codesign --verify --deep --strict "$INSTALLED_APP_PATH"
 
-echo "MyMacStats를 실행합니다..."
-open "$INSTALLED_APP_PATH"
+if [[ "${MYMACSTATS_SKIP_OPEN:-0}" == "1" ]]; then
+    echo "MYMACSTATS_SKIP_OPEN=1 이므로 앱 실행을 건너뜁니다."
+else
+    echo "MyMacStats를 실행합니다..."
+    open "$INSTALLED_APP_PATH"
+fi
 echo
 echo "설치 완료: $INSTALLED_APP_PATH"
 echo "다음부터는 Applications에서 MyMacStats를 바로 실행하면 됩니다."
