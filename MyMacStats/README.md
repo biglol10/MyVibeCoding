@@ -65,7 +65,7 @@ swift run MyMacStatsApp
 - Network 활성 인터페이스, 다운로드/업로드 속도, 누적 전송량 표시
 - Battery 충전 상태, 전원 소스, 사이클 수 표시 시도
 - Processes 검색 및 CPU/RAM/Name/PID 정렬
-- Quit / Force Quit 2단계 프로세스 종료 흐름
+- 프로세스 또는 앱 그룹 단위 Quit / Force Quit 2단계 종료 흐름
 - 보호 프로세스 종료 차단
 - 전체 사이드바 row 클릭 영역 지원
 
@@ -96,14 +96,14 @@ swift run MyMacStatsApp
 
 CPU 상태는 70%/90% 임계값이 10초 이상 유지될 때 warning/critical로 바뀝니다. RAM, Disk, Battery, Network는 각 샘플러 결과와 HealthEvaluator 규칙에 따라 상태가 정해집니다.
 
-## 프로세스 종료
+## 프로세스/앱 종료
 
-오른쪽 상세 패널에서 선택된 프로세스에 대해 `Quit Process`를 요청할 수 있습니다.
+오른쪽 상세 패널에서 선택된 대상에 대해 `Quit Process` 또는 `Quit App`을 요청할 수 있습니다. 단일 프로세스는 해당 PID만 대상으로 하고, 앱 그룹으로 묶인 항목은 같은 앱의 관련 프로세스들을 함께 대상으로 합니다.
 
-- 일반 Quit은 `SIGTERM`을 보냅니다.
-- Quit 후 같은 프로세스가 계속 남아 있으면 `Force Quit` 경로를 사용할 수 있습니다.
-- Force Quit은 `SIGKILL`을 보냅니다.
-- `launchd`, `WindowServer`, 앱 자신, 시스템 경로 프로세스 등은 보호 대상으로 처리되어 버튼이 비활성화됩니다.
+- 일반 Quit은 대상 프로세스들에 `SIGTERM`을 보냅니다.
+- Quit 후 대상 앱/프로세스가 계속 남아 있으면 `Force Quit` 경로를 사용할 수 있습니다.
+- Force Quit은 대상 프로세스들에 `SIGKILL`을 보냅니다.
+- `launchd`, `WindowServer`, 앱 자신, 시스템 경로 프로세스 등 보호 대상이 포함되면 버튼이 비활성화됩니다.
 
 ## 디스크 공간 후보
 
@@ -153,7 +153,7 @@ swift test
 - HealthEvaluator 상태 판정
 - metric formatter
 - process sorting/grouping
-- Quit / Force Quit signal 선택
+- 프로세스/앱 그룹 Quit / Force Quit 대상 및 signal 선택
 - dashboard view model 선택/정렬/검색/히스토리
 - system metrics snapshot 구성
 - disk space candidate scanner
