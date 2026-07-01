@@ -43,18 +43,20 @@ public final class DashboardViewModel: ObservableObject {
     @Published public var historyRange: HistoryRange
     @Published public var selectedProcessID: Int32?
     @Published public private(set) var pendingTerminationProcess: ProcessMetric?
+    @Published public private(set) var pendingTerminationGroup: ProcessAppGroup?
     @Published public private(set) var pendingTerminationMode: ProcessTerminationMode
     @Published public var terminationMessage: String?
 
     private let service: SystemMetricsService
     private var terminator: ProcessTerminator
     private var terminationMessageProcessID: Int32?
-    private var forceQuitCandidateProcessID: Int32?
+    private var forceQuitCandidateGroupID: String?
     private var refreshTask: Task<Void, Never>?
     private var displayedProcessesCacheKey: ProcessDisplayCacheKey?
     private var displayedProcessesCache: [ProcessMetric] = []
     private var displayedProcessGroupsCacheKey: ProcessDisplayCacheKey?
     private var displayedProcessGroupsCache: [ProcessAppGroup] = []
+    private var selectedProcessGroupID: String?
     private var sortPreferences: [MetricKind: ProcessSortPreference]
     private var isApplyingSortPreference: Bool
 
@@ -73,11 +75,13 @@ public final class DashboardViewModel: ObservableObject {
         self.refreshInterval = .oneSecond
         self.historyRange = .oneMinute
         self.selectedProcessID = nil
+        self.selectedProcessGroupID = nil
         self.pendingTerminationProcess = nil
+        self.pendingTerminationGroup = nil
         self.pendingTerminationMode = .quit
         self.terminationMessage = nil
         self.terminationMessageProcessID = nil
-        self.forceQuitCandidateProcessID = nil
+        self.forceQuitCandidateGroupID = nil
         self.sortPreferences = MetricKind.defaultProcessSortPreferences
         self.isApplyingSortPreference = false
     }
@@ -131,6 +135,10 @@ public final class DashboardViewModel: ObservableObject {
     }
 
     public var selectedProcessGroup: ProcessAppGroup? {
+        if let selectedProcessGroupID,
+           let selected = displayedProcessGroups.first(where: { $0.id == selectedProcessGroupID }) {
+            return selected
+        }
         if let selectedProcessID,
            let selected = displayedProcessGroups.first(where: { group in
                group.processes.contains { $0.pid == selectedProcessID }
@@ -174,7 +182,7 @@ public final class DashboardViewModel: ObservableObject {
         guard let selectedProcess else {
             return .denied("No process selected")
         }
-        return terminator.canTerminate(selectedProcess)
+        return terminator.canTerminate(terminationTargets(for: selectedProcess))
     }
 
     public var selectedProcessTerminationMessage: String? {
@@ -183,22 +191,41 @@ public final class DashboardViewModel: ObservableObject {
     }
 
     public var selectedProcessCanForceQuit: Bool {
-        guard let selectedProcess,
-              selectedProcess.pid == forceQuitCandidateProcessID,
-              terminator.canTerminate(selectedProcess).isAllowed
+        guard let selectedProcessGroup,
+              selectedProcessGroup.id == forceQuitCandidateGroupID,
+              terminator.canTerminate(selectedProcessGroup.processes).isAllowed
         else {
             return false
         }
         return true
     }
 
+    public var pendingTerminationDisplayName: String? {
+        guard let pendingTerminationProcess else { return nil }
+        return pendingTerminationTargetDescription(process: pendingTerminationProcess)
+    }
+
+    public var pendingTerminationDetailText: String? {
+        guard let pendingTerminationProcess else { return nil }
+        if let group = pendingTerminationGroup, group.processes.count > 1 {
+            return "CPU \(MetricFormatters.percent(group.cpuPercent, fractionDigits: group.cpuPercent < 10 ? 1 : 0)), Memory \(MetricFormatters.bytes(group.memoryBytes))"
+        }
+        return "PID \(pendingTerminationProcess.pid), CPU \(MetricFormatters.percent(pendingTerminationProcess.cpuPercent, fractionDigits: pendingTerminationProcess.cpuPercent < 10 ? 1 : 0)), Memory \(MetricFormatters.bytes(pendingTerminationProcess.memoryBytes))"
+    }
+
+    public var pendingTerminationTargetsApp: Bool {
+        guard let pendingTerminationGroup else { return false }
+        return pendingTerminationGroup.isApplicationTarget
+    }
+
     public func terminationAvailability(for process: ProcessMetric) -> ProcessTerminationAvailability {
-        terminator.canTerminate(process)
+        terminator.canTerminate(terminationTargets(for: process))
     }
 
     public func select(_ kind: MetricKind) {
         selectedKind = kind
         selectedProcessID = nil
+        selectedProcessGroupID = nil
         applySortPreference(for: kind)
     }
 
@@ -208,6 +235,9 @@ public final class DashboardViewModel: ObservableObject {
 
     public func selectProcess(pid: Int32) {
         selectedProcessID = pid
+        selectedProcessGroupID = displayedProcessGroups.first { group in
+            group.processes.contains { $0.pid == pid }
+        }?.id
     }
 
     private func applySortPreference(for kind: MetricKind) {
@@ -224,29 +254,35 @@ public final class DashboardViewModel: ObservableObject {
     }
 
     public func requestTermination(for process: ProcessMetric) {
-        let availability = terminator.canTerminate(process)
+        let targets = terminationTargets(for: process)
+        let availability = terminator.canTerminate(targets)
         guard availability.isAllowed else {
             terminationMessage = availability.reason
             terminationMessageProcessID = process.pid
             pendingTerminationProcess = nil
+            pendingTerminationGroup = nil
             return
         }
         pendingTerminationProcess = process
+        pendingTerminationGroup = terminationGroup(for: process)
         pendingTerminationMode = .quit
         terminationMessage = nil
         terminationMessageProcessID = nil
     }
 
     public func requestForceTermination(for process: ProcessMetric) {
-        let availability = terminator.canTerminate(process)
+        let targets = terminationTargets(for: process)
+        let availability = terminator.canTerminate(targets)
         guard availability.isAllowed else {
             terminationMessage = availability.reason
             terminationMessageProcessID = process.pid
             pendingTerminationProcess = nil
+            pendingTerminationGroup = nil
             pendingTerminationMode = .quit
             return
         }
         pendingTerminationProcess = process
+        pendingTerminationGroup = terminationGroup(for: process)
         pendingTerminationMode = .forceQuit
         terminationMessage = nil
         terminationMessageProcessID = nil
@@ -254,24 +290,29 @@ public final class DashboardViewModel: ObservableObject {
 
     public func cancelPendingTermination() {
         pendingTerminationProcess = nil
+        pendingTerminationGroup = nil
         pendingTerminationMode = .quit
     }
 
     public func confirmPendingTermination() {
         guard let process = pendingTerminationProcess else { return }
         let mode = pendingTerminationMode
+        let targets = pendingTerminationGroup?.processes ?? [process]
+        let targetDescription = pendingTerminationTargetDescription(process: process)
+        let targetGroupID = pendingTerminationGroup?.id ?? terminationGroup(for: process)?.id
         do {
-            try terminator.terminate(process, mode: mode)
+            try terminator.terminate(targets, mode: mode)
             switch mode {
             case .quit:
-                terminationMessage = "Termination requested for \(process.name)."
-                forceQuitCandidateProcessID = process.pid
+                terminationMessage = "Termination requested for \(targetDescription)."
+                forceQuitCandidateGroupID = targetGroupID
             case .forceQuit:
-                terminationMessage = "Force quit requested for \(process.name)."
-                forceQuitCandidateProcessID = nil
+                terminationMessage = "Force quit requested for \(targetDescription)."
+                forceQuitCandidateGroupID = nil
             }
             terminationMessageProcessID = process.pid
             pendingTerminationProcess = nil
+            pendingTerminationGroup = nil
             pendingTerminationMode = .quit
             Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -281,13 +322,35 @@ public final class DashboardViewModel: ObservableObject {
             terminationMessage = error.message
             terminationMessageProcessID = process.pid
             pendingTerminationProcess = nil
+            pendingTerminationGroup = nil
             pendingTerminationMode = .quit
         } catch {
             terminationMessage = "Termination failed."
             terminationMessageProcessID = process.pid
             pendingTerminationProcess = nil
+            pendingTerminationGroup = nil
             pendingTerminationMode = .quit
         }
+    }
+
+    private func terminationGroup(for process: ProcessMetric) -> ProcessAppGroup? {
+        displayedProcessGroups.first { group in
+            group.processes.contains { $0.pid == process.pid }
+        }
+    }
+
+    private func terminationTargets(for process: ProcessMetric) -> [ProcessMetric] {
+        terminationGroup(for: process)?.processes ?? [process]
+    }
+
+    private func pendingTerminationTargetDescription(process: ProcessMetric) -> String {
+        guard let group = pendingTerminationGroup else {
+            return process.name
+        }
+        if group.processes.count > 1 {
+            return "\(group.name) (\(group.processes.count) processes)"
+        }
+        return group.isApplicationTarget ? group.name : process.name
     }
 
     public func refreshNow() async {
@@ -309,6 +372,12 @@ public final class DashboardViewModel: ObservableObject {
     public func stop() {
         refreshTask?.cancel()
         refreshTask = nil
+    }
+}
+
+private extension ProcessAppGroup {
+    var isApplicationTarget: Bool {
+        id.hasPrefix("app:") || processes.count > 1
     }
 }
 

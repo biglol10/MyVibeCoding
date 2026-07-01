@@ -75,6 +75,18 @@ public struct ProcessTerminator {
         return .allowed
     }
 
+    public func canTerminate(_ processes: [ProcessMetric]) -> ProcessTerminationAvailability {
+        guard !processes.isEmpty else {
+            return .denied("No process selected")
+        }
+        if let denied = processes
+            .map(canTerminate)
+            .first(where: { !$0.isAllowed }) {
+            return denied
+        }
+        return .allowed
+    }
+
     private func isProtectedSystemPath(_ path: String) -> Bool {
         let protectedPrefixes = ["/System/", "/usr/libexec/", "/usr/sbin/", "/bin/", "/sbin/"]
         return protectedPrefixes.contains { path.hasPrefix($0) }
@@ -97,6 +109,30 @@ public struct ProcessTerminator {
             default:
                 throw ProcessTerminationError.failed(code)
             }
+        }
+    }
+
+    public mutating func terminate(_ processes: [ProcessMetric], mode: ProcessTerminationMode = .quit) throws {
+        let availability = canTerminate(processes)
+        guard availability.isAllowed else {
+            throw ProcessTerminationError.protectedProcess(availability.reason ?? "Protected process")
+        }
+
+        var firstFailure: ProcessTerminationError?
+        for process in processes {
+            do {
+                try terminate(process, mode: mode)
+            } catch ProcessTerminationError.processNotFound {
+                continue
+            } catch let error as ProcessTerminationError {
+                if firstFailure == nil {
+                    firstFailure = error
+                }
+            }
+        }
+
+        if let firstFailure {
+            throw firstFailure
         }
     }
 }

@@ -55,6 +55,24 @@ final class ProcessTerminatorTests: XCTestCase {
         XCTAssertEqual(sent.first?.1, SIGKILL)
     }
 
+    func testGroupTerminationContinuesPastAlreadyExitedProcess() {
+        var sent: [(Int32, Int32)] = []
+        var terminator = ProcessTerminator(
+            currentProcessID: 99,
+            signalSender: { pid, signal in
+                sent.append((pid, signal))
+                return pid == 501 ? -1 : 0
+            },
+            errnoProvider: { ESRCH }
+        )
+        let staleHelper = ProcessMetric(pid: 501, name: "Figma Helper", cpuPercent: 5, memoryBytes: 10, path: "/Applications/Figma.app/Contents/Frameworks/Figma Helper.app", bundleIdentifier: "com.figma.Desktop.helper")
+        let mainApp = ProcessMetric(pid: 500, name: "Figma", cpuPercent: 3, memoryBytes: 10, path: "/Applications/Figma.app/Contents/MacOS/Figma", bundleIdentifier: "com.figma.Desktop")
+
+        XCTAssertNoThrow(try terminator.terminate([staleHelper, mainApp]))
+        XCTAssertEqual(sent.map(\.0), [501, 500])
+        XCTAssertTrue(sent.allSatisfy { $0.1 == SIGTERM })
+    }
+
     func testTerminateReportsProtectedAndPermissionFailures() {
         var protectedTerminator = ProcessTerminator(currentProcessID: 99)
         let protected = ProcessMetric(pid: 1, name: "launchd", cpuPercent: 0, memoryBytes: 0, path: "/sbin/launchd", bundleIdentifier: nil)

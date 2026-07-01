@@ -24,8 +24,15 @@ struct ContentView: View {
                 viewModel.confirmPendingTermination()
             }
         } message: {
-            if let process = viewModel.pendingTerminationProcess {
-                Text("\(process.name) (PID \(process.pid))\nCPU \(MetricFormatters.percent(process.cpuPercent, fractionDigits: process.cpuPercent < 10 ? 1 : 0)), Memory \(MetricFormatters.bytes(process.memoryBytes))")
+            if let displayName = viewModel.pendingTerminationDisplayName {
+                Text(
+                    [
+                        displayName,
+                        viewModel.pendingTerminationDetailText
+                    ]
+                    .compactMap { $0 }
+                    .joined(separator: "\n")
+                )
             }
         }
         .task {
@@ -45,6 +52,7 @@ struct ContentView: View {
     }
 
     private var terminationAlertTitle: String {
-        viewModel.pendingTerminationMode == .forceQuit ? "Force Quit Process?" : "Quit Process?"
+        let target = viewModel.pendingTerminationTargetsApp ? "App" : "Process"
+        return viewModel.pendingTerminationMode == .forceQuit ? "Force Quit \(target)?" : "Quit \(target)?"
     }
 }

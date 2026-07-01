@@ -148,6 +148,7 @@ struct MetricDetailView: View {
     private var processDetail: some View {
         VStack(spacing: 0) {
             if let group = viewModel.selectedProcessGroup, let process = viewModel.selectedProcess {
+                let terminationTarget = group.id.hasPrefix("app:") || group.processes.count > 1 ? "App" : "Process"
                 InfoRow(title: "App", value: group.name)
                 InfoRow(title: "Processes", value: "\(group.processes.count)")
                 InfoRow(title: "Total CPU", value: MetricFormatters.percent(group.cpuPercent, fractionDigits: group.cpuPercent < 10 ? 1 : 0))
@@ -166,19 +167,19 @@ struct MetricDetailView: View {
                 Button(role: .destructive) {
                     viewModel.requestTermination(for: process)
                 } label: {
-                    Label("Quit Process", systemImage: "xmark.octagon")
+                    Label("Quit \(terminationTarget)", systemImage: "xmark.octagon")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
                 .disabled(!viewModel.selectedProcessTerminationAvailability.isAllowed)
-                .help(viewModel.selectedProcessTerminationAvailability.reason ?? "Quit selected process")
+                .help(viewModel.selectedProcessTerminationAvailability.reason ?? "Quit selected \(terminationTarget.lowercased())")
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
                 if viewModel.selectedProcessCanForceQuit {
                     Button(role: .destructive) {
                         viewModel.requestForceTermination(for: process)
                     } label: {
-                        Label("Force Quit", systemImage: "exclamationmark.octagon")
+                        Label("Force Quit \(terminationTarget)", systemImage: "exclamationmark.octagon")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)

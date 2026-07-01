@@ -106,6 +106,17 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedProcessGroup?.processes.map(\.pid), [41, 40])
     }
 
+    func testSelectedProcessGroupSurvivesWhenSelectedChildExitsAfterRefresh() {
+        let viewModel = DashboardViewModel(snapshot: groupedSnapshot)
+        viewModel.select(.memory)
+        viewModel.selectProcess(pid: 41)
+
+        viewModel.replaceSnapshot(groupedSnapshotWithoutSelectedCodeHelper)
+
+        XCTAssertEqual(viewModel.selectedProcessGroup?.name, "Visual Studio Code")
+        XCTAssertEqual(viewModel.selectedProcess?.pid, 40)
+    }
+
     func testSelectedProcessDefaultsToLeadProcessInsideSelectedGroup() {
         let now = Date(timeIntervalSince1970: 250)
         let viewModel = DashboardViewModel(
@@ -212,6 +223,69 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.selectedProcessTerminationMessage)
     }
 
+    func testTerminationTargetsEveryProcessInSelectedAppGroup() {
+        var sent: [(Int32, Int32)] = []
+        let viewModel = DashboardViewModel(
+            snapshot: groupedSnapshot,
+            terminator: ProcessTerminator(
+                currentProcessID: 99,
+                signalSender: { pid, signal in
+                    sent.append((pid, signal))
+                    return 0
+                },
+                errnoProvider: { 0 }
+            )
+        )
+        viewModel.select(.memory)
+        viewModel.selectProcess(pid: 41)
+
+        viewModel.requestTermination(for: viewModel.selectedProcess!)
+        viewModel.confirmPendingTermination()
+
+        XCTAssertEqual(Set(sent.map(\.0)), Set([40, 41]))
+        XCTAssertTrue(sent.allSatisfy { $0.1 == SIGTERM })
+        XCTAssertEqual(viewModel.terminationMessage, "Termination requested for Visual Studio Code (2 processes).")
+    }
+
+    func testPendingTerminationSummaryDescribesSelectedAppGroup() {
+        let viewModel = DashboardViewModel(snapshot: groupedSnapshot)
+        viewModel.select(.memory)
+        viewModel.selectProcess(pid: 41)
+
+        viewModel.requestTermination(for: viewModel.selectedProcess!)
+
+        XCTAssertEqual(viewModel.pendingTerminationDisplayName, "Visual Studio Code (2 processes)")
+        XCTAssertEqual(viewModel.pendingTerminationDetailText, "CPU 33%, Memory 1.3 KB")
+    }
+
+    func testForceQuitCandidateSurvivesWhenOriginalSelectedProcessExits() {
+        var sent: [(Int32, Int32)] = []
+        let viewModel = DashboardViewModel(
+            snapshot: groupedSnapshot,
+            terminator: ProcessTerminator(
+                currentProcessID: 99,
+                signalSender: { pid, signal in
+                    sent.append((pid, signal))
+                    return 0
+                },
+                errnoProvider: { 0 }
+            )
+        )
+        viewModel.select(.memory)
+        viewModel.selectProcess(pid: 41)
+
+        viewModel.requestTermination(for: viewModel.selectedProcess!)
+        viewModel.confirmPendingTermination()
+        viewModel.replaceSnapshot(groupedSnapshotWithoutSelectedCodeHelper)
+
+        XCTAssertTrue(viewModel.selectedProcessCanForceQuit)
+
+        viewModel.requestForceTermination(for: viewModel.selectedProcess!)
+        viewModel.confirmPendingTermination()
+
+        XCTAssertTrue(sent.contains { $0 == (40, SIGKILL) })
+    }
+
     func testProtectedTerminationIsDisabled() {
         let now = Date(timeIntervalSince1970: 100)
         let viewModel = DashboardViewModel(
@@ -271,6 +345,27 @@ final class DashboardViewModelTests: XCTestCase {
             processes: [
                 ProcessMetric(pid: 40, name: "Code", cpuPercent: 3, memoryBytes: 400, path: "/Applications/Visual Studio Code.app/Contents/MacOS/Electron", bundleIdentifier: "com.microsoft.VSCode"),
                 ProcessMetric(pid: 41, name: "Code Helper (Renderer)", cpuPercent: 30, memoryBytes: 900, path: "/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Renderer).app/Contents/MacOS/Code Helper (Renderer)", bundleIdentifier: "com.microsoft.VSCode.helper"),
+                ProcessMetric(pid: 50, name: "Safari", cpuPercent: 35, memoryBytes: 500, path: "/Applications/Safari.app/Contents/MacOS/Safari", bundleIdentifier: "com.apple.Safari")
+            ],
+            cpuHistory: [40],
+            updatedAt: now
+        )
+    }
+
+    private var groupedSnapshotWithoutSelectedCodeHelper: SystemMetricsSnapshot {
+        let now = Date(timeIntervalSince1970: 210)
+        return SystemMetricsSnapshot(
+            summaries: [
+                MetricSummary(kind: .cpu, title: "CPU", valueText: "40%", detailText: nil, health: .normal, updatedAt: now),
+                MetricSummary(kind: .memory, title: "RAM", valueText: "8 GB / 16 GB", detailText: nil, health: .normal, updatedAt: now)
+            ],
+            cpu: nil,
+            memory: nil,
+            disk: nil,
+            network: nil,
+            battery: nil,
+            processes: [
+                ProcessMetric(pid: 40, name: "Code", cpuPercent: 3, memoryBytes: 400, path: "/Applications/Visual Studio Code.app/Contents/MacOS/Electron", bundleIdentifier: "com.microsoft.VSCode"),
                 ProcessMetric(pid: 50, name: "Safari", cpuPercent: 35, memoryBytes: 500, path: "/Applications/Safari.app/Contents/MacOS/Safari", bundleIdentifier: "com.apple.Safari")
             ],
             cpuHistory: [40],
