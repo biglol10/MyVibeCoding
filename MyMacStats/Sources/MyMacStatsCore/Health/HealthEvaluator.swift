@@ -56,7 +56,7 @@ public struct HealthEvaluator: Sendable {
             return .warning
         }
         if snapshot.pressure == .unavailable {
-            return .unavailable
+            return .normal
         }
         return .normal
     }

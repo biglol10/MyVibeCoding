@@ -119,7 +119,16 @@ public struct DiskSpaceCandidateScanner {
         return total
     }
 
-    static func defaultTargets(home _: URL) -> [DiskSpaceCandidateTarget] {
-        []
+    static func defaultTargets(home: URL) -> [DiskSpaceCandidateTarget] {
+        [
+            DiskSpaceCandidateTarget(
+                title: "Caches",
+                url: home.appendingPathComponent("Library/Caches", isDirectory: true)
+            ),
+            DiskSpaceCandidateTarget(
+                title: "Xcode DerivedData",
+                url: home.appendingPathComponent("Library/Developer/Xcode/DerivedData", isDirectory: true)
+            )
+        ]
     }
 }

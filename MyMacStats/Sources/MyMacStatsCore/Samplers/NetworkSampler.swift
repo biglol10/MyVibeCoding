@@ -7,86 +7,115 @@ public struct NetworkSampler {
     public init() {}
 
     public mutating func sample() throws -> NetworkSnapshot {
-        var interfaces: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&interfaces) == 0, let first = interfaces else {
-            throw SamplerError.systemCallFailed("getifaddrs")
-        }
-        defer { freeifaddrs(first) }
-
         let now = Date()
-        var bestCounter: NetworkCounter?
-        var pointer: UnsafeMutablePointer<ifaddrs>? = first
-        while let current = pointer {
-            defer { pointer = current.pointee.ifa_next }
-            guard let address = current.pointee.ifa_addr,
-                  Int32(address.pointee.sa_family) == AF_LINK,
-                  let data = current.pointee.ifa_data
-            else {
-                continue
-            }
-
-            let flags = current.pointee.ifa_flags
-            guard (flags & UInt32(IFF_UP)) != 0,
-                  (flags & UInt32(IFF_LOOPBACK)) == 0
-            else {
-                continue
-            }
-
-            let name = String(cString: current.pointee.ifa_name)
-            let ifData = data.assumingMemoryBound(to: if_data.self).pointee
-            let counter = NetworkCounter(
-                name: name,
-                receivedBytes: UInt64(ifData.ifi_ibytes),
-                sentBytes: UInt64(ifData.ifi_obytes),
-                sampledAt: now
-            )
-
-            if let existing = bestCounter {
-                if counter.receivedBytes + counter.sentBytes > existing.receivedBytes + existing.sentBytes {
-                    bestCounter = counter
-                }
-            } else {
-                bestCounter = counter
-            }
-        }
-
-        guard let counter = bestCounter else {
+        guard let counter = try Self.readInterfaceCounters(sampledAt: now).max(by: { lhs, rhs in
+            lhs.receivedBytes + lhs.sentBytes < rhs.receivedBytes + rhs.sentBytes
+        }) else {
             throw SamplerError.unavailable("No active network interface")
         }
 
         let previousCounter = previous
         previous = counter
-
-        let downloadSpeed: UInt64
-        let uploadSpeed: UInt64
-        if let previousCounter, previousCounter.name == counter.name {
-            let elapsed = max(0.001, counter.sampledAt.timeIntervalSince(previousCounter.sampledAt))
-            downloadSpeed = counter.receivedBytes > previousCounter.receivedBytes
-                ? UInt64(Double(counter.receivedBytes - previousCounter.receivedBytes) / elapsed)
-                : 0
-            uploadSpeed = counter.sentBytes > previousCounter.sentBytes
-                ? UInt64(Double(counter.sentBytes - previousCounter.sentBytes) / elapsed)
-                : 0
-        } else {
-            downloadSpeed = 0
-            uploadSpeed = 0
-        }
+        let speeds = Self.speeds(previous: previousCounter, current: counter)
 
         return NetworkSnapshot(
             interfaceName: counter.name,
-            downloadBytesPerSecond: downloadSpeed,
-            uploadBytesPerSecond: uploadSpeed,
+            downloadBytesPerSecond: speeds.downloadBytesPerSecond,
+            uploadBytesPerSecond: speeds.uploadBytesPerSecond,
             receivedBytes: counter.receivedBytes,
             sentBytes: counter.sentBytes,
             isConnected: true,
             sampledAt: now
         )
     }
+
+    static func speeds(previous: NetworkCounter?, current: NetworkCounter) -> NetworkSpeeds {
+        guard let previous, previous.name == current.name else {
+            return NetworkSpeeds(downloadBytesPerSecond: 0, uploadBytesPerSecond: 0)
+        }
+
+        let elapsed = max(0.001, current.sampledAt.timeIntervalSince(previous.sampledAt))
+        let downloadSpeed = current.receivedBytes >= previous.receivedBytes
+            ? UInt64(Double(current.receivedBytes - previous.receivedBytes) / elapsed)
+            : 0
+        let uploadSpeed = current.sentBytes >= previous.sentBytes
+            ? UInt64(Double(current.sentBytes - previous.sentBytes) / elapsed)
+            : 0
+        return NetworkSpeeds(downloadBytesPerSecond: downloadSpeed, uploadBytesPerSecond: uploadSpeed)
+    }
+
+    private static func readInterfaceCounters(sampledAt: Date) throws -> [NetworkCounter] {
+        var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, 0, NET_RT_IFLIST2, 0]
+        var length = 0
+        guard sysctl(&mib, u_int(mib.count), nil, &length, nil, 0) == 0 else {
+            throw SamplerError.systemCallFailed("sysctl NET_RT_IFLIST2 size")
+        }
+
+        var buffer = [UInt8](repeating: 0, count: length)
+        guard sysctl(&mib, u_int(mib.count), &buffer, &length, nil, 0) == 0 else {
+            throw SamplerError.systemCallFailed("sysctl NET_RT_IFLIST2")
+        }
+
+        return buffer.withUnsafeBytes { rawBuffer in
+            var counters: [NetworkCounter] = []
+            var offset = 0
+            while offset + MemoryLayout<if_msghdr>.size <= length {
+                let header = rawBuffer.loadUnaligned(fromByteOffset: offset, as: if_msghdr.self)
+                let messageLength = Int(header.ifm_msglen)
+                guard messageLength > 0 else { break }
+
+                if Int32(header.ifm_type) == RTM_IFINFO2,
+                   offset + MemoryLayout<if_msghdr2>.size <= length {
+                    let message = rawBuffer.loadUnaligned(fromByteOffset: offset, as: if_msghdr2.self)
+                    if let counter = counter(from: message, sampledAt: sampledAt) {
+                        counters.append(counter)
+                    }
+                }
+
+                offset += messageLength
+            }
+            return counters
+        }
+    }
+
+    private static func counter(from message: if_msghdr2, sampledAt: Date) -> NetworkCounter? {
+        let flags = UInt32(bitPattern: message.ifm_flags)
+        guard (flags & UInt32(IFF_UP)) != 0,
+              (flags & UInt32(IFF_LOOPBACK)) == 0,
+              let name = interfaceName(for: message.ifm_index)
+        else {
+            return nil
+        }
+
+        return NetworkCounter(
+            name: name,
+            receivedBytes: message.ifm_data.ifi_ibytes,
+            sentBytes: message.ifm_data.ifi_obytes,
+            sampledAt: sampledAt
+        )
+    }
+
+    private static func interfaceName(for index: UInt16) -> String? {
+        var name = [CChar](repeating: 0, count: Int(IF_NAMESIZE))
+        return name.withUnsafeMutableBufferPointer { buffer in
+            guard let baseAddress = buffer.baseAddress,
+                  if_indextoname(UInt32(index), baseAddress) != nil
+            else {
+                return nil
+            }
+            return String(cString: baseAddress)
+        }
+    }
 }
 
-private struct NetworkCounter {
+struct NetworkCounter: Equatable, Sendable {
     let name: String
     let receivedBytes: UInt64
     let sentBytes: UInt64
     let sampledAt: Date
+}
+
+struct NetworkSpeeds: Equatable, Sendable {
+    let downloadBytesPerSecond: UInt64
+    let uploadBytesPerSecond: UInt64
 }

@@ -19,6 +19,20 @@ final class ProcessTerminatorTests: XCTestCase {
         XCTAssertTrue(terminator.canTerminate(process).isAllowed)
     }
 
+    func testSelfProtectionUsesCurrentPIDNotProcessNameOnly() {
+        let terminator = ProcessTerminator(currentProcessID: 99)
+        let otherProcessWithSameExecutableName = ProcessMetric(
+            pid: 500,
+            name: "MyMacStatsApp",
+            cpuPercent: 3,
+            memoryBytes: 10,
+            path: "/Users/example/Build/MyMacStatsApp",
+            bundleIdentifier: nil
+        )
+
+        XCTAssertTrue(terminator.canTerminate(otherProcessWithSameExecutableName).isAllowed)
+    }
+
     func testTerminateSendsSIGTERMToAllowedProcess() {
         var sent: [(Int32, Int32)] = []
         var terminator = ProcessTerminator(

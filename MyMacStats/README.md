@@ -111,10 +111,10 @@ Disk 화면은 용량 부족 원인 후보를 보여줍니다.
 
 기본 후보:
 
-- Downloads
-- Trash
 - Caches
 - Xcode DerivedData
+
+Downloads, Desktop, Documents, Trash처럼 macOS 개인정보 보호 권한 프롬프트가 생길 수 있는 폴더는 기본 자동 스캔 대상에서 제외합니다.
 
 후보 스캔은 UI를 막지 않도록 백그라운드에서 수행되며, 오래 걸리는 대상은 timeout 후 다음 갱신으로 넘깁니다.
 

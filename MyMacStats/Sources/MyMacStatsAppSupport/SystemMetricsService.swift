@@ -81,6 +81,7 @@ public final class SystemMetricsService {
     private var diskSpaceCandidateRefreshTask: Task<Void, Never>?
     private var lastDiskSpaceCandidateRefreshStartedAt: Date?
     private let diskSpaceCandidateRefreshInterval: TimeInterval
+    private var previousMemorySwapUsedBytes: UInt64?
 
     deinit {
         diskSpaceCandidateRefreshTask?.cancel()
@@ -195,7 +196,7 @@ public final class SystemMetricsService {
                     title: MetricKind.cpu.title,
                     valueText: MetricFormatters.percent(cpu.totalUsagePercent),
                     detailText: "User \(MetricFormatters.percent(cpu.userPercent)) / System \(MetricFormatters.percent(cpu.systemPercent))",
-                    health: health,
+                    health: evaluator.debouncedHealth(for: .cpu, candidate: health),
                     updatedAt: now
                 )
 
@@ -208,7 +209,13 @@ public final class SystemMetricsService {
                     title: MetricKind.memory.title,
                     valueText: "\(MetricFormatters.compactBytes(memory.usedBytes)) / \(MetricFormatters.compactBytes(memory.totalBytes))",
                     detailText: "Free \(MetricFormatters.bytes(memory.freeBytes))",
-                    health: evaluator.memoryHealth(snapshot: memory),
+                    health: evaluator.debouncedHealth(
+                        for: .memory,
+                        candidate: evaluator.memoryHealth(
+                            snapshot: memory,
+                            isSwapIncreasing: isMemorySwapIncreasing(memory)
+                        )
+                    ),
                     updatedAt: now
                 )
 
@@ -222,7 +229,7 @@ public final class SystemMetricsService {
                     title: MetricKind.disk.title,
                     valueText: MetricFormatters.percent(usedRatio * 100),
                     detailText: "Free \(MetricFormatters.bytes(disk.freeBytes))",
-                    health: evaluator.diskHealth(snapshot: disk),
+                    health: evaluator.debouncedHealth(for: .disk, candidate: evaluator.diskHealth(snapshot: disk)),
                     updatedAt: now
                 )
 
@@ -242,7 +249,10 @@ public final class SystemMetricsService {
                     title: MetricKind.network.title,
                     valueText: "↓ \(MetricFormatters.compactSpeed(network.downloadBytesPerSecond))",
                     detailText: "\(network.interfaceName ?? "No interface")  ↑ \(MetricFormatters.compactSpeed(network.uploadBytesPerSecond))",
-                    health: evaluator.networkHealth(snapshot: network, consecutiveFailures: consecutiveNetworkFailures),
+                    health: evaluator.debouncedHealth(
+                        for: .network,
+                        candidate: evaluator.networkHealth(snapshot: network, consecutiveFailures: consecutiveNetworkFailures)
+                    ),
                     updatedAt: now
                 )
 
@@ -255,7 +265,7 @@ public final class SystemMetricsService {
                     title: MetricKind.battery.title,
                     valueText: battery.percentage.map { MetricFormatters.percent($0) } ?? "Unavailable",
                     detailText: battery.powerSource,
-                    health: evaluator.batteryHealth(snapshot: battery),
+                    health: evaluator.debouncedHealth(for: .battery, candidate: evaluator.batteryHealth(snapshot: battery)),
                     updatedAt: now
                 )
 
@@ -289,21 +299,30 @@ public final class SystemMetricsService {
         guard let earliest = sustainedSamples.last else { return 0 }
         return now.timeIntervalSince(earliest.date)
     }
+
+    private func isMemorySwapIncreasing(_ memory: MemorySnapshot) -> Bool {
+        guard let current = memory.swapUsedBytes else {
+            previousMemorySwapUsedBytes = nil
+            return false
+        }
+        defer { previousMemorySwapUsedBytes = current }
+        guard let previous = previousMemorySwapUsedBytes else { return false }
+        return current > previous
+    }
 }
 
 public final class DefaultSystemSampler: SystemSampler {
+    private var cpuSampler = CPUSampler()
     private let memorySampler = MemorySampler()
     private let diskSampler = DiskSampler()
     private var networkSampler = NetworkSampler()
     private let batterySampler = BatterySampler()
+    private let processSampler = ProcessSampler()
 
     public init() {}
 
     public func sampleCPU() async -> CPUSnapshot? {
-        await Task.detached(priority: .utility) {
-            var sampler = CPUSampler()
-            return try? sampler.sample()
-        }.value
+        try? cpuSampler.sample()
     }
 
     public func sampleMemory() async -> MemorySnapshot? {
@@ -329,8 +348,9 @@ public final class DefaultSystemSampler: SystemSampler {
     }
 
     public func sampleProcesses() async -> [ProcessMetric] {
-        await Task.detached(priority: .utility) {
-            (try? ProcessSampler().sample()) ?? []
+        let processSampler = processSampler
+        return await Task.detached(priority: .utility) {
+            (try? processSampler.sample()) ?? []
         }.value
     }
 }

@@ -63,7 +63,7 @@ public struct ProcessTerminator {
         if process.pid <= 1 {
             return .denied("Protected system process")
         }
-        if process.pid == currentProcessID || process.name == "MyMacStatsApp" {
+        if process.pid == currentProcessID {
             return .denied("MyMacStats cannot terminate itself")
         }
         if process.name == "launchd" || process.name == "kernel_task" {

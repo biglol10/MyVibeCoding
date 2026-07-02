@@ -90,6 +90,22 @@ final class SystemMetricsServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.cpuHistory, [20, 30, 40])
     }
 
+    func testSummariesUseDebouncedHealthStates() async {
+        let sampler = SequenceMemorySampler(usages: [40, 95, 95])
+        let service = SystemMetricsService(
+            sampler: sampler,
+            evaluator: HealthEvaluator(debounceSamples: 2)
+        )
+
+        let first = await service.refresh(now: Date(timeIntervalSince1970: 0))
+        let second = await service.refresh(now: Date(timeIntervalSince1970: 1))
+        let third = await service.refresh(now: Date(timeIntervalSince1970: 2))
+
+        XCTAssertEqual(first.summary(for: .memory)?.health, .normal)
+        XCTAssertEqual(second.summary(for: .memory)?.health, .normal)
+        XCTAssertEqual(third.summary(for: .memory)?.health, .critical)
+    }
+
     private func gib(_ value: UInt64) -> UInt64 {
         value * 1_024 * 1_024 * 1_024
     }
@@ -145,6 +161,37 @@ private struct SlowDiskCandidateSampler: SystemSampler {
         ]
     }
 
+    func sampleProcesses() async -> [ProcessMetric] { [] }
+}
+
+@MainActor
+private final class SequenceMemorySampler: SystemSampler {
+    private var usages: [UInt64]
+
+    init(usages: [UInt64]) {
+        self.usages = usages
+    }
+
+    func sampleCPU() async -> CPUSnapshot? { nil }
+
+    func sampleMemory() async -> MemorySnapshot? {
+        guard !usages.isEmpty else { return nil }
+        let used = usages.removeFirst()
+        return MemorySnapshot(
+            totalBytes: 100,
+            usedBytes: used,
+            freeBytes: 100 - used,
+            compressedBytes: nil,
+            cachedBytes: nil,
+            swapUsedBytes: nil,
+            pressure: .normal
+        )
+    }
+
+    func sampleDisk() async -> DiskSnapshot? { nil }
+    func sampleNetwork() async -> NetworkSnapshot? { nil }
+    func sampleBattery() async -> BatterySnapshot? { nil }
+    func sampleDiskSpaceCandidates() async -> [DiskSpaceCandidate] { [] }
     func sampleProcesses() async -> [ProcessMetric] { [] }
 }
 

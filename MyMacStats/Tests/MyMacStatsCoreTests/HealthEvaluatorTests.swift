@@ -11,6 +11,15 @@ final class HealthEvaluatorTests: XCTestCase {
     }
 
     func testMemoryHealthUsesUsagePressureAndSwapIncrease() {
+        let normalSnapshotWithUnavailablePressure = MemorySnapshot(
+            totalBytes: 100,
+            usedBytes: 40,
+            freeBytes: 60,
+            compressedBytes: nil,
+            cachedBytes: nil,
+            swapUsedBytes: nil,
+            pressure: .unavailable
+        )
         let warningSnapshot = MemorySnapshot(
             totalBytes: 100,
             usedBytes: 80,
@@ -40,6 +49,7 @@ final class HealthEvaluatorTests: XCTestCase {
         )
         let evaluator = HealthEvaluator()
 
+        XCTAssertEqual(evaluator.memoryHealth(snapshot: normalSnapshotWithUnavailablePressure), .normal)
         XCTAssertEqual(evaluator.memoryHealth(snapshot: warningSnapshot), .warning)
         XCTAssertEqual(evaluator.memoryHealth(snapshot: criticalSnapshot), .critical)
         XCTAssertEqual(evaluator.memoryHealth(snapshot: pressureSnapshot), .critical)
