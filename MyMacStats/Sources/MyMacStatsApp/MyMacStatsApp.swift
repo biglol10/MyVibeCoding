@@ -6,7 +6,7 @@ struct MyMacStatsApp: App {
     @StateObject private var viewModel = DashboardViewModel()
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(AppWindowTitles.dashboard) {
             ContentView(viewModel: viewModel)
                 .frame(minWidth: 1120, minHeight: 700)
         }

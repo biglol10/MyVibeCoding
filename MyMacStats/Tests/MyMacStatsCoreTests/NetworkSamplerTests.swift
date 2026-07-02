@@ -44,4 +44,19 @@ final class NetworkSamplerTests: XCTestCase {
         XCTAssertEqual(speeds.downloadBytesPerSecond, 0)
         XCTAssertEqual(speeds.uploadBytesPerSecond, 0)
     }
+
+    func testSelectsInterfaceWithCurrentActivityOverLargestHistoricalCounter() throws {
+        let previous = [
+            "en0": NetworkCounter(name: "en0", receivedBytes: 9_000_000, sentBytes: 1_000_000, sampledAt: Date(timeIntervalSince1970: 100)),
+            "en1": NetworkCounter(name: "en1", receivedBytes: 2_000, sentBytes: 2_000, sampledAt: Date(timeIntervalSince1970: 100))
+        ]
+        let current = [
+            NetworkCounter(name: "en0", receivedBytes: 9_000_000, sentBytes: 1_000_000, sampledAt: Date(timeIntervalSince1970: 101)),
+            NetworkCounter(name: "en1", receivedBytes: 8_000, sentBytes: 5_000, sampledAt: Date(timeIntervalSince1970: 101))
+        ]
+
+        let selected = try XCTUnwrap(NetworkSampler.selectedCounter(from: current, previousByName: previous))
+
+        XCTAssertEqual(selected.name, "en1")
+    }
 }

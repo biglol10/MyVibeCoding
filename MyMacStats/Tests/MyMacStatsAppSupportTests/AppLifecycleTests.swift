@@ -19,4 +19,20 @@ final class AppLifecycleTests: XCTestCase {
         XCTAssertTrue(popoverSource.contains("viewModel.start()"))
         XCTAssertFalse(contentViewSource.contains("viewModel.stop()"))
     }
+
+    func testMenuBarOpenDashboardTargetsDashboardWindowByTitle() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let appURL = packageRoot.appendingPathComponent("Sources/MyMacStatsApp/MyMacStatsApp.swift")
+        let popoverURL = packageRoot.appendingPathComponent("Sources/MyMacStatsApp/Views/MenuBarPopoverView.swift")
+
+        let appSource = try String(contentsOf: appURL, encoding: .utf8)
+        let popoverSource = try String(contentsOf: popoverURL, encoding: .utf8)
+
+        XCTAssertTrue(appSource.contains("WindowGroup(AppWindowTitles.dashboard)"))
+        XCTAssertFalse(popoverSource.contains("NSApp.windows.first?"))
+        XCTAssertTrue(popoverSource.contains("window.title == AppWindowTitles.dashboard"))
+    }
 }

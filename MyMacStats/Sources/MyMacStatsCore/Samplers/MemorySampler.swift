@@ -8,6 +8,7 @@ public struct MemorySampler {
         var stats = vm_statistics64_data_t()
         var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.stride / MemoryLayout<integer_t>.stride)
         let host = mach_host_self()
+        defer { mach_port_deallocate(mach_task_self_, host) }
 
         let result = withUnsafeMutablePointer(to: &stats) { statsPointer in
             statsPointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { pointer in
@@ -65,26 +66,26 @@ public struct MemorySampler {
         )
     }
 
-    static func pressure(fromRawValue rawValue: Int32) -> MemoryPressure {
-        switch rawValue {
-        case ..<0:
-            .unavailable
-        case 0:
-            .normal
+    static func pressure(fromMemoryStatusLevel level: Int32) -> MemoryPressure {
+        switch level {
         case 1:
+            .normal
+        case 2:
             .warning
-        default:
+        case 4:
             .critical
+        default:
+            .unavailable
         }
     }
 
     private static func readMemoryPressure() -> MemoryPressure {
-        var rawValue: Int32 = -1
+        var level: Int32 = 0
         var size = MemoryLayout<Int32>.stride
-        guard sysctlbyname("vm.memory_pressure", &rawValue, &size, nil, 0) == 0 else {
+        guard sysctlbyname("kern.memorystatus_vm_pressure_level", &level, &size, nil, 0) == 0 else {
             return .unavailable
         }
-        return pressure(fromRawValue: rawValue)
+        return pressure(fromMemoryStatusLevel: level)
     }
 
     private static func readSwapUsedBytes() -> UInt64? {

@@ -31,8 +31,9 @@ final class MemorySamplerTests: XCTestCase {
     }
 
     func testMemoryPressureMappingUsesSysctlLevels() {
-        XCTAssertEqual(MemorySampler.pressure(fromRawValue: 0), .normal)
-        XCTAssertEqual(MemorySampler.pressure(fromRawValue: 1), .warning)
-        XCTAssertEqual(MemorySampler.pressure(fromRawValue: 2), .critical)
+        XCTAssertEqual(MemorySampler.pressure(fromMemoryStatusLevel: 1), .normal)
+        XCTAssertEqual(MemorySampler.pressure(fromMemoryStatusLevel: 2), .warning)
+        XCTAssertEqual(MemorySampler.pressure(fromMemoryStatusLevel: 4), .critical)
+        XCTAssertEqual(MemorySampler.pressure(fromMemoryStatusLevel: 99), .unavailable)
     }
 }

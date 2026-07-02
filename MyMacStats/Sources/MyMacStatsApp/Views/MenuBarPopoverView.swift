@@ -40,8 +40,7 @@ struct MenuBarPopoverView: View {
             }
 
             Button {
-                NSApp.activate(ignoringOtherApps: true)
-                NSApp.windows.first?.makeKeyAndOrderFront(nil)
+                openDashboard()
             } label: {
                 Label("Open Dashboard", systemImage: "macwindow")
                     .frame(maxWidth: .infinity)
@@ -53,6 +52,23 @@ struct MenuBarPopoverView: View {
         .preferredColorScheme(.dark)
         .task {
             viewModel.start()
+        }
+    }
+
+    private func openDashboard() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let dashboardWindow = NSApp.windows.first(where: { window in
+            window.title == AppWindowTitles.dashboard
+        }) {
+            dashboardWindow.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        NSApp.sendAction(Selector(("newWindow:")), to: nil, from: nil)
+        DispatchQueue.main.async {
+            NSApp.windows.first(where: { window in
+                window.title == AppWindowTitles.dashboard
+            })?.makeKeyAndOrderFront(nil)
         }
     }
 
