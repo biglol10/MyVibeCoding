@@ -9,6 +9,7 @@ final class MenuBarController {
     var onOpenSettings: (() -> Void)?
 
     func install() {
+        guard statusItem == nil else { return }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem?.button?.image = NSImage(systemSymbolName: "calendar", accessibilityDescription: "MyMacCalendar")
 
@@ -29,6 +30,20 @@ final class MenuBarController {
         menu.addItem(settingsItem)
         menu.addItem(quitItem)
         statusItem?.menu = menu
+    }
+
+    func setVisible(_ visible: Bool) {
+        if visible {
+            install()
+        } else {
+            removeStatusItem()
+        }
+    }
+
+    private func removeStatusItem() {
+        guard let statusItem else { return }
+        NSStatusBar.system.removeStatusItem(statusItem)
+        self.statusItem = nil
     }
 
     @objc private func openMainWindow() {

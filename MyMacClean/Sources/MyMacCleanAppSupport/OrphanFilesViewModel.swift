@@ -8,6 +8,7 @@ public final class OrphanFilesViewModel {
     private let homeDirectory: URL
     private var installedApps: [InstalledApp]
     private let excludedBundleIdentifiers: [String]
+    private let planner: DeletionPlanner
     private let executor: DeletionExecutor
     private let verifier: DeletionVerifier
     private let receiptStore: DeletionReceiptStore
@@ -16,12 +17,15 @@ public final class OrphanFilesViewModel {
     public var selectedCandidateIDs: Set<RelatedFileCandidate.ID> = []
     public var deletionReport: DeletionReportViewModel?
     public var errorMessage: String?
+    public var hasScanned = false
     public var isScanning = false
+    public var isDeleting = false
 
     public init(
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
         installedApps: [InstalledApp],
         excludedBundleIdentifiers: [String] = Bundle.main.bundleIdentifier.map { [$0] } ?? [],
+        planner: DeletionPlanner = DeletionPlanner(),
         executor: DeletionExecutor = DeletionExecutor(),
         verifier: DeletionVerifier = DeletionVerifier(),
         receiptStore: DeletionReceiptStore = DeletionReceiptStore(
@@ -32,6 +36,7 @@ public final class OrphanFilesViewModel {
         self.homeDirectory = homeDirectory
         self.installedApps = installedApps
         self.excludedBundleIdentifiers = excludedBundleIdentifiers
+        self.planner = planner
         self.executor = executor
         self.verifier = verifier
         self.receiptStore = receiptStore
@@ -40,6 +45,9 @@ public final class OrphanFilesViewModel {
     public func loadGroups() async {
         isScanning = true
         defer { isScanning = false }
+        groups = []
+        selectedCandidateIDs = []
+        deletionReport = nil
         do {
             groups = try await OrphanFileScanner(
                 homeDirectory: homeDirectory,
@@ -47,13 +55,17 @@ public final class OrphanFilesViewModel {
                 excludedBundleIdentifiers: excludedBundleIdentifiers
             ).scan()
             selectedCandidateIDs = Set(groups.flatMap(\.candidates).filter(\.defaultSelected).map(\.id))
+            hasScanned = true
+            errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
+            hasScanned = true
         }
     }
 
     public func updateInstalledApps(_ installedApps: [InstalledApp]) {
         self.installedApps = installedApps
+        invalidateScanResults()
     }
 
     public var selectedCandidates: [RelatedFileCandidate] {
@@ -65,9 +77,7 @@ public final class OrphanFilesViewModel {
     }
 
     public func deleteSelectedLeftovers(confirmation: String, force: Bool = false) async {
-        let candidates = selectedCandidates
-        guard !candidates.isEmpty else { return }
-
+        guard !isDeleting else { return }
         let app = InstalledApp(
             displayName: "Orphan Files",
             bundleIdentifier: nil,
@@ -78,9 +88,25 @@ public final class OrphanFilesViewModel {
             bundleSize: 0,
             lastOpenedAt: nil
         )
-        let plan = DeletionPlan(app: app, candidates: candidates)
+        let plan: DeletionPlan
+        do {
+            plan = try planner.makePlan(
+                app: app,
+                candidates: groups.flatMap(\.candidates),
+                selectedIDs: selectedCandidateIDs
+            )
+        } catch {
+            deletionReport = nil
+            errorMessage = error.localizedDescription
+            return
+        }
+
+        isDeleting = true
+        defer { isDeleting = false }
+
+        let candidates = plan.candidates
         let results = await executor.execute(plan: plan, confirmation: confirmation, force: force)
-        let verificationResults = await verifier.verify(plan: plan)
+        let verificationResults = await verifier.verify(plan: plan, executionResults: results)
         let receipt = DeletionReceipt(
             appName: "Orphan Files",
             bundleIdentifier: nil,
@@ -96,8 +122,9 @@ public final class OrphanFilesViewModel {
 
         do {
             try receiptStore.append(receipt)
+            errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = "Could not save deletion history: \(error.localizedDescription)"
         }
 
         deletionReport = DeletionReportViewModel(receipt: receipt)
@@ -119,5 +146,12 @@ public final class OrphanFilesViewModel {
         }
         let remainingIDs = Set(groups.flatMap(\.candidates).map(\.id))
         selectedCandidateIDs.formIntersection(remainingIDs)
+    }
+
+    private func invalidateScanResults() {
+        groups = []
+        selectedCandidateIDs = []
+        deletionReport = nil
+        hasScanned = false
     }
 }

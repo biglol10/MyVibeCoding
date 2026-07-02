@@ -5,7 +5,7 @@ final class CalendarEnhancementSourceTests: XCTestCase {
         let source = try String(contentsOfFile: sourcePath("Sources/MyMacCalendar/Views/MonthGridView.swift"), encoding: .utf8)
 
         XCTAssertTrue(source.contains("@State private var overflowDate: Date?"))
-        XCTAssertTrue(source.contains("static let visibleEntryLimit = 2"))
+        XCTAssertTrue(source.contains("density == .compact ? 3 : 2"))
         XCTAssertTrue(source.contains("Button {"))
         XCTAssertTrue(source.contains("selectedDate = cell.date"))
         XCTAssertTrue(source.contains("overflowDate = cell.date"))

@@ -20,7 +20,14 @@ final class NativeBrowserBridgeService: ObservableObject {
         }
 
         do {
-            let listener = try NWListener(using: .tcp, on: 17_321)
+            guard let port = NWEndpoint.Port(rawValue: 17_321) else {
+                lastError = "브라우저 브리지 포트를 열 수 없습니다."
+                isRunning = false
+                return
+            }
+            let parameters = NWParameters.tcp
+            parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: port)
+            let listener = try NWListener(using: parameters)
             listener.newConnectionHandler = { [weak self] connection in
                 self?.handle(connection)
             }

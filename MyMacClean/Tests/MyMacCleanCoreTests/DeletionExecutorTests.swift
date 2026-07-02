@@ -40,6 +40,38 @@ final class DeletionExecutorTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL.path))
     }
 
+    func testExecutorRejectsProtectedCandidatesAtExecutionTime() async throws {
+        let root = try TestFixtures.temporaryDirectory(named: "executor-protected")
+        let appURL = root.appendingPathComponent("Figma.app", isDirectory: true)
+        let protectedURL = root.appendingPathComponent("Documents/Figma Export", isDirectory: true)
+        try FileManager.default.createDirectory(at: appURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: protectedURL, withIntermediateDirectories: true)
+
+        let app = InstalledApp(displayName: "Figma", bundleIdentifier: "com.figma.Desktop", version: nil, executableName: "Figma", bundleURL: appURL, iconIdentifier: nil, bundleSize: 0, lastOpenedAt: nil)
+        let candidate = RelatedFileCandidate(url: protectedURL, kind: .unknown, size: 0, matchReason: "test", confidence: .low, defaultSelected: true, requiresManualReview: true, isProtected: true)
+        let plan = DeletionPlan(app: app, candidates: [candidate], createdAt: Date(timeIntervalSince1970: 0))
+
+        let results = await DeletionExecutor().execute(plan: plan, confirmation: "DELETE")
+
+        XCTAssertEqual(results, [DeletionItemResult(path: protectedURL.path, success: false, errorMessage: "protected path skipped")])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: protectedURL.path))
+    }
+
+    func testExecutorReportsPathMissingBeforeDelete() async throws {
+        let root = try TestFixtures.temporaryDirectory(named: "executor-missing")
+        let appURL = root.appendingPathComponent("Figma.app", isDirectory: true)
+        let missingURL = root.appendingPathComponent("Library/Caches/com.figma.Missing", isDirectory: true)
+        try FileManager.default.createDirectory(at: appURL, withIntermediateDirectories: true)
+
+        let app = InstalledApp(displayName: "Figma", bundleIdentifier: "com.figma.Desktop", version: nil, executableName: "Figma", bundleURL: appURL, iconIdentifier: nil, bundleSize: 0, lastOpenedAt: nil)
+        let candidate = RelatedFileCandidate(url: missingURL, kind: .cache, size: 0, matchReason: "test", confidence: .high, defaultSelected: true, requiresManualReview: false, isProtected: false)
+        let plan = DeletionPlan(app: app, candidates: [candidate], createdAt: Date(timeIntervalSince1970: 0))
+
+        let results = await DeletionExecutor().execute(plan: plan, confirmation: "DELETE")
+
+        XCTAssertEqual(results, [DeletionItemResult(path: missingURL.path, success: false, errorMessage: "path not found before delete")])
+    }
+
     func testExecutorRejectsMissingConfirmationPhrase() async throws {
         let app = InstalledApp(displayName: "Figma", bundleIdentifier: nil, version: nil, executableName: nil, bundleURL: URL(fileURLWithPath: "/tmp/Figma.app"), iconIdentifier: nil, bundleSize: 0, lastOpenedAt: nil)
         let candidate = RelatedFileCandidate(url: URL(fileURLWithPath: "/tmp/Figma-cache"), kind: .cache, size: 0, matchReason: "test", confidence: .high, defaultSelected: true, requiresManualReview: false, isProtected: false)

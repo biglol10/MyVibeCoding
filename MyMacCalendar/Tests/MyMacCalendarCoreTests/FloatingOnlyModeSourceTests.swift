@@ -20,6 +20,22 @@ final class FloatingOnlyModeSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("mainWindow.makeKeyAndOrderFront(nil)"))
     }
 
+    func testAppReopenCreatesMainWindowWhenRestoredWithNoWindows() throws {
+        let source = try String(contentsOfFile: sourcePath("Sources/MyMacCalendar/App/AppDelegate.swift"), encoding: .utf8)
+
+        XCTAssertTrue(source.contains("NSApp.sendAction(Selector((\"newWindow:\")), to: nil, from: nil)"))
+        XCTAssertTrue(source.contains("DispatchQueue.main.async"))
+        XCTAssertTrue(source.contains("bringExistingMainWindowToFront()"))
+    }
+
+    func testAppLaunchRecoversFromWindowRestorationWithNoVisibleWindows() throws {
+        let source = try String(contentsOfFile: sourcePath("Sources/MyMacCalendar/App/AppDelegate.swift"), encoding: .utf8)
+
+        XCTAssertTrue(source.contains("openMainWindowIfNeeded()"))
+        XCTAssertTrue(source.contains("NSApp.windows.isEmpty"))
+        XCTAssertTrue(source.contains("window.isVisible"))
+    }
+
     private func sourcePath(_ relativePath: String) -> String {
         let testFile = URL(fileURLWithPath: #filePath)
         return testFile

@@ -167,6 +167,98 @@ final class FileOperationServiceTests: XCTestCase {
         XCTAssertTrue(snapshots.contains { $0.completedUnitCount == 2 && $0.currentItemName == "b.txt" })
     }
 
+    func testCopyItemsReportsByteProgressFromManifest() async throws {
+        let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
+        let destFolder = tempDirectory.appendingPathComponent("dest", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceFolder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destFolder, withIntermediateDirectories: true)
+        let first = sourceFolder.appendingPathComponent("a.bin")
+        let second = sourceFolder.appendingPathComponent("b.bin")
+        try Data(repeating: 1, count: 4).write(to: first)
+        try Data(repeating: 1, count: 6).write(to: second)
+        let recorder = FileOperationProgressRecorder()
+        let reporter = FileOperationProgressReporter(
+            initialSnapshot: FileOperationProgressSnapshot(kind: .copy, title: "Copying"),
+            onUpdate: { snapshot in await recorder.append(snapshot) }
+        )
+
+        _ = try await FileOperationService().copyItems([first, second], to: destFolder, progress: reporter)
+
+        let snapshots = await recorder.snapshots
+        XCTAssertTrue(snapshots.contains { $0.completedBytes == 0 && $0.totalBytes == 10 })
+        XCTAssertTrue(snapshots.contains { $0.completedBytes == 4 && $0.totalBytes == 10 })
+        XCTAssertTrue(snapshots.contains { $0.completedBytes == 10 && $0.totalBytes == 10 })
+    }
+
+    func testCopySingleFileReportsIntermediateByteProgress() async throws {
+        let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
+        let destFolder = tempDirectory.appendingPathComponent("dest", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceFolder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destFolder, withIntermediateDirectories: true)
+        let source = sourceFolder.appendingPathComponent("large.bin")
+        try Data(repeating: 1, count: 10).write(to: source)
+        let recorder = FileOperationProgressRecorder()
+        let reporter = FileOperationProgressReporter(
+            initialSnapshot: FileOperationProgressSnapshot(kind: .copy, title: "Copying"),
+            onUpdate: { snapshot in await recorder.append(snapshot) }
+        )
+
+        _ = try await FileOperationService(copyChunkSize: 4).copyItems([source], to: destFolder, progress: reporter)
+
+        let snapshots = await recorder.snapshots
+        XCTAssertTrue(snapshots.contains { $0.completedBytes == 4 && $0.totalBytes == 10 && $0.completedUnitCount == 0 })
+        XCTAssertTrue(snapshots.contains { $0.completedBytes == 8 && $0.totalBytes == 10 && $0.completedUnitCount == 0 })
+        XCTAssertTrue(snapshots.contains { $0.completedBytes == 10 && $0.totalBytes == 10 && $0.completedUnitCount == 1 })
+    }
+
+    func testCopyItemsStopsBeforeCopyingWhenProgressIsCancelledAfterStartUpdate() async throws {
+        let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
+        let destFolder = tempDirectory.appendingPathComponent("dest", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceFolder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destFolder, withIntermediateDirectories: true)
+        let source = sourceFolder.appendingPathComponent("cancel.txt")
+        try "cancel".write(to: source, atomically: true, encoding: .utf8)
+        let canceller = ProgressCanceller()
+        var reporter: FileOperationProgressReporter!
+        reporter = FileOperationProgressReporter(
+            initialSnapshot: FileOperationProgressSnapshot(kind: .copy, title: "Copying"),
+            onUpdate: { snapshot in await canceller.cancelOnce(snapshot: snapshot) }
+        )
+        await canceller.setReporter(reporter)
+
+        do {
+            _ = try await FileOperationService().copyItems([source], to: destFolder, progress: reporter)
+            XCTFail("Expected cancellation")
+        } catch is CancellationError {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: destFolder.appendingPathComponent("cancel.txt").path))
+        }
+    }
+
+    func testCopySingleFileCanBeCancelledDuringStreamingCopy() async throws {
+        let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
+        let destFolder = tempDirectory.appendingPathComponent("dest", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceFolder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destFolder, withIntermediateDirectories: true)
+        let source = sourceFolder.appendingPathComponent("cancel-during-copy.bin")
+        try Data(repeating: 1, count: 10).write(to: source)
+        let destination = destFolder.appendingPathComponent(source.lastPathComponent)
+        let canceller = ByteThresholdProgressCanceller(cancelAtCompletedBytes: 4)
+        var reporter: FileOperationProgressReporter!
+        reporter = FileOperationProgressReporter(
+            initialSnapshot: FileOperationProgressSnapshot(kind: .copy, title: "Copying"),
+            onUpdate: { snapshot in await canceller.cancelIfNeeded(snapshot: snapshot) }
+        )
+        await canceller.setReporter(reporter)
+
+        do {
+            _ = try await FileOperationService(copyChunkSize: 4).copyItems([source], to: destFolder, progress: reporter)
+            XCTFail("Expected cancellation")
+        } catch is CancellationError {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+        }
+    }
+
     func testMoveItemsRemovesOriginal() async throws {
         let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
         let destFolder = tempDirectory.appendingPathComponent("dest", isDirectory: true)
@@ -277,6 +369,34 @@ final class FileOperationServiceTests: XCTestCase {
         }
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: first.path))
+    }
+
+    func testMoveToTrashRestoresAlreadyTrashedItemsWhenLaterTrashFails() async throws {
+        let first = tempDirectory.appendingPathComponent("first.txt")
+        let second = tempDirectory.appendingPathComponent("second.txt")
+        let simulatedTrash = tempDirectory.appendingPathComponent("SimulatedTrash", isDirectory: true)
+        try FileManager.default.createDirectory(at: simulatedTrash, withIntermediateDirectories: true)
+        try "first".write(to: first, atomically: true, encoding: .utf8)
+        try "second".write(to: second, atomically: true, encoding: .utf8)
+        let service = FileOperationService(trashItem: { url in
+            if url == second {
+                throw ExplorerError.readFailed("trash failed")
+            }
+            let trashed = simulatedTrash.appendingPathComponent(url.lastPathComponent)
+            try FileManager.default.moveItem(at: url, to: trashed)
+            return trashed
+        })
+
+        do {
+            _ = try await service.moveToTrash([first, second])
+            XCTFail("Expected trash failure")
+        } catch let error as ExplorerError {
+            XCTAssertEqual(error, .readFailed("trash failed"))
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: first.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: second.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: simulatedTrash.appendingPathComponent("first.txt").path))
     }
 
     func testCopyItemsReplacesExistingFileWhenResolverChoosesReplace() async throws {
@@ -407,5 +527,54 @@ private actor FileOperationProgressRecorder {
 
     func append(_ snapshot: FileOperationProgressSnapshot) {
         snapshots.append(snapshot)
+    }
+}
+
+private actor ProgressCanceller {
+    private var didCancel = false
+    private var reporter: FileOperationProgressReporter?
+
+    func setReporter(_ reporter: FileOperationProgressReporter) {
+        self.reporter = reporter
+    }
+
+    func cancelOnce(snapshot: FileOperationProgressSnapshot) async {
+        guard !didCancel, snapshot.phase == .running else {
+            return
+        }
+        guard let reporter else {
+            return
+        }
+        didCancel = true
+        await reporter.cancel()
+    }
+}
+
+private actor ByteThresholdProgressCanceller {
+    private let cancelAtCompletedBytes: Int64
+    private var didCancel = false
+    private var reporter: FileOperationProgressReporter?
+
+    init(cancelAtCompletedBytes: Int64) {
+        self.cancelAtCompletedBytes = cancelAtCompletedBytes
+    }
+
+    func setReporter(_ reporter: FileOperationProgressReporter) {
+        self.reporter = reporter
+    }
+
+    func cancelIfNeeded(snapshot: FileOperationProgressSnapshot) async {
+        guard !didCancel,
+              snapshot.phase == .running,
+              let completedBytes = snapshot.completedBytes,
+              completedBytes >= cancelAtCompletedBytes,
+              completedBytes < (snapshot.totalBytes ?? completedBytes) else {
+            return
+        }
+        guard let reporter else {
+            return
+        }
+        didCancel = true
+        await reporter.cancel()
     }
 }

@@ -32,9 +32,13 @@ struct MainWindowView: View {
                 previewArea
             }
 
-            if appState.currentDocument?.kind == .screenshot {
+            if appState.currentDocument?.kind == .screenshot,
+               ToolInspectorPresentation.controls(
+                for: editorViewModel.activeTool,
+                selectedLayer: selectedLayer
+               ).isVisible {
                 Divider()
-                ToolInspectorView(editorViewModel: editorViewModel)
+                ToolInspectorView(selectedLayer: selectedLayer, editorViewModel: editorViewModel)
             }
 
             if let document = appState.currentDocument {
@@ -68,21 +72,37 @@ struct MainWindowView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .tint(.blue)
+            .disabled(appState.isRecordingInProgress)
             .help("Capture area")
 
-            Button {
-                Task { await captureCoordinator.startScreenRecording() }
-            } label: {
-                Label("Record", systemImage: "record.circle")
-                    .labelStyle(.titleAndIcon)
-                    .frame(minWidth: 104)
+            if appState.isRecordingInProgress {
+                Button {
+                    Task { await captureCoordinator.stopActiveRecording() }
+                } label: {
+                    Label("Stop", systemImage: "stop.circle")
+                        .labelStyle(.titleAndIcon)
+                        .frame(minWidth: 104)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .tint(.red)
+                .help("Stop recording")
+            } else {
+                Button {
+                    Task { await captureCoordinator.startScreenRecording() }
+                } label: {
+                    Label("Record", systemImage: "record.circle")
+                        .labelStyle(.titleAndIcon)
+                        .frame(minWidth: 104)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .tint(.red)
+                .help("Record area")
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .tint(.red)
-            .help("Record area")
 
             quickOptionsMenu
+                .disabled(appState.isRecordingInProgress)
 
             Button {
                 openSettingsToDefaultTab()
@@ -132,26 +152,46 @@ struct MainWindowView: View {
         return MainWindowPresentation.recordingSummary(settings: settingsStore.settings)
     }
 
+    private var selectedLayer: EditorLayer? {
+        guard let document = appState.currentDocument,
+              let selectedLayerID = document.selectedLayerID
+        else {
+            return nil
+        }
+
+        return document.layers.first(where: { $0.id == selectedLayerID })
+    }
+
     private var quickOptionsMenu: some View {
         let control = MainWindowPresentation.quickOptionsControl
 
         return Menu {
             Section("Screenshot Delay") {
                 ForEach([0, 3, 5, 10], id: \.self) { seconds in
-                    Button("\(seconds)s") {
+                    Button {
                         settingsStore.update { settings in
                             settings.defaultDelaySeconds = seconds
                         }
+                    } label: {
+                        quickOptionLabel(
+                            title: "\(seconds)s",
+                            isSelected: settingsStore.settings.defaultDelaySeconds == seconds
+                        )
                     }
                 }
             }
 
             Section("Recording Countdown") {
                 ForEach([0, 3, 5, 10], id: \.self) { seconds in
-                    Button("\(seconds)s") {
+                    Button {
                         settingsStore.update { settings in
                             settings.countdownSeconds = seconds
                         }
+                    } label: {
+                        quickOptionLabel(
+                            title: "\(seconds)s",
+                            isSelected: settingsStore.settings.countdownSeconds == seconds
+                        )
                     }
                 }
             }
@@ -180,6 +220,15 @@ struct MainWindowView: View {
         .help("Quick options")
     }
 
+    @ViewBuilder
+    private func quickOptionLabel(title: String, isSelected: Bool) -> some View {
+        if isSelected {
+            Label(title, systemImage: "checkmark")
+        } else {
+            Text(title)
+        }
+    }
+
     private func recentResultRow(for document: EditorDocument) -> some View {
         let result = MainWindowPresentation.recentResult(for: document, statusMessage: appState.statusMessage)
         return HStack(spacing: 12) {
@@ -200,7 +249,7 @@ struct MainWindowView: View {
 
             Spacer()
 
-            if result.canCopy {
+            if result.canCopy && document.kind != .screenshot {
                 Button {
                     captureCoordinator.copyCurrentDocument()
                 } label: {
@@ -218,7 +267,7 @@ struct MainWindowView: View {
                 .help("Reveal in Finder")
             }
 
-            if result.canSave {
+            if result.canSave && document.kind != .screenshot {
                 if result.requiresSave {
                     Button {
                         captureCoordinator.saveCurrentDocument()
@@ -253,7 +302,7 @@ struct MainWindowView: View {
     @ViewBuilder
     private func editorToolbar(for document: EditorDocument) -> some View {
         let result = MainWindowPresentation.recentResult(for: document, statusMessage: appState.statusMessage)
-        if document.kind == .screenshot || result.canCopy || result.canSave {
+        if document.kind == .screenshot {
             Divider()
             EditorToolbarView(
                 documentKind: document.kind,
@@ -281,7 +330,11 @@ struct MainWindowView: View {
 
             if let result = appState.currentDocument?.ocrResult {
                 Divider()
-                OCRResultPanelView(result: result, onCopyText: captureCoordinator.copyOCRText)
+                OCRResultPanelView(
+                    result: result,
+                    onCopyText: captureCoordinator.copyOCRText,
+                    onClose: captureCoordinator.dismissOCRResult
+                )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

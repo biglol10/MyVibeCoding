@@ -133,7 +133,20 @@ struct RelatedFileRow: View {
 struct DeleteActionButton: View {
     let selectedCount: Int
     let selectedBytes: Int64
+    let disabledSummary: String
     let action: () -> Void
+
+    init(
+        selectedCount: Int,
+        selectedBytes: Int64,
+        disabledSummary: String = "Select related files first",
+        action: @escaping () -> Void
+    ) {
+        self.selectedCount = selectedCount
+        self.selectedBytes = selectedBytes
+        self.disabledSummary = disabledSummary
+        self.action = action
+    }
 
     var body: some View {
         Button(action: action) {
@@ -179,7 +192,7 @@ struct DeleteActionButton: View {
 
     private var summary: String {
         if isDisabled {
-            return "Select related files first"
+            return disabledSummary
         }
         let size = ByteCountFormatter.string(fromByteCount: selectedBytes, countStyle: .file)
         return "\(selectedCount) items selected - \(size)"

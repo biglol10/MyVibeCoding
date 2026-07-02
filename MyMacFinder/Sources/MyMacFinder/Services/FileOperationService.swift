@@ -3,13 +3,29 @@ import Foundation
 public struct FileOperationService: @unchecked Sendable {
     private let fileManager: FileManager
     private let conflictResolver: any FileConflictResolving
+    private let manifestBuilder: FileOperationManifestBuilder
+    private let trashItem: (URL) throws -> URL
+    private let copyChunkSize: Int
 
     public init(
         fileManager: FileManager = .default,
-        conflictResolver: any FileConflictResolving = DefaultFileConflictResolver()
+        conflictResolver: any FileConflictResolving = DefaultFileConflictResolver(),
+        manifestBuilder: FileOperationManifestBuilder? = nil,
+        trashItem: ((URL) throws -> URL)? = nil,
+        copyChunkSize: Int = 1_048_576
     ) {
         self.fileManager = fileManager
         self.conflictResolver = conflictResolver
+        self.manifestBuilder = manifestBuilder ?? FileOperationManifestBuilder(fileManager: fileManager)
+        self.trashItem = trashItem ?? { url in
+            var result: NSURL?
+            try fileManager.trashItem(at: url, resultingItemURL: &result)
+            guard let result else {
+                throw ExplorerError.readFailed("Item could not be moved to Trash: \(url.path)")
+            }
+            return result as URL
+        }
+        self.copyChunkSize = max(copyChunkSize, 1)
     }
 
     @discardableResult
@@ -45,7 +61,7 @@ public struct FileOperationService: @unchecked Sendable {
         do {
             try fileManager.moveItem(at: url, to: resolvedDestination)
         } catch {
-            rollbackReplacement(resolution.replacedItem, partialDestination: resolvedDestination)
+            rollbackFailedDestination(resolution.replacedItem, partialDestination: resolvedDestination)
             throw error
         }
         return FileOperationResult(
@@ -81,6 +97,9 @@ public struct FileOperationService: @unchecked Sendable {
         progress: FileOperationProgressReporter? = nil
     ) async throws -> FileOperationResult {
         try validateSourcesExist(urls)
+        let byteCounts = await progressByteCounts(for: urls, progress: progress)
+        let totalByteCount = totalByteCount(from: byteCounts)
+        var completedByteCount: Int64 = 0
 
         var createdURLs: [URL] = []
         var replacedItems: [FileTrashRecord] = []
@@ -92,8 +111,11 @@ public struct FileOperationService: @unchecked Sendable {
                 phase: .running,
                 currentItemName: source.lastPathComponent,
                 completedUnitCount: index,
-                totalUnitCount: urls.count
+                totalUnitCount: urls.count,
+                completedBytes: completedByteCount,
+                totalBytes: totalByteCount
             )
+            try await progress?.checkCancellation()
             let proposed = destinationFolder.appendingPathComponent(source.lastPathComponent)
             let normalizedSource = source.standardizedFileURL.resolvingSymlinksInPath()
             if isDescendant(proposed.standardizedFileURL, of: normalizedSource) {
@@ -109,23 +131,47 @@ public struct FileOperationService: @unchecked Sendable {
             )
             guard let destination = resolution.url else {
                 skippedURLs.append(source)
+                completedByteCount += byteCount(for: source, in: byteCounts)
+                await progress?.update(
+                    phase: .running,
+                    currentItemName: source.lastPathComponent,
+                    completedUnitCount: index + 1,
+                    totalUnitCount: urls.count,
+                    completedBytes: completedByteCount,
+                    totalBytes: totalByteCount
+                )
                 continue
             }
+            try await progress?.checkCancellation()
             do {
-                try fileManager.copyItem(at: source, to: destination)
+                try await copyItem(
+                    at: source,
+                    to: destination,
+                    progress: ByteProgressContext(
+                        progress: progress,
+                        currentItemName: source.lastPathComponent,
+                        completedUnitCount: index,
+                        totalUnitCount: urls.count,
+                        baseCompletedBytes: completedByteCount,
+                        totalBytes: totalByteCount
+                    )
+                )
             } catch {
-                rollbackReplacement(resolution.replacedItem, partialDestination: destination)
+                rollbackFailedDestination(resolution.replacedItem, partialDestination: destination)
                 throw error
             }
             createdURLs.append(destination)
             if let replacedItem = resolution.replacedItem {
                 replacedItems.append(replacedItem)
             }
+            completedByteCount += byteCount(for: source, in: byteCounts)
             await progress?.update(
                 phase: .running,
                 currentItemName: source.lastPathComponent,
                 completedUnitCount: index + 1,
-                totalUnitCount: urls.count
+                totalUnitCount: urls.count,
+                completedBytes: completedByteCount,
+                totalBytes: totalByteCount
             )
         }
 
@@ -143,6 +189,9 @@ public struct FileOperationService: @unchecked Sendable {
         progress: FileOperationProgressReporter? = nil
     ) async throws -> FileOperationResult {
         try validateSourcesExist(urls)
+        let byteCounts = await progressByteCounts(for: urls, progress: progress)
+        let totalByteCount = totalByteCount(from: byteCounts)
+        var completedByteCount: Int64 = 0
 
         let normalizedDestinationFolder = destinationFolder.standardizedFileURL.resolvingSymlinksInPath()
         var movedItems: [FileMoveRecord] = []
@@ -155,14 +204,26 @@ public struct FileOperationService: @unchecked Sendable {
                 phase: .running,
                 currentItemName: source.lastPathComponent,
                 completedUnitCount: index,
-                totalUnitCount: urls.count
+                totalUnitCount: urls.count,
+                completedBytes: completedByteCount,
+                totalBytes: totalByteCount
             )
+            try await progress?.checkCancellation()
             let normalizedSourceFolder = source
                 .deletingLastPathComponent()
                 .standardizedFileURL
                 .resolvingSymlinksInPath()
             if normalizedSourceFolder == normalizedDestinationFolder {
                 skippedURLs.append(source)
+                completedByteCount += byteCount(for: source, in: byteCounts)
+                await progress?.update(
+                    phase: .running,
+                    currentItemName: source.lastPathComponent,
+                    completedUnitCount: index + 1,
+                    totalUnitCount: urls.count,
+                    completedBytes: completedByteCount,
+                    totalBytes: totalByteCount
+                )
                 continue
             }
 
@@ -181,23 +242,36 @@ public struct FileOperationService: @unchecked Sendable {
             )
             guard let destination = resolution.url else {
                 skippedURLs.append(source)
+                completedByteCount += byteCount(for: source, in: byteCounts)
+                await progress?.update(
+                    phase: .running,
+                    currentItemName: source.lastPathComponent,
+                    completedUnitCount: index + 1,
+                    totalUnitCount: urls.count,
+                    completedBytes: completedByteCount,
+                    totalBytes: totalByteCount
+                )
                 continue
             }
+            try await progress?.checkCancellation()
             do {
-                try fileManager.moveItem(at: source, to: destination)
+                try await moveItem(at: source, to: destination)
             } catch {
-                rollbackReplacement(resolution.replacedItem, partialDestination: destination)
+                rollbackFailedDestination(resolution.replacedItem, partialDestination: destination)
                 throw error
             }
             movedItems.append(FileMoveRecord(source: source, destination: destination))
             if let replacedItem = resolution.replacedItem {
                 replacedItems.append(replacedItem)
             }
+            completedByteCount += byteCount(for: source, in: byteCounts)
             await progress?.update(
                 phase: .running,
                 currentItemName: source.lastPathComponent,
                 completedUnitCount: index + 1,
-                totalUnitCount: urls.count
+                totalUnitCount: urls.count,
+                completedBytes: completedByteCount,
+                totalBytes: totalByteCount
             )
         }
 
@@ -214,6 +288,9 @@ public struct FileOperationService: @unchecked Sendable {
         progress: FileOperationProgressReporter? = nil
     ) async throws -> FileOperationResult {
         try validateSourcesExist(urls)
+        let byteCounts = await progressByteCounts(for: urls, progress: progress)
+        let totalByteCount = totalByteCount(from: byteCounts)
+        var completedByteCount: Int64 = 0
 
         var trashedItems: [FileTrashRecord] = []
         for (index, url) in urls.enumerated() {
@@ -222,14 +299,25 @@ public struct FileOperationService: @unchecked Sendable {
                 phase: .running,
                 currentItemName: url.lastPathComponent,
                 completedUnitCount: index,
-                totalUnitCount: urls.count
+                totalUnitCount: urls.count,
+                completedBytes: completedByteCount,
+                totalBytes: totalByteCount
             )
-            trashedItems.append(try trashExistingItem(at: url))
+            try await progress?.checkCancellation()
+            do {
+                trashedItems.append(try trashExistingItem(at: url))
+            } catch {
+                restoreTrashedItems(trashedItems)
+                throw error
+            }
+            completedByteCount += byteCount(for: url, in: byteCounts)
             await progress?.update(
                 phase: .running,
                 currentItemName: url.lastPathComponent,
                 completedUnitCount: index + 1,
-                totalUnitCount: urls.count
+                totalUnitCount: urls.count,
+                completedBytes: completedByteCount,
+                totalBytes: totalByteCount
             )
         }
         return FileOperationResult(trashedItems: trashedItems)
@@ -278,20 +366,15 @@ public struct FileOperationService: @unchecked Sendable {
     }
 
     private func trashExistingItem(at url: URL) throws -> FileTrashRecord {
-        var result: NSURL?
-        try fileManager.trashItem(at: url, resultingItemURL: &result)
-        guard let result else {
-            throw ExplorerError.readFailed("Item could not be moved to Trash: \(url.path)")
-        }
-        return FileTrashRecord(original: url, trashed: result as URL)
+        FileTrashRecord(original: url, trashed: try trashItem(url))
     }
 
-    private func rollbackReplacement(_ record: FileTrashRecord?, partialDestination: URL) {
-        guard let record else {
-            return
-        }
+    private func rollbackFailedDestination(_ record: FileTrashRecord?, partialDestination: URL) {
         if fileManager.fileExists(atPath: partialDestination.path) {
             try? fileManager.removeItem(at: partialDestination)
+        }
+        guard let record else {
+            return
         }
         guard !fileManager.fileExists(atPath: record.original.path),
               fileManager.fileExists(atPath: record.trashed.path) else {
@@ -302,6 +385,117 @@ public struct FileOperationService: @unchecked Sendable {
             withIntermediateDirectories: true
         )
         try? fileManager.moveItem(at: record.trashed, to: record.original)
+    }
+
+    private func restoreTrashedItems(_ records: [FileTrashRecord]) {
+        for record in records.reversed() {
+            guard !fileManager.fileExists(atPath: record.original.path),
+                  fileManager.fileExists(atPath: record.trashed.path) else {
+                continue
+            }
+            try? fileManager.createDirectory(
+                at: record.original.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try? fileManager.moveItem(at: record.trashed, to: record.original)
+        }
+    }
+
+    private struct ByteProgressContext: Sendable {
+        var progress: FileOperationProgressReporter?
+        var currentItemName: String
+        var completedUnitCount: Int
+        var totalUnitCount: Int
+        var baseCompletedBytes: Int64
+        var totalBytes: Int64?
+
+        func update(copiedBytes: Int64) async {
+            await progress?.update(
+                phase: .running,
+                currentItemName: currentItemName,
+                completedUnitCount: completedUnitCount,
+                totalUnitCount: totalUnitCount,
+                completedBytes: baseCompletedBytes + copiedBytes,
+                totalBytes: totalBytes
+            )
+        }
+
+        func checkCancellation() async throws {
+            try await progress?.checkCancellation()
+        }
+    }
+
+    private func copyItem(
+        at source: URL,
+        to destination: URL,
+        progress: ByteProgressContext
+    ) async throws {
+        if try isStreamCopyEligible(source) {
+            try await copyRegularFile(at: source, to: destination, progress: progress)
+            return
+        }
+
+        let fileManager = fileManager
+        try await Task.detached(priority: .utility) {
+            try fileManager.copyItem(at: source, to: destination)
+        }.value
+    }
+
+    private func moveItem(at source: URL, to destination: URL) async throws {
+        let fileManager = fileManager
+        try await Task.detached(priority: .utility) {
+            try fileManager.moveItem(at: source, to: destination)
+        }.value
+    }
+
+    private func isStreamCopyEligible(_ source: URL) throws -> Bool {
+        let values = try source.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        return values.isRegularFile == true && values.isSymbolicLink != true
+    }
+
+    private func copyRegularFile(
+        at source: URL,
+        to destination: URL,
+        progress: ByteProgressContext
+    ) async throws {
+        let fileManager = fileManager
+        let chunkSize = copyChunkSize
+        try await Task.detached(priority: .utility) {
+            let attributes = try fileManager.attributesOfItem(atPath: source.path)
+            guard fileManager.createFile(atPath: destination.path, contents: nil) else {
+                throw ExplorerError.readFailed("Unable to create destination file: \(destination.path)")
+            }
+
+            let reader = try FileHandle(forReadingFrom: source)
+            let writer = try FileHandle(forWritingTo: destination)
+            var completedBytes: Int64 = 0
+
+            do {
+                while true {
+                    try await progress.checkCancellation()
+                    let chunk = try reader.read(upToCount: chunkSize) ?? Data()
+                    guard !chunk.isEmpty else {
+                        break
+                    }
+                    try writer.write(contentsOf: chunk)
+                    completedBytes += Int64(chunk.count)
+                    await progress.update(copiedBytes: completedBytes)
+                }
+
+                try reader.close()
+                try writer.close()
+
+                var copiedAttributes = attributes
+                copiedAttributes.removeValue(forKey: .size)
+                copiedAttributes.removeValue(forKey: .type)
+                try? fileManager.setAttributes(copiedAttributes, ofItemAtPath: destination.path)
+            } catch {
+                try? reader.close()
+                try? writer.close()
+                try? fileManager.removeItem(at: destination)
+                throw error
+            }
+        }.value
     }
 
     private func copyName(for url: URL) -> URL {
@@ -335,6 +529,37 @@ public struct FileOperationService: @unchecked Sendable {
                 throw ExplorerError.pathDoesNotExist(url.path)
             }
         }
+    }
+
+    private func progressByteCounts(
+        for urls: [URL],
+        progress: FileOperationProgressReporter?
+    ) async -> [URL: Int64]? {
+        guard progress != nil else {
+            return nil
+        }
+        let builder = manifestBuilder
+        return await Task.detached {
+            var byteCounts: [URL: Int64] = [:]
+            for url in urls {
+                guard let manifest = try? builder.manifest(for: [url]) else {
+                    return nil
+                }
+                byteCounts[url.standardizedFileURL] = manifest.totalByteCount
+            }
+            return byteCounts
+        }.value
+    }
+
+    private func totalByteCount(from byteCounts: [URL: Int64]?) -> Int64? {
+        guard let byteCounts else {
+            return nil
+        }
+        return byteCounts.values.reduce(0, +)
+    }
+
+    private func byteCount(for url: URL, in byteCounts: [URL: Int64]?) -> Int64 {
+        byteCounts?[url.standardizedFileURL] ?? 0
     }
 
     private func isDescendant(_ possibleChild: URL, of possibleParent: URL) -> Bool {

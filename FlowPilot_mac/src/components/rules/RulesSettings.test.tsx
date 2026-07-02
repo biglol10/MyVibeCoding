@@ -1,12 +1,14 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createRule, listRules, updateRule } from "../../api/activityApi";
+import { createRule, deleteRule, listRules, setRuleEnabled, updateRule } from "../../api/activityApi";
 import type { ClassificationRule } from "../../types/activity";
 import { RulesSettings } from "./RulesSettings";
 
 vi.mock("../../api/activityApi", () => ({
   createRule: vi.fn(),
+  deleteRule: vi.fn(),
   listRules: vi.fn(),
+  setRuleEnabled: vi.fn(),
   updateRule: vi.fn(),
 }));
 
@@ -43,6 +45,8 @@ describe("RulesSettings", () => {
   beforeEach(() => {
     vi.mocked(listRules).mockResolvedValue([existingRule]);
     vi.mocked(createRule).mockResolvedValue(createdRule);
+    vi.mocked(deleteRule).mockResolvedValue(undefined);
+    vi.mocked(setRuleEnabled).mockImplementation(async (ruleId, isEnabled) => ({ ...existingRule, id: ruleId, isEnabled }));
     vi.mocked(updateRule).mockResolvedValue(updatedRule);
   });
 
@@ -102,12 +106,23 @@ describe("RulesSettings", () => {
     expect(cells[0]).toHaveClass("w-[22%]", "text-left");
     expect(headers[1]).toHaveClass("w-[10%]", "text-left");
     expect(cells[1]).toHaveClass("w-[10%]", "text-left");
-    expect(headers[2]).toHaveClass("w-[24%]", "text-left");
-    expect(cells[2]).toHaveClass("w-[24%]", "text-left");
+    expect(headers[2]).toHaveClass("w-[20%]", "text-left");
+    expect(cells[2]).toHaveClass("w-[20%]", "text-left");
     expect(headers[4]).toHaveClass("w-[10%]", "text-right");
     expect(cells[4]).toHaveClass("w-[10%]", "text-right");
-    expect(headers[6]).toHaveClass("w-[8%]", "text-right");
-    expect(cells[6]).toHaveClass("w-[8%]", "text-right");
+    expect(headers[6]).toHaveClass("w-[18%]", "text-right");
+    expect(cells[6]).toHaveClass("w-[18%]", "text-right");
+  });
+
+  it("lets rule table cells use the full card width on narrow screens", async () => {
+    render(<RulesSettings />);
+
+    const row = await screen.findByRole("row", { name: /ChatGPT/ });
+    const cells = within(row).getAllByRole("cell");
+
+    for (const cell of cells) {
+      expect(cell).toHaveClass("max-[700px]:w-full");
+    }
   });
 
   it("can sort displayed rules by priority", async () => {
@@ -216,6 +231,30 @@ describe("RulesSettings", () => {
       category: "neutral",
     });
     expect(screen.getByRole("row", { name: /ChatGPT.*중립/ })).toBeInTheDocument();
+  });
+
+  it("toggles a rule enabled state from the management column", async () => {
+    const user = userEvent.setup();
+    vi.mocked(setRuleEnabled).mockResolvedValue({ ...existingRule, isEnabled: false });
+    render(<RulesSettings />);
+
+    const row = await screen.findByRole("row", { name: /ChatGPT/ });
+    await user.click(within(row).getByRole("button", { name: "비활성" }));
+
+    expect(setRuleEnabled).toHaveBeenCalledWith("builtin:domain:chatgpt.com", false);
+    expect(screen.getByRole("row", { name: /ChatGPT.*비활성/ })).toBeInTheDocument();
+  });
+
+  it("deletes user rules from the management column", async () => {
+    const user = userEvent.setup();
+    vi.mocked(listRules).mockResolvedValue([createdRule, existingRule]);
+    render(<RulesSettings />);
+
+    const row = await screen.findByRole("row", { name: /\/watch/ });
+    await user.click(within(row).getByRole("button", { name: "삭제" }));
+
+    expect(deleteRule).toHaveBeenCalledWith("user:urlPattern:/watch");
+    expect(screen.queryByRole("row", { name: /\/watch/ })).not.toBeInTheDocument();
   });
 
   it("marks the pattern input as required and associates validation errors", async () => {

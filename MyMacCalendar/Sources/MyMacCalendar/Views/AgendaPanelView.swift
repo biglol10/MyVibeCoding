@@ -71,7 +71,7 @@ struct AgendaPanelView: View {
                 Text("No events")
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(items, id: \.startDate) { occurrence in
+                ForEach(items, id: \.occurrenceID) { occurrence in
                     Button {
                         onSelectOccurrence(occurrence)
                     } label: {

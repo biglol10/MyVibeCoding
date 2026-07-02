@@ -88,8 +88,8 @@ public struct DeletionReceiptStore: Sendable {
     public func readReceipts() throws -> [DeletionReceipt] {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
         let text = try String(contentsOf: fileURL, encoding: .utf8)
-        return try text.split(separator: "\n").map { line in
-            try decoder.decode(DeletionReceipt.self, from: Data(line.utf8))
+        return text.split(separator: "\n").compactMap { line in
+            try? decoder.decode(DeletionReceipt.self, from: Data(line.utf8))
         }
     }
 

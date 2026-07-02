@@ -15,16 +15,31 @@ public protocol FileSystemServicing: Sendable {
     func contentsOfDirectory(at url: URL, options: DirectoryReadOptions) async throws -> [FileEntry]
 }
 
+public protocol FileResourceValueReading: Sendable {
+    func resourceValues(for url: URL, keys: Set<URLResourceKey>) throws -> URLResourceValues
+}
+
+public struct DefaultFileResourceValueReader: FileResourceValueReading {
+    public init() {}
+
+    public func resourceValues(for url: URL, keys: Set<URLResourceKey>) throws -> URLResourceValues {
+        try url.resourceValues(forKeys: keys)
+    }
+}
+
 public struct FileSystemService: FileSystemServicing, @unchecked Sendable {
     private let fileManager: FileManager
     private let finderTagService: any FinderTagServicing
+    private let resourceValueReader: any FileResourceValueReading
 
     public init(
         fileManager: FileManager = .default,
-        finderTagService: any FinderTagServicing = FinderTagService()
+        finderTagService: any FinderTagServicing = FinderTagService(),
+        resourceValueReader: any FileResourceValueReading = DefaultFileResourceValueReader()
     ) {
         self.fileManager = fileManager
         self.finderTagService = finderTagService
+        self.resourceValueReader = resourceValueReader
     }
 
     public func contentsOfDirectory(at url: URL, options: DirectoryReadOptions = DirectoryReadOptions()) async throws -> [FileEntry] {
@@ -51,14 +66,16 @@ public struct FileSystemService: FileSystemServicing, @unchecked Sendable {
             options: [.skipsSubdirectoryDescendants]
         )
 
-        return try childURLs.compactMap { childURL in
+        return childURLs.compactMap { childURL in
             let displayURL = displayURL(for: childURL, readRootURL: readURL, displayRootURL: url)
-            let entry = try makeEntry(
+            guard let entry = try? makeEntry(
                 for: childURL,
                 displayURL: displayURL,
                 resourceKeys: keys,
                 includeFinderTags: options.includeFinderTags
-            )
+            ) else {
+                return nil
+            }
             if !options.showHiddenFiles && entry.isHidden {
                 return nil
             }
@@ -99,7 +116,7 @@ public struct FileSystemService: FileSystemServicing, @unchecked Sendable {
         resourceKeys: Set<URLResourceKey>,
         includeFinderTags: Bool
     ) throws -> FileEntry {
-        let values = try url.resourceValues(forKeys: resourceKeys)
+        let values = try resourceValueReader.resourceValues(for: url, keys: resourceKeys)
         let displayURL = displayURL ?? url
         let name = displayURL.lastPathComponent
         let isDirectory = values.isDirectory == true

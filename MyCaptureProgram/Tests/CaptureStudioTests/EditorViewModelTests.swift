@@ -39,6 +39,55 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertNil(appState.currentDocument?.selectedLayerID)
     }
 
+    func testUndoBackToSavedScreenshotClearsDirtyState() {
+        let appState = AppState()
+        let document = EditorDocument(
+            kind: .screenshot,
+            fileURL: URL(fileURLWithPath: "/tmp/Screenshot.png"),
+            data: Data([0x89, 0x50, 0x4E, 0x47]),
+            isDirty: false
+        )
+        appState.currentDocument = document
+        let viewModel = EditorViewModel(appState: appState)
+        let layer = EditorLayer.arrow(
+            ArrowLayer(
+                start: CGPoint(x: 10, y: 10),
+                end: CGPoint(x: 60, y: 40),
+                style: LayerStyle(strokeColor: .red, fillColor: .clear, lineWidth: 2)
+            )
+        )
+
+        viewModel.addLayer(layer)
+        XCTAssertTrue(appState.currentDocument?.isDirty ?? false)
+
+        viewModel.undo()
+
+        XCTAssertEqual(appState.currentDocument?.layers, [])
+        XCTAssertFalse(appState.currentDocument?.isDirty ?? true)
+    }
+
+    func testUndoBackToUnsavedCaptureKeepsDirtyState() {
+        let appState = AppState()
+        appState.currentDocument = EditorDocument(
+            kind: .screenshot,
+            data: Data([0x89, 0x50, 0x4E, 0x47]),
+            isDirty: true
+        )
+        let viewModel = EditorViewModel(appState: appState)
+        let layer = EditorLayer.rectangle(
+            ShapeLayer(
+                frame: CGRect(x: 10, y: 20, width: 80, height: 40),
+                style: LayerStyle(strokeColor: .red, fillColor: .clear, lineWidth: 2)
+            )
+        )
+
+        viewModel.addLayer(layer)
+        viewModel.undo()
+
+        XCTAssertEqual(appState.currentDocument?.layers, [])
+        XCTAssertTrue(appState.currentDocument?.isDirty ?? false)
+    }
+
     func testCreateRectangleLayerFromDrag() throws {
         let appState = AppState()
         appState.currentDocument = EditorDocument(kind: .screenshot, data: Data([0x89, 0x50, 0x4E, 0x47]))
@@ -86,5 +135,118 @@ final class EditorViewModelTests: XCTestCase {
         let layer = try XCTUnwrap(appState.currentDocument?.layers.first)
         XCTAssertEqual(layer.textContent, "Note")
         XCTAssertEqual(layer.frame.origin, CGPoint(x: 50, y: 70))
+    }
+
+    func testUpdateSelectedTextChangesTextLayerAndMarksDirty() throws {
+        let appState = AppState()
+        let layer = EditorLayer.text(
+            TextLayer(
+                frame: CGRect(x: 20, y: 20, width: 140, height: 40),
+                text: "Text",
+                fontSize: 18,
+                style: LayerStyle(strokeColor: .black, fillColor: .yellow, lineWidth: 1)
+            )
+        )
+        appState.currentDocument = EditorDocument(
+            kind: .screenshot,
+            fileURL: URL(fileURLWithPath: "/tmp/Screenshot.png"),
+            data: Data([0x89, 0x50, 0x4E, 0x47]),
+            layers: [layer],
+            selectedLayerID: layer.id,
+            isDirty: false
+        )
+        let viewModel = EditorViewModel(appState: appState)
+
+        viewModel.updateSelectedText("Edited")
+
+        let updatedLayer = try XCTUnwrap(appState.currentDocument?.layers.first)
+        XCTAssertEqual(updatedLayer.textContent, "Edited")
+        XCTAssertTrue(appState.currentDocument?.isDirty ?? false)
+    }
+
+    func testUpdateDisplayedLineWidthUpdatesSelectedShapeLayer() throws {
+        let appState = AppState()
+        let layer = EditorLayer.rectangle(
+            ShapeLayer(
+                frame: CGRect(x: 10, y: 20, width: 80, height: 40),
+                style: LayerStyle(strokeColor: .red, fillColor: .clear, lineWidth: 2)
+            )
+        )
+        appState.currentDocument = EditorDocument(
+            kind: .screenshot,
+            fileURL: URL(fileURLWithPath: "/tmp/Screenshot.png"),
+            data: Data([0x89, 0x50, 0x4E, 0x47]),
+            layers: [layer],
+            selectedLayerID: layer.id,
+            isDirty: false
+        )
+        let viewModel = EditorViewModel(appState: appState)
+
+        viewModel.updateDisplayedLineWidth(9)
+
+        let updatedLayer = try XCTUnwrap(appState.currentDocument?.layers.first)
+        XCTAssertEqual(updatedLayer.lineWidth, 9)
+        XCTAssertEqual(viewModel.style.lineWidth, 9)
+        XCTAssertTrue(appState.currentDocument?.isDirty ?? false)
+    }
+
+    func testUpdateDisplayedTextSizeUpdatesSelectedTextLayer() throws {
+        let appState = AppState()
+        let layer = EditorLayer.text(
+            TextLayer(
+                frame: CGRect(x: 20, y: 20, width: 140, height: 40),
+                text: "Text",
+                fontSize: 18,
+                style: LayerStyle(strokeColor: .black, fillColor: .yellow, lineWidth: 1)
+            )
+        )
+        appState.currentDocument = EditorDocument(
+            kind: .screenshot,
+            fileURL: URL(fileURLWithPath: "/tmp/Screenshot.png"),
+            data: Data([0x89, 0x50, 0x4E, 0x47]),
+            layers: [layer],
+            selectedLayerID: layer.id,
+            isDirty: false
+        )
+        let viewModel = EditorViewModel(appState: appState)
+
+        viewModel.updateDisplayedTextSize(26)
+
+        let updatedLayer = try XCTUnwrap(appState.currentDocument?.layers.first)
+        XCTAssertEqual(updatedLayer.textFontSize, 26)
+        XCTAssertEqual(viewModel.textSize, 26)
+        XCTAssertTrue(appState.currentDocument?.isDirty ?? false)
+    }
+
+    func testMoveSelectedLayerUpdatesFrameAndUndoRestoresOriginalPosition() throws {
+        let appState = AppState()
+        let layer = EditorLayer.rectangle(
+            ShapeLayer(
+                frame: CGRect(x: 10, y: 20, width: 80, height: 40),
+                style: LayerStyle(strokeColor: .red, fillColor: .clear, lineWidth: 2)
+            )
+        )
+        appState.currentDocument = EditorDocument(
+            kind: .screenshot,
+            fileURL: URL(fileURLWithPath: "/tmp/Screenshot.png"),
+            data: Data([0x89, 0x50, 0x4E, 0x47]),
+            layers: [layer],
+            selectedLayerID: layer.id,
+            isDirty: false
+        )
+        let viewModel = EditorViewModel(appState: appState)
+
+        viewModel.beginSelectedLayerDrag()
+        viewModel.updateSelectedLayerDrag(translation: CGSize(width: 15, height: -6))
+        let movedLayer = try XCTUnwrap(appState.currentDocument?.layers.first)
+        XCTAssertEqual(movedLayer.frame, CGRect(x: 25, y: 14, width: 80, height: 40))
+        XCTAssertTrue(appState.currentDocument?.isDirty ?? false)
+
+        viewModel.endSelectedLayerDrag()
+        viewModel.undo()
+
+        let restoredLayer = try XCTUnwrap(appState.currentDocument?.layers.first)
+        XCTAssertEqual(restoredLayer.frame, CGRect(x: 10, y: 20, width: 80, height: 40))
+        XCTAssertFalse(appState.currentDocument?.isDirty ?? true)
     }
 }

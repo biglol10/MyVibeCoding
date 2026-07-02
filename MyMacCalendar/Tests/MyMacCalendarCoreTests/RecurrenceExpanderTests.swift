@@ -25,6 +25,17 @@ final class RecurrenceExpanderTests: XCTestCase {
         XCTAssertEqual(occurrences.map { calendar.component(.day, from: $0.startDate) }, [25, 25, 25])
     }
 
+    func testMonthlyExpansionClampsWithoutPermanentEndOfMonthDrift() throws {
+        let start = try date(2026, 1, 31)
+        let event = CalendarEvent(title: "Monthly Bill", startDate: start, endDate: start, recurrence: .monthly)
+        let range = DateInterval(start: try date(2026, 1, 1), end: try date(2026, 5, 1))
+
+        let occurrences = RecurrenceExpander(calendar: calendar).occurrences(for: event, in: range)
+
+        XCTAssertEqual(occurrences.map { calendar.component(.month, from: $0.startDate) }, [1, 2, 3, 4])
+        XCTAssertEqual(occurrences.map { calendar.component(.day, from: $0.startDate) }, [31, 28, 31, 30])
+    }
+
     private func date(_ year: Int, _ month: Int, _ day: Int) throws -> Date {
         try XCTUnwrap(calendar.date(from: DateComponents(year: year, month: month, day: day)))
     }

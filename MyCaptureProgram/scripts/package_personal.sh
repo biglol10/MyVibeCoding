@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="${CAPTURE_STUDIO_APP_NAME:-CaptureStudio}"
@@ -24,25 +25,17 @@ codesign --verify --deep --strict "$APP_BUNDLE"
 cat > "$INSTALLER" <<'INSTALLER_SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_SOURCE="$SCRIPT_DIR/CaptureStudio.app"
-DEFAULT_INSTALL_DIR="/Applications"
-INSTALL_DIR="${CAPTURE_STUDIO_INSTALL_DIR:-$DEFAULT_INSTALL_DIR}"
-APP_DEST="$INSTALL_DIR/CaptureStudio.app"
-# Default destination: /Applications/CaptureStudio.app
+APP_DEST="/Applications/CaptureStudio.app"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-
-pause_if_interactive() {
-  if [[ -t 0 ]]; then
-    read -r -p "$1"
-  fi
-}
 
 if [[ ! -d "$APP_SOURCE" ]]; then
   echo "CaptureStudio.app was not found next to this installer."
   echo "Keep Install CaptureStudio.command and CaptureStudio.app in the same folder."
-  pause_if_interactive "Press Return to close."
+  read -r -p "Press Return to close."
   exit 1
 fi
 
@@ -58,9 +51,8 @@ echo "Signing locally for this Mac..."
 codesign --force --deep --sign - "$APP_SOURCE" >/dev/null
 codesign --verify --deep --strict "$APP_SOURCE"
 
-echo "Copying to $INSTALL_DIR..."
-mkdir -p "$INSTALL_DIR" 2>/dev/null || true
-if [[ -w "$INSTALL_DIR" ]]; then
+echo "Copying to /Applications..."
+if [[ -w "/Applications" ]]; then
   rm -rf "$APP_DEST"
   ditto "$APP_SOURCE" "$APP_DEST"
   xattr -dr com.apple.quarantine "$APP_DEST" 2>/dev/null || true
@@ -82,7 +74,7 @@ echo
 echo "If macOS asks for permissions, enable CaptureStudio in:"
 echo "System Settings > Privacy & Security > Screen & System Audio Recording"
 echo
-pause_if_interactive "Press Return to close this installer."
+read -r -p "Press Return to close this installer."
 INSTALLER_SCRIPT
 
 chmod +x "$INSTALLER"
@@ -101,7 +93,6 @@ This personal package is not for public distribution. For a public download site
 README
 
 echo "Creating personal installer zip..."
-xattr -cr "$PACKAGE_ROOT" 2>/dev/null || true
 ditto -c -k --sequesterRsrc --keepParent "$PACKAGE_ROOT" "$FINAL_ZIP"
 /usr/bin/unzip -tq "$FINAL_ZIP"
 

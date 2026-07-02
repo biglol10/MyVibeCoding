@@ -2,6 +2,13 @@ import XCTest
 @testable import MyMacCleanCore
 
 final class DeletionPlannerTests: XCTestCase {
+    func testEmptySelectionHasActionableErrorDescription() {
+        XCTAssertEqual(
+            DeletionPlannerError.emptySelection.localizedDescription,
+            "Select at least one deletable item."
+        )
+    }
+
     func testPlannerExcludesProtectedAndUnselectedCandidates() throws {
         let app = InstalledApp(
             displayName: "Figma",

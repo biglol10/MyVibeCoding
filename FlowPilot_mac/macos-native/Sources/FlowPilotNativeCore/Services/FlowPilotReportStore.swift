@@ -76,6 +76,18 @@ public final class FlowPilotReportStore: ObservableObject {
         refresh()
     }
 
+    public func setRuleEnabled(id: String, isEnabled: Bool) throws {
+        let database = FlowPilotDatabase(path: databaseURL.path)
+        try database.setRuleEnabled(id: id, isEnabled: isEnabled)
+        refresh()
+    }
+
+    public func deleteUserRule(id: String) throws {
+        let database = FlowPilotDatabase(path: databaseURL.path)
+        try database.deleteUserRule(id: id)
+        refresh()
+    }
+
     public static func defaultDatabaseURL(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
         homeDirectory
             .appendingPathComponent("Library")

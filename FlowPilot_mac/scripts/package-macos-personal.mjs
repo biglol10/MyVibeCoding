@@ -38,8 +38,7 @@ set -euo pipefail
 
 package_root="$(cd "$(dirname "$0")" && pwd)"
 source_app="$package_root/App/FlowPilot.app"
-target_dir="\${FLOWPILOT_INSTALL_DIR:-/Applications}"
-target_app="$target_dir/FlowPilot.app"
+target_app="/Applications/FlowPilot.app"
 
 if [ ! -d "$source_app" ]; then
   echo "FlowPilot.app을 찾을 수 없습니다: $source_app"
@@ -50,12 +49,11 @@ echo "실행 중인 FlowPilot을 종료합니다..."
 osascript -e 'tell application "FlowPilot" to quit' >/dev/null 2>&1 || true
 sleep 1
 
-echo "FlowPilot을 $target_dir에 설치합니다..."
-mkdir -p "$target_dir" 2>/dev/null || true
+echo "FlowPilot을 /Applications에 설치합니다..."
 if rm -rf "$target_app" && ditto "$source_app" "$target_app"; then
   echo "일반 사용자 권한으로 설치했습니다."
 else
-  echo "일반 권한으로 $target_dir에 설치할 수 없어 관리자 권한으로 다시 시도합니다..."
+  echo "일반 권한으로 /Applications에 설치할 수 없어 관리자 권한으로 다시 시도합니다..."
   echo "macOS가 비밀번호를 물어보면 이 Mac의 로그인 비밀번호를 입력하세요."
   sudo rm -rf "$target_app"
   sudo ditto "$source_app" "$target_app"
@@ -74,8 +72,8 @@ open "$target_app"
 echo "설치 완료: $target_app"
 echo ""
 echo "macOS 권한 요청이 나오면 install-flowpilot-personal.command나 Terminal이 아니라"
-echo "$target_app 항목을 허용하세요."
-echo "시스템 설정에서 직접 추가할 때도 $target_app을 선택하세요."
+echo "/Applications/FlowPilot.app 항목을 허용하세요."
+echo "시스템 설정에서 직접 추가할 때도 /Applications/FlowPilot.app을 선택하세요."
 `;
 }
 

@@ -46,7 +46,7 @@ final class FloatingWidgetController {
         hostingController?.rootView = FloatingWidgetView(occurrences: occurrences, onSelect: onSelect, onShowAll: onShowAll)
         window?.level = alwaysOnTop ? .floating : .normal
         window?.alphaValue = opacity
-        window?.makeKeyAndOrderFront(nil)
+        showWithoutActivating()
     }
 
     func showDetail(for event: CalendarEvent) {
@@ -90,6 +90,10 @@ final class FloatingWidgetController {
         window?.orderOut(nil)
     }
 
+    private func showWithoutActivating() {
+        window?.orderFront(nil)
+    }
+
     @objc private func floatingWidgetDidMove(_ notification: Notification) {
         guard let movedWindow = notification.object as? NSWindow else { return }
         FloatingWidgetPositionStore.saveFrame(movedWindow.frame)
@@ -113,20 +117,49 @@ private enum FloatingWidgetPositionStore {
         let defaults = UserDefaults.standard
         guard defaults.object(forKey: originXKey) != nil,
               defaults.object(forKey: originYKey) != nil else {
-            return FloatingWidgetLayout.initialFrame
+            return defaultFrame()
         }
 
-        return NSRect(
+        let frame = NSRect(
             x: defaults.double(forKey: originXKey),
             y: defaults.double(forKey: originYKey),
             width: FloatingWidgetLayout.size.width,
             height: FloatingWidgetLayout.size.height
         )
+        return validatedFrame(frame)
     }
 
     static func saveFrame(_ frame: NSRect) {
         UserDefaults.standard.set(frame.origin.x, forKey: originXKey)
         UserDefaults.standard.set(frame.origin.y, forKey: originYKey)
+    }
+
+    private static func validatedFrame(_ frame: NSRect) -> NSRect {
+        let visibleFrames = NSScreen.screens.map(\.visibleFrame)
+        guard visibleFrames.isEmpty == false else {
+            return FloatingWidgetLayout.initialFrame
+        }
+        guard visibleFrames.contains(where: { $0.intersects(frame) }) else {
+            return defaultFrame()
+        }
+        return frame
+    }
+
+    private static func defaultFrame() -> NSRect {
+        guard let visibleFrame = NSScreen.main?.visibleFrame else {
+            return FloatingWidgetLayout.initialFrame
+        }
+
+        let maxX = max(visibleFrame.minX, visibleFrame.maxX - FloatingWidgetLayout.size.width)
+        let maxY = max(visibleFrame.minY, visibleFrame.maxY - FloatingWidgetLayout.size.height)
+        let x = min(max(FloatingWidgetLayout.initialFrame.origin.x, visibleFrame.minX), maxX)
+        let y = min(max(FloatingWidgetLayout.initialFrame.origin.y, visibleFrame.minY), maxY)
+        return NSRect(
+            x: x,
+            y: y,
+            width: FloatingWidgetLayout.size.width,
+            height: FloatingWidgetLayout.size.height
+        )
     }
 }
 

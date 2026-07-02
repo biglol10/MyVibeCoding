@@ -23,6 +23,13 @@ public enum CalendarStore {
     }
 
     private static func persistentStoreURL() throws -> URL {
+        if let overridePath = ProcessInfo.processInfo.environment["MYMACCALENDAR_STORE_URL"], overridePath.isEmpty == false {
+            let overrideURL = URL(fileURLWithPath: overridePath)
+            let directory = overrideURL.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            return overrideURL
+        }
+
         let baseURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let appDirectory = baseURL.appendingPathComponent("MyMacCalendar", isDirectory: true)
         if try prepareWritableDirectory(appDirectory) {

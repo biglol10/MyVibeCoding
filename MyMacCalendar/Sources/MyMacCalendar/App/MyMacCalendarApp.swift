@@ -8,10 +8,19 @@ struct MyMacCalendarApp: App {
     private let container: ModelContainer
 
     init() {
+        container = Self.makeModelContainer()
+    }
+
+    private static func makeModelContainer() -> ModelContainer {
         do {
-            container = try CalendarStore.makeContainer()
+            return try CalendarStore.makeContainer()
         } catch {
-            fatalError("Failed to create SwiftData container: \(error)")
+            NSLog("Failed to create SwiftData container: \(error). Falling back to in-memory store.")
+            do {
+                return try CalendarStore.makeInMemoryContainer()
+            } catch {
+                preconditionFailure("Unable to create any SwiftData container: \(error)")
+            }
         }
     }
 

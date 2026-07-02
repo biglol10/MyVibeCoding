@@ -33,6 +33,8 @@ struct EventEditorView: View {
     @State private var dateSelectionRole: DateSelectionRole
     @State private var displayedDateMonth: Date
     @State private var showingDeleteConfirmation = false
+    @State private var errorMessage: String?
+    @Query private var settingsRows: [AppSettings]
 
     init(event: CalendarEvent? = nil, defaultDate: Date = Date()) {
         self.event = event
@@ -72,6 +74,11 @@ struct EventEditorView: View {
             Button("취소", role: .cancel) {}
         } message: {
             Text(recurrence == .none ? "이 일정이 삭제됩니다." : "반복 일정 전체가 삭제됩니다.")
+        }
+        .alert("저장할 수 없습니다", isPresented: errorBinding) {
+            Button("확인", role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "다시 시도해 주세요.")
         }
     }
 
@@ -246,6 +253,21 @@ struct EventEditorView: View {
         return "\(formattedDate(startDate)) - \(formattedDate(endDate))"
     }
 
+    private var settings: AppSettings {
+        settingsRows.first ?? AppSettings()
+    }
+
+    private var errorBinding: Binding<Bool> {
+        Binding(
+            get: { errorMessage != nil },
+            set: { isPresented in
+                if isPresented == false {
+                    errorMessage = nil
+                }
+            }
+        )
+    }
+
     private func editorSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
@@ -304,6 +326,8 @@ struct EventEditorView: View {
         let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedStart = Calendar.current.startOfDay(for: startDate)
         let normalizedEnd = Calendar.current.startOfDay(for: max(endDate, startDate))
+        let previousNotificationIdentifiers = event.map { EventService().deletePlan(for: $0).notificationIdentifiers } ?? []
+        let savedEvent: CalendarEvent
 
         if let event {
             event.title = normalizedTitle
@@ -315,31 +339,67 @@ struct EventEditorView: View {
             event.recurrence = recurrence
             event.notificationOffsetsDays = notificationOffsets.sorted(by: >)
             event.updatedAt = Date()
+            savedEvent = event
         } else {
-            modelContext.insert(
-                CalendarEvent(
-                    title: normalizedTitle,
-                    startDate: normalizedStart,
-                    endDate: normalizedEnd,
-                    colorHex: category.colorHex,
-                    category: category,
-                    notes: notes,
-                    recurrence: recurrence,
-                    notificationOffsetsDays: notificationOffsets.sorted(by: >)
-                )
+            let newEvent = CalendarEvent(
+                title: normalizedTitle,
+                startDate: normalizedStart,
+                endDate: normalizedEnd,
+                colorHex: category.colorHex,
+                category: category,
+                notes: notes,
+                recurrence: recurrence,
+                notificationOffsetsDays: notificationOffsets.sorted(by: >)
             )
+            modelContext.insert(newEvent)
+            savedEvent = newEvent
         }
 
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            errorMessage = error.localizedDescription
+            return
+        }
+
+        refreshNotifications(for: savedEvent, replacing: previousNotificationIdentifiers)
         dismiss()
     }
 
     private func delete() {
         if let event {
+            let identifiers = EventService().deletePlan(for: event).notificationIdentifiers
             modelContext.delete(event)
-            try? modelContext.save()
+            do {
+                try modelContext.save()
+                NotificationService().cancel(identifiers: identifiers)
+            } catch {
+                errorMessage = error.localizedDescription
+                return
+            }
         }
         dismiss()
+    }
+
+    private func refreshNotifications(for event: CalendarEvent, replacing previousIdentifiers: [String]) {
+        NotificationService().cancel(identifiers: previousIdentifiers)
+        guard event.notificationOffsetsDays.isEmpty == false else { return }
+        let reminderHour = settings.defaultReminderHour
+        let reminderMinute = settings.defaultReminderMinute
+
+        Task { @MainActor in
+            do {
+                let granted = try await NotificationService().requestAuthorization()
+                guard granted else { return }
+                NotificationService().schedule(
+                    event: event,
+                    defaultHour: reminderHour,
+                    defaultMinute: reminderMinute
+                )
+            } catch {
+                NSLog("Failed to request notification authorization: \(error)")
+            }
+        }
     }
 }
 

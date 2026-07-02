@@ -20,6 +20,7 @@ pub fn run() {
     if let Err(err) = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             commands::create_rule,
+            commands::delete_rule,
             commands::export_today_csv,
             commands::get_today_summary,
             commands::get_today_sessions,
@@ -27,6 +28,7 @@ pub fn run() {
             commands::list_rules,
             commands::pause_tracking,
             commands::resume_tracking,
+            commands::set_rule_enabled,
             commands::update_rule,
             permissions::get_platform_permission_status,
             permissions::open_macos_permission_settings

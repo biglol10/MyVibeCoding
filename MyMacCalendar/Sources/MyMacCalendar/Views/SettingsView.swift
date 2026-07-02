@@ -3,12 +3,16 @@ import SwiftUI
 import MyMacCalendarCore
 
 struct SettingsView: View {
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query private var settingsRows: [AppSettings]
     @Query(sort: \HolidayRecord.date) private var holidays: [HolidayRecord]
     @State private var selectedTab = "general"
     @State private var newHolidayTitle = ""
     @State private var newHolidayDate = Date()
+    @State private var settingsErrorMessage: String?
+    @State private var isFetchingHolidays = false
+    @State private var holidayFetchMessage: String?
 
     private let reminderPresets = [
         ReminderTimePreset(hour: 8, minute: 0),
@@ -18,29 +22,49 @@ struct SettingsView: View {
     ]
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            generalTab
-                .tabItem { Label("일반", systemImage: "gearshape") }
-                .tag("general")
-            widgetTab
-                .tabItem { Label("위젯", systemImage: "rectangle.on.rectangle") }
-                .tag("widget")
-            notificationsTab
-                .tabItem { Label("알림", systemImage: "bell") }
-                .tag("notifications")
-            holidaysTab
-                .tabItem { Label("휴일", systemImage: "calendar.badge.exclamationmark") }
-                .tag("holidays")
-            appearanceTab
-                .tabItem { Label("화면", systemImage: "paintpalette") }
-                .tag("appearance")
-            dataTab
-                .tabItem { Label("데이터", systemImage: "externaldrive") }
-                .tag("data")
+        VStack(spacing: 0) {
+            TabView(selection: $selectedTab) {
+                generalTab
+                    .tabItem { Label("일반", systemImage: "gearshape") }
+                    .tag("general")
+                widgetTab
+                    .tabItem { Label("위젯", systemImage: "rectangle.on.rectangle") }
+                    .tag("widget")
+                notificationsTab
+                    .tabItem { Label("알림", systemImage: "bell") }
+                    .tag("notifications")
+                holidaysTab
+                    .tabItem { Label("휴일", systemImage: "calendar.badge.exclamationmark") }
+                    .tag("holidays")
+                appearanceTab
+                    .tabItem { Label("화면", systemImage: "paintpalette") }
+                    .tag("appearance")
+                dataTab
+                    .tabItem { Label("데이터", systemImage: "externaldrive") }
+                    .tag("data")
+            }
+
+            Divider()
+
+            HStack {
+                Spacer()
+                Button("완료") {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 14)
+            .background(Color(nsColor: .windowBackgroundColor))
         }
-        .frame(width: 760, height: 500)
+        .frame(width: 760, height: 540)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { ensureSettings() }
+        .alert("설정을 적용할 수 없습니다", isPresented: settingsErrorBinding) {
+            Button("확인", role: .cancel) {}
+        } message: {
+            Text(settingsErrorMessage ?? "다시 시도해 주세요.")
+        }
     }
 
     private var settings: AppSettings {
@@ -54,7 +78,7 @@ struct SettingsView: View {
         SettingsPage {
             SettingsSection("앱") {
                 SettingsRow("Mac 시작 시 자동 실행") {
-                    Toggle("", isOn: binding(\.launchAtLogin))
+                    Toggle("", isOn: launchAtLoginBinding)
                         .labelsHidden()
                 }
                 SettingsDivider()
@@ -150,6 +174,21 @@ struct SettingsView: View {
                             .disabled(newHolidayTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
+                SettingsDivider()
+                SettingsRow("온라인") {
+                    HStack(spacing: 10) {
+                        Button(isFetchingHolidays ? "가져오는 중..." : "한국 휴일 가져오기") {
+                            fetchOnlineHolidays()
+                        }
+                        .disabled(isFetchingHolidays)
+
+                        if let holidayFetchMessage {
+                            Text(holidayFetchMessage)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
             }
 
             SettingsSection("등록된 휴일") {
@@ -173,17 +212,7 @@ struct SettingsView: View {
 
     private var appearanceTab: some View {
         SettingsPage {
-            SettingsSection("화면") {
-                SettingsRow("테마") {
-                    Picker("", selection: binding(\.theme)) {
-                        Text("시스템").tag("system")
-                        Text("밝게").tag("light")
-                        Text("어둡게").tag("dark")
-                    }
-                    .labelsHidden()
-                    .frame(width: 150)
-                }
-                SettingsDivider()
+            SettingsSection("달력") {
                 SettingsRow("달력 밀도") {
                     Picker("", selection: binding(\.calendarDensity)) {
                         Text("여유 있게").tag("comfortable")
@@ -230,6 +259,24 @@ struct SettingsView: View {
         )
     }
 
+    private var launchAtLoginBinding: Binding<Bool> {
+        Binding(
+            get: { settings.launchAtLogin },
+            set: { setLaunchAtLogin($0) }
+        )
+    }
+
+    private var settingsErrorBinding: Binding<Bool> {
+        Binding(
+            get: { settingsErrorMessage != nil },
+            set: { isPresented in
+                if isPresented == false {
+                    settingsErrorMessage = nil
+                }
+            }
+        )
+    }
+
     private func ensureSettings() {
         if settingsRows.isEmpty {
             modelContext.insert(AppSettings())
@@ -243,12 +290,65 @@ struct SettingsView: View {
         try? modelContext.save()
     }
 
+    private func setLaunchAtLogin(_ isEnabled: Bool) {
+        do {
+            try LoginItemController.setEnabled(isEnabled)
+            settings.launchAtLogin = isEnabled
+            try modelContext.save()
+            notifyAppSettingsChanged()
+        } catch {
+            settings.launchAtLogin = false
+            try? modelContext.save()
+            settingsErrorMessage = error.localizedDescription
+        }
+    }
+
     private func addManualHoliday() {
         let normalizedTitle = newHolidayTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         let year = Calendar.current.component(.year, from: newHolidayDate)
         modelContext.insert(HolidayRecord(date: Calendar.current.startOfDay(for: newHolidayDate), title: normalizedTitle, source: .manual, year: year))
         newHolidayTitle = ""
         try? modelContext.save()
+    }
+
+    private func fetchOnlineHolidays() {
+        let year = Calendar.current.component(.year, from: newHolidayDate)
+        isFetchingHolidays = true
+        holidayFetchMessage = nil
+
+        Task { @MainActor in
+            do {
+                let imports = try await HolidayService().fetchKoreanHolidays(year: year)
+                applyHolidayImports(imports, year: year)
+            } catch {
+                holidayFetchMessage = "가져오기 실패"
+                settingsErrorMessage = error.localizedDescription
+                isFetchingHolidays = false
+            }
+        }
+    }
+
+    private func applyHolidayImports(_ imports: [HolidayImport], year: Int) {
+        let existingProviderKeys = Set(holidays.filter { $0.source == .api }.map(\.providerKey))
+        let merged = HolidayMerger().merge(imports: imports, existing: holidays, year: year)
+        let newRecords = merged.filter { holiday in
+            holiday.source == .api &&
+                holiday.isHidden == false &&
+                existingProviderKeys.contains(holiday.providerKey) == false
+        }
+
+        for holiday in newRecords {
+            modelContext.insert(holiday)
+        }
+
+        do {
+            try modelContext.save()
+            holidayFetchMessage = newRecords.isEmpty ? "새 휴일 없음" : "\(newRecords.count)개 추가됨"
+        } catch {
+            holidayFetchMessage = "저장 실패"
+            settingsErrorMessage = error.localizedDescription
+        }
+        isFetchingHolidays = false
     }
 
     private func hideOrDelete(_ holiday: HolidayRecord) {
@@ -266,7 +366,18 @@ struct SettingsView: View {
             set: {
                 settings[keyPath: keyPath] = $0
                 try? modelContext.save()
+                notifyAppSettingsChanged()
             }
+        )
+    }
+
+    private func notifyAppSettingsChanged() {
+        NotificationCenter.default.post(
+            name: .appSettingsDidChange,
+            object: nil,
+            userInfo: [
+                "showMenuBar": settings.showMenuBar
+            ]
         )
     }
 }

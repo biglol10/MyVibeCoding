@@ -41,6 +41,10 @@ public struct FileOutputService {
             .appendingPathComponent(recordingFilename(for: date))
     }
 
+    public func availableRecordingURL(settings: AppSettings, date: Date = Date()) -> URL {
+        uniqueFileURL(for: recordingURL(settings: settings, date: date))
+    }
+
     public func temporaryRecordingURL() -> URL {
         fileManager.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
@@ -48,27 +52,24 @@ public struct FileOutputService {
     }
 
     public func writeScreenshotData(_ data: Data, settings: AppSettings, date: Date = Date()) throws -> URL {
-        let outputURL = screenshotURL(settings: settings, date: date)
+        let outputURL = uniqueFileURL(for: screenshotURL(settings: settings, date: date))
         try data.write(to: outputURL, options: .atomic)
         return outputURL
     }
 
     public func writeRecordingData(_ data: Data, settings: AppSettings, date: Date = Date()) throws -> URL {
-        let outputURL = recordingURL(settings: settings, date: date)
+        let outputURL = uniqueFileURL(for: recordingURL(settings: settings, date: date))
         try data.write(to: outputURL, options: .atomic)
         return outputURL
     }
 
     public func moveRecordingFile(from sourceURL: URL, settings: AppSettings, date: Date = Date()) throws -> URL {
-        let outputURL = recordingURL(settings: settings, date: date)
-        if sourceURL.standardizedFileURL == outputURL.standardizedFileURL {
-            return outputURL
+        let preferredOutputURL = recordingURL(settings: settings, date: date)
+        if sourceURL.standardizedFileURL == preferredOutputURL.standardizedFileURL {
+            return preferredOutputURL
         }
 
-        if fileManager.fileExists(atPath: outputURL.path) {
-            try fileManager.removeItem(at: outputURL)
-        }
-
+        let outputURL = uniqueFileURL(for: preferredOutputURL)
         try fileManager.moveItem(at: sourceURL, to: outputURL)
         return outputURL
     }
@@ -77,5 +78,27 @@ public struct FileOutputService {
         var isDirectory = ObjCBool(false)
         let exists = fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory)
         return exists && isDirectory.boolValue
+    }
+
+    private func uniqueFileURL(for preferredURL: URL) -> URL {
+        guard fileManager.fileExists(atPath: preferredURL.path) else {
+            return preferredURL
+        }
+
+        let directory = preferredURL.deletingLastPathComponent()
+        let baseName = preferredURL.deletingPathExtension().lastPathComponent
+        let fileExtension = preferredURL.pathExtension
+        var suffix = 2
+
+        while true {
+            let candidateName = fileExtension.isEmpty
+                ? "\(baseName) \(suffix)"
+                : "\(baseName) \(suffix).\(fileExtension)"
+            let candidateURL = directory.appendingPathComponent(candidateName)
+            if !fileManager.fileExists(atPath: candidateURL.path) {
+                return candidateURL
+            }
+            suffix += 1
+        }
     }
 }

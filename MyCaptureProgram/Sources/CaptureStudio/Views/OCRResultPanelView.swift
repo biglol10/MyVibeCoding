@@ -3,6 +3,7 @@ import SwiftUI
 struct OCRResultPanelView: View {
     let result: OCRResult
     let onCopyText: () -> Void
+    let onClose: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -13,6 +14,12 @@ struct OCRResultPanelView: View {
                 Button("Copy") {
                     onCopyText()
                 }
+                Button {
+                    onClose()
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .help("Close OCR text")
             }
 
             ScrollView {

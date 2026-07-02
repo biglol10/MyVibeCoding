@@ -17,6 +17,7 @@ public final class CaptureCoordinator: ObservableObject {
     private let imageRenderService: ImageRenderServicing
     private let ocrService: OCRServicing
     private let redactionDetector: RedactionDetector
+    private let screenCapturePermissionChecker: ScreenCapturePermissionChecking
 
     public init(
         appState: AppState,
@@ -26,13 +27,14 @@ public final class CaptureCoordinator: ObservableObject {
         imageRenderService: ImageRenderServicing = AppKitImageRenderService(),
         ocrService: OCRServicing = VisionOCRService(),
         redactionDetector: RedactionDetector = RedactionDetector(),
-        recordingService: RecordingServicing = ScreenCaptureKitRecordingService(),
+        recordingService: RecordingServicing = ScreenCaptureKitRecordingService.shared,
         selectionService: SelectionServicing? = nil,
         delaySleeper: CaptureDelaySleeping = TaskCaptureDelaySleeper(),
         clipboardService: ClipboardServicing = PasteboardClipboardService(),
         fileRevealService: FileRevealServicing = WorkspaceFileRevealService(),
         fileTrashService: FileTrashServicing = WorkspaceFileTrashService(),
-        windowVisibilityController: CaptureWindowVisibilityControlling = AppKitCaptureWindowVisibilityController()
+        windowVisibilityController: CaptureWindowVisibilityControlling = AppKitCaptureWindowVisibilityController(),
+        screenCapturePermissionChecker: ScreenCapturePermissionChecking = CoreGraphicsScreenCapturePermissionChecker()
     ) {
         self.appState = appState
         self.settingsStore = settingsStore
@@ -48,6 +50,7 @@ public final class CaptureCoordinator: ObservableObject {
         self.fileRevealService = fileRevealService
         self.fileTrashService = fileTrashService
         self.windowVisibilityController = windowVisibilityController
+        self.screenCapturePermissionChecker = screenCapturePermissionChecker
     }
 
     public func startNewCapture() async {
@@ -61,6 +64,7 @@ public final class CaptureCoordinator: ObservableObject {
 
     public func startScreenshotCapture() async {
         do {
+            try ensureScreenCaptureAccess()
             let settings = settingsStore.settings
             let didHideCaptureWindows = hideCaptureWindowsIfNeeded(settings: settings)
             defer { restoreCaptureWindowsIfNeeded(didHideCaptureWindows) }
@@ -103,14 +107,17 @@ public final class CaptureCoordinator: ObservableObject {
 
     public func startScreenRecording() async {
         do {
+            try ensureScreenCaptureAccess()
             let settings = settingsStore.settings
             let didHideCaptureWindows = hideCaptureWindowsIfNeeded(settings: settings)
             defer { restoreCaptureWindowsIfNeeded(didHideCaptureWindows) }
-            try await waitIfNeeded(seconds: settings.countdownSeconds)
             let selection = try await selectionService.selectRectangle()
+            try await waitIfNeeded(seconds: settings.countdownSeconds)
             let outputURL = settings.automaticallySaveRecordings
-                ? fileOutputService.recordingURL(settings: settings)
+                ? fileOutputService.availableRecordingURL(settings: settings)
                 : fileOutputService.temporaryRecordingURL()
+            appState.isRecordingInProgress = true
+            defer { appState.isRecordingInProgress = false }
             let result = try await recordingService.recordScreen(selection: selection, to: outputURL, settings: settings)
             appState.currentDocument = EditorDocument(
                 kind: .recording,
@@ -136,6 +143,16 @@ public final class CaptureCoordinator: ObservableObject {
         }
     }
 
+    public func stopActiveRecording() async {
+        guard appState.isRecordingInProgress else {
+            appState.statusMessage = "No recording in progress."
+            return
+        }
+
+        appState.statusMessage = "Stopping recording..."
+        await recordingService.stopRecording()
+    }
+
     public func saveCurrentDocument() {
         guard var document = appState.currentDocument else {
             appState.statusMessage = "Nothing to save."
@@ -155,6 +172,7 @@ public final class CaptureCoordinator: ObservableObject {
                 document.data = outputData
                 document.renderedImageData = outputData
                 document.fileURL = fileURL
+                document.savedSnapshot = document.currentSnapshot
                 document.isDirty = false
                 appState.currentDocument = document
                 appState.statusMessage = "Screenshot saved."
@@ -273,6 +291,15 @@ public final class CaptureCoordinator: ObservableObject {
         appState.statusMessage = "OCR text copied."
     }
 
+    public func dismissOCRResult() {
+        guard var document = appState.currentDocument, document.kind == .screenshot else {
+            return
+        }
+
+        document.ocrResult = nil
+        appState.currentDocument = document
+    }
+
     public func quickRedact() async {
         guard var document = appState.currentDocument, document.kind == .screenshot else {
             appState.statusMessage = "No screenshot to redact."
@@ -368,6 +395,12 @@ public final class CaptureCoordinator: ObservableObject {
         try await delaySleeper.sleep(seconds: clampedSeconds)
     }
 
+    private func ensureScreenCaptureAccess() throws {
+        guard screenCapturePermissionChecker.hasScreenCaptureAccess() else {
+            throw ScreenCapturePermissionError.accessDenied
+        }
+    }
+
     private func hideCaptureWindowsIfNeeded(settings: AppSettings) -> Bool {
         guard settings.hideAppDuringCapture else {
             return false
@@ -386,16 +419,11 @@ public final class CaptureCoordinator: ObservableObject {
     }
 
     private func userMessage(for error: Error) -> String {
-        let description = error.localizedDescription
-        let lowercasedDescription = description.lowercased()
-        if lowercasedDescription.contains("tcc")
-            || lowercasedDescription.contains("permission")
-            || lowercasedDescription.contains("denied")
-            || description.contains("거절")
-            || description.contains("권한") {
-            return "Screen access is off. Enable CaptureStudio in System Settings > Privacy & Security."
+        if let permissionError = error as? ScreenCapturePermissionError {
+            return permissionError.localizedDescription
         }
-        return description
+
+        return error.localizedDescription
     }
 
     private func isRecordingStoppedByUser(_ error: Error) -> Bool {

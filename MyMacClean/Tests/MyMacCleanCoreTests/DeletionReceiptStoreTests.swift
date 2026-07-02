@@ -50,4 +50,36 @@ final class DeletionReceiptStoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: receiptURL.path))
         XCTAssertEqual(try store.readReceipts(), [])
     }
+
+    func testReadReceiptsSkipsMalformedLinesAndKeepsValidHistory() throws {
+        let root = try TestFixtures.temporaryDirectory(named: "receipt-store-malformed")
+        let receiptURL = root.appendingPathComponent("receipts.jsonl")
+        let store = DeletionReceiptStore(fileURL: receiptURL)
+        let first = receipt(appName: "First", completedAt: Date(timeIntervalSince1970: 1))
+        let second = receipt(appName: "Second", completedAt: Date(timeIntervalSince1970: 2))
+
+        try store.append(first)
+        let invalidLine = Data("{this is not valid json}\n".utf8)
+        let handle = try FileHandle(forWritingTo: receiptURL)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: invalidLine)
+        try handle.close()
+        try store.append(second)
+
+        XCTAssertEqual(try store.readReceipts(), [first, second])
+    }
+
+    private func receipt(appName: String, completedAt: Date) -> DeletionReceipt {
+        DeletionReceipt(
+            appName: appName,
+            bundleIdentifier: nil,
+            bundlePath: "/Applications/\(appName).app",
+            action: .uninstall,
+            completedAt: completedAt,
+            selectedCandidates: [],
+            executionResults: [],
+            verificationResults: [],
+            confirmationMatched: true
+        )
+    }
 }

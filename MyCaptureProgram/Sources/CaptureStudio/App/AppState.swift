@@ -8,18 +8,21 @@ public final class AppState: ObservableObject {
     @Published public var currentDocument: EditorDocument?
     @Published public var statusMessage: String?
     @Published public var isGuidePresented: Bool
+    @Published public var isRecordingInProgress: Bool
 
     public init(
         captureMode: CaptureMode = .screenshot,
         areaType: CaptureAreaType = .rectangle,
         currentDocument: EditorDocument? = nil,
         statusMessage: String? = nil,
-        isGuidePresented: Bool = false
+        isGuidePresented: Bool = false,
+        isRecordingInProgress: Bool = false
     ) {
         self.captureMode = captureMode
         self.areaType = areaType
         self.currentDocument = currentDocument
         self.statusMessage = statusMessage
         self.isGuidePresented = isGuidePresented
+        self.isRecordingInProgress = isRecordingInProgress
     }
 }

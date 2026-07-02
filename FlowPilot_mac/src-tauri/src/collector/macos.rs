@@ -39,7 +39,7 @@ impl ActivitySnapshotReader for MacosActivitySnapshotReader {
             observation.is_primary = index == primary_index;
         }
 
-        let primary = sample_from_observation(&observations[primary_index]);
+        let primary = sample_from_observation(&observations[primary_index], macos_is_idle());
 
         Ok(ActivitySnapshot {
             primary,
@@ -48,7 +48,7 @@ impl ActivitySnapshotReader for MacosActivitySnapshotReader {
     }
 }
 
-fn sample_from_observation(observation: &WindowObservation) -> ActivitySample {
+fn sample_from_observation(observation: &WindowObservation, is_idle: bool) -> ActivitySample {
     ActivitySample {
         observed_at: observation.observed_at,
         app_name: observation.app_name.clone(),
@@ -59,7 +59,37 @@ fn sample_from_observation(observation: &WindowObservation) -> ActivitySample {
             .filter(|title| !title.trim().is_empty())
             .unwrap_or_else(|| observation.app_name.clone()),
         domain: None,
-        is_idle: false,
+        is_idle,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_is_idle() -> bool {
+    const IDLE_THRESHOLD_SECONDS: f64 = 300.0;
+    let seconds_since_last_input = seconds_since_last_input_event();
+    seconds_since_last_input.is_finite() && seconds_since_last_input >= IDLE_THRESHOLD_SECONDS
+}
+
+#[cfg(not(target_os = "macos"))]
+fn macos_is_idle() -> bool {
+    false
+}
+
+#[cfg(target_os = "macos")]
+fn seconds_since_last_input_event() -> f64 {
+    const CG_EVENT_SOURCE_STATE_COMBINED_SESSION_STATE: u32 = 0;
+    const CG_ANY_INPUT_EVENT_TYPE: u32 = u32::MAX;
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn CGEventSourceSecondsSinceLastEventType(state_id: u32, event_type: u32) -> f64;
+    }
+
+    unsafe {
+        CGEventSourceSecondsSinceLastEventType(
+            CG_EVENT_SOURCE_STATE_COMBINED_SESSION_STATE,
+            CG_ANY_INPUT_EVENT_TYPE,
+        )
     }
 }
 
@@ -202,13 +232,33 @@ mod tests {
             is_primary: true,
         };
 
-        let sample = sample_from_observation(&observation);
+        let sample = sample_from_observation(&observation, false);
 
         assert_eq!(sample.app_name, "Safari");
         assert_eq!(sample.process_name, "Safari");
         assert_eq!(sample.window_title, "Apple Developer");
         assert_eq!(sample.domain, None);
         assert!(!sample.is_idle);
+    }
+
+    #[test]
+    fn sample_from_observation_preserves_idle_state() {
+        let observed_at = chrono::Utc.with_ymd_and_hms(2026, 6, 19, 9, 0, 0).unwrap();
+        let observation = crate::collector::snapshot::WindowObservation {
+            observed_at,
+            app_name: "Safari".into(),
+            process_name: "Safari".into(),
+            pid: Some(123),
+            bundle_identifier: Some("com.apple.Safari".into()),
+            window_title: Some("Apple Developer".into()),
+            is_visible: true,
+            is_frontmost: true,
+            is_primary: true,
+        };
+
+        let sample = sample_from_observation(&observation, true);
+
+        assert!(sample.is_idle);
     }
 
     #[test]
@@ -226,7 +276,7 @@ mod tests {
             is_primary: true,
         };
 
-        let sample = sample_from_observation(&observation);
+        let sample = sample_from_observation(&observation, false);
 
         assert_eq!(sample.window_title, "Notes");
     }

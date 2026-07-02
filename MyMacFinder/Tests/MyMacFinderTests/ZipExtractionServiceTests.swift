@@ -133,6 +133,27 @@ final class ZipExtractionServiceTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: tempDirectory.appendingPathComponent("evil.txt").path))
     }
 
+    func testExtractionFailureRemovesPartialDestinationFolder() async throws {
+        let zipURL = try makeArchive(
+            named: "partial.zip",
+            entries: [
+                ("blocked", "file"),
+                ("blocked/nested.txt", "nested")
+            ]
+        )
+
+        do {
+            _ = try await ZipExtractionService().extract([zipURL], to: tempDirectory)
+            XCTFail("Expected extraction to fail")
+        } catch {
+            XCTAssertFalse(
+                FileManager.default.fileExists(
+                    atPath: tempDirectory.appendingPathComponent("partial", isDirectory: true).path
+                )
+            )
+        }
+    }
+
     func testUnsafeZipEntryDoesNotReplaceExistingDestinationFolder() async throws {
         let archiveName = "unsafe-\(UUID().uuidString)"
         let zipURL = try makeArchive(

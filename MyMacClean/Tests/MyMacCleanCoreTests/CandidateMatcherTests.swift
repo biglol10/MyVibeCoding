@@ -143,4 +143,29 @@ final class CandidateMatcherTests: XCTestCase {
         XCTAssertEqual(match?.evidence.first?.type, .exactAppName)
         XCTAssertEqual(match?.evidence.first?.strength, .medium)
     }
+
+    func testKnownSharedVendorFolderMatchRequiresManualReviewAndIsNotDefaultSelected() {
+        let app = InstalledApp(
+            displayName: "Adobe",
+            bundleIdentifier: "com.adobe.Adobe",
+            version: nil,
+            executableName: "Adobe",
+            bundleURL: URL(fileURLWithPath: "/Applications/Adobe.app"),
+            iconIdentifier: nil,
+            bundleSize: 0,
+            lastOpenedAt: nil
+        )
+
+        let match = CandidateMatcher().match(
+            url: URL(fileURLWithPath: "/Users/me/Library/Application Support/Adobe"),
+            app: app,
+            kind: .applicationSupport
+        )
+
+        XCTAssertEqual(match?.confidence, .low)
+        XCTAssertEqual(match?.defaultSelected, false)
+        XCTAssertEqual(match?.requiresManualReview, true)
+        XCTAssertEqual(match?.evidence.first?.type, .weakName)
+        XCTAssertEqual(match?.evidence.first?.strength, .weak)
+    }
 }

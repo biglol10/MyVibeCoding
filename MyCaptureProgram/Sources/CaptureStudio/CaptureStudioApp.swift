@@ -5,6 +5,7 @@ struct CaptureStudioApp: App {
     @StateObject private var appState = AppState()
     @StateObject private var settingsStore = SettingsStore()
     @StateObject private var shortcutManager = ShortcutManager()
+    @StateObject private var globalShortcutController = GlobalShortcutController()
 
     var body: some Scene {
         WindowGroup {
@@ -12,6 +13,9 @@ struct CaptureStudioApp: App {
                 .environmentObject(appState)
                 .environmentObject(settingsStore)
                 .environmentObject(shortcutManager)
+                .onAppear {
+                    globalShortcutController.configure(shortcutManager: shortcutManager, actionHandler: handleShortcutAction)
+                }
         }
         .defaultSize(width: 560, height: 128)
         .commands {
@@ -32,6 +36,12 @@ struct CaptureStudioApp: App {
                     modifiers: shortcutBinding(for: .newRecording).eventModifiers
                 )
 
+                Button("Stop Recording") {
+                    stopActiveRecording()
+                }
+                .keyboardShortcut(.cancelAction)
+                .disabled(!appState.isRecordingInProgress)
+
                 Divider()
 
                 OpenSettingsCommand(
@@ -51,7 +61,7 @@ struct CaptureStudioApp: App {
             SettingsView()
                 .environmentObject(settingsStore)
                 .environmentObject(shortcutManager)
-                .frame(width: 640, height: 520)
+                .frame(width: 760, height: 580)
         }
     }
 
@@ -74,6 +84,30 @@ struct CaptureStudioApp: App {
                 appState: appState,
                 settingsStore: settingsStore
             ).startScreenRecording()
+        }
+    }
+
+    private func stopActiveRecording() {
+        Task { @MainActor in
+            await CaptureCoordinator(
+                appState: appState,
+                settingsStore: settingsStore
+            ).stopActiveRecording()
+        }
+    }
+
+    private func handleShortcutAction(_ action: ShortcutAction) {
+        switch action {
+        case .newScreenshot:
+            startScreenshotCapture()
+        case .newRecording:
+            startScreenRecording()
+        case .openSettings:
+            SettingsTab.selectDefaultOpenTab()
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        case .textExtraction, .colorPicker, .lastCapture:
+            break
         }
     }
 

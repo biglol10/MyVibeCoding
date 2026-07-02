@@ -4,8 +4,25 @@ public struct DeletionVerifier: Sendable {
     public init() {}
 
     public func verify(plan: DeletionPlan) async -> [DeletionVerificationResult] {
-        plan.candidates.map { candidate in
-            verifyExistingPath(candidate.url)
+        await verify(plan: plan, executionResults: [])
+    }
+
+    public func verify(plan: DeletionPlan, executionResults: [DeletionItemResult]) async -> [DeletionVerificationResult] {
+        let notFoundBeforeDeletePaths = Set(
+            executionResults.compactMap { result -> String? in
+                result.errorMessage == DeletionExecutionErrorMessage.pathNotFoundBeforeDelete ? result.path : nil
+            }
+        )
+
+        return plan.candidates.map { candidate in
+            if notFoundBeforeDeletePaths.contains(candidate.url.path) {
+                return DeletionVerificationResult(
+                    path: candidate.url.path,
+                    status: .notFoundBeforeDelete,
+                    errorMessage: DeletionExecutionErrorMessage.pathNotFoundBeforeDelete
+                )
+            }
+            return verifyExistingPath(candidate.url)
         }
     }
 

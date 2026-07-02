@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import MyMacCleanCore
 import MyMacCleanAppSupport
@@ -8,8 +9,7 @@ struct ContentView: View {
     @State private var orphanFilesViewModel = OrphanFilesViewModel(installedApps: [])
     @State private var navigationState = SidebarNavigationState()
     @State private var confirmationText = ""
-    @State private var showsConfirmation = false
-    @State private var confirmationMode: DeletionConfirmationMode = .application
+    @State private var confirmationMode: DeletionConfirmationMode?
     @State private var forceDelete = false
 
     var body: some View {
@@ -46,8 +46,8 @@ struct ContentView: View {
         } message: {
             Text(viewModel.errorMessage ?? historyViewModel.errorMessage ?? orphanFilesViewModel.errorMessage ?? "")
         }
-        .sheet(isPresented: $showsConfirmation) {
-            confirmationSheet
+        .sheet(item: $confirmationMode) { mode in
+            confirmationSheet(for: mode)
         }
     }
 
@@ -130,29 +130,76 @@ struct ContentView: View {
                 }
                 .buttonStyle(.bordered)
                 .help("Refresh Applications")
-                .disabled(viewModel.isLoadingApps || viewModel.isScanning)
+                .disabled(viewModel.isLoadingApps || viewModel.isScanning || viewModel.isDeleting)
 
-                Button(SidebarDestination.applications.primaryActionTitle) {
+                Button(viewModel.isScanning ? "Scanning..." : SidebarDestination.applications.primaryActionTitle) {
                     Task { await viewModel.scanSelectedApp() }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(viewModel.selectedApp == nil || viewModel.isScanning || viewModel.isLoadingApps)
+                .disabled(viewModel.selectedApp == nil || viewModel.isScanning || viewModel.isLoadingApps || viewModel.isDeleting)
             }
             .padding()
 
-            Table(viewModel.apps, selection: Binding(
-                get: { viewModel.selectedApp?.id },
-                set: { newID in viewModel.selectApp(id: newID) }
-            )) {
-                TableColumn("Name") { app in
-                    Text(app.displayName)
-                }
-                TableColumn("Bundle ID") { app in
-                    Text(app.bundleIdentifier ?? "Unknown")
+            VStack(spacing: 10) {
+                HStack {
+                    Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
+                    TextField("Search applications, bundle IDs, or paths", text: $viewModel.appSearchText)
+                        .textFieldStyle(.plain)
                 }
-                TableColumn("Size") { app in
-                    SizeText(bytes: app.bundleSize)
+                .padding(.horizontal, 12)
+                .frame(height: 38)
+                .background(Color.primary.opacity(0.055))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                HStack(spacing: 12) {
+                    Picker("Filter", selection: $viewModel.appFilter) {
+                        ForEach(ApplicationListFilter.allCases) { filter in
+                            Text(filter.title).tag(filter)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 300)
+
+                    Spacer()
+
+                    Picker("Sort", selection: $viewModel.appSort) {
+                        ForEach(ApplicationListSort.allCases) { sort in
+                            Text(sort.title).tag(sort)
+                        }
+                    }
+                    .frame(width: 140)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 12)
+
+            Divider()
+
+            if viewModel.isLoadingApps && viewModel.apps.isEmpty {
+                ProgressView("Loading Applications")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if viewModel.hasLoadedApps && viewModel.apps.isEmpty {
+                ContentUnavailableView("No Applications Found", systemImage: "app.dashed")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if viewModel.visibleApps.isEmpty {
+                ContentUnavailableView("No Matching Applications", systemImage: "magnifyingglass")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                Table(viewModel.visibleApps, selection: Binding(
+                    get: { viewModel.selectedApp?.id },
+                    set: { newID in viewModel.selectApp(id: newID) }
+                )) {
+                    TableColumn("Name") { app in
+                        Text(app.displayName)
+                    }
+                    TableColumn("Bundle ID") { app in
+                        Text(app.bundleIdentifier ?? "Unknown")
+                            .foregroundStyle(.secondary)
+                    }
+                    TableColumn("Size") { app in
+                        SizeText(bytes: app.bundleSize)
+                    }
                 }
             }
         }
@@ -217,16 +264,20 @@ struct ContentView: View {
                 ContentUnavailableView("No Delete History", systemImage: "clock")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(historyViewModel.filteredReceipts) { receipt in
+                List(historyViewModel.filteredReceipts, selection: Binding(
+                    get: { historyViewModel.selectedReceiptID },
+                    set: { historyViewModel.selectReceipt(id: $0) }
+                )) { receipt in
+                    let summary = DeletionHistoryReceiptSummary(receipt: receipt)
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 10) {
                             Text(receipt.appName)
                                 .font(.headline.weight(.semibold))
                                 .lineLimit(1)
                             Spacer()
-                            Text(deletionStatusTitle(for: receipt))
+                            Text(summary.statusTitle)
                                 .font(.callout.weight(.semibold))
-                                .foregroundStyle(deletionStatusColor(for: receipt))
+                                .foregroundStyle(deletionStatusColor(for: summary.status))
                         }
 
                         Text(receipt.bundleIdentifier ?? receipt.bundlePath)
@@ -261,18 +312,28 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button(SidebarDestination.orphanFiles.primaryActionTitle) {
+                Button(orphanFilesViewModel.isScanning ? "Scanning..." : SidebarDestination.orphanFiles.primaryActionTitle) {
                     orphanFilesViewModel.updateInstalledApps(viewModel.apps)
                     Task { await orphanFilesViewModel.loadGroups() }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(orphanFilesViewModel.isScanning)
+                .disabled(orphanFilesViewModel.isScanning || orphanFilesViewModel.isDeleting)
             }
             .padding()
 
             Divider()
 
-            if orphanFilesViewModel.groups.isEmpty {
+            if orphanFilesViewModel.isScanning {
+                ProgressView("Scanning Leftovers")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if !orphanFilesViewModel.hasScanned {
+                ContentUnavailableView(
+                    "Scan Leftovers",
+                    systemImage: "folder.badge.questionmark",
+                    description: Text("Run a scan to find leftovers from apps that are no longer installed.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if orphanFilesViewModel.groups.isEmpty {
                 ContentUnavailableView("No Orphan Files", systemImage: "folder.badge.questionmark")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -347,7 +408,7 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("History Details")
                     .font(.title2.weight(.semibold))
-                Text("\(historyViewModel.filteredReceipts.count) receipts shown")
+                Text(historyViewModel.selectedReceipt.map { $0.completedAt.formatted(date: .abbreviated, time: .standard) } ?? "\(historyViewModel.filteredReceipts.count) receipts shown")
                     .font(.callout.weight(.medium))
                     .foregroundStyle(.secondary)
             }
@@ -356,63 +417,18 @@ struct ContentView: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
-                    ForEach(historyViewModel.filteredReceipts) { receipt in
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(receipt.appName)
-                                        .font(.headline.weight(.semibold))
-                                    Text(receipt.completedAt.formatted(date: .abbreviated, time: .standard))
-                                        .font(.caption.weight(.medium))
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Text(deletionStatusTitle(for: receipt))
-                                    .font(.callout.weight(.semibold))
-                                    .foregroundStyle(deletionStatusColor(for: receipt))
-                            }
-
-                            Text(receipt.bundlePath)
-                                .font(.callout.weight(.medium))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                                .truncationMode(.middle)
-
-                            HStack(spacing: 18) {
-                                HistoryMetric(title: "Selected", value: "\(receipt.selectedCandidates.count)")
-                                HistoryMetric(title: "Deleted", value: "\(deletedCount(for: receipt))")
-                                HistoryMetric(title: "Remaining", value: "\(remainingCount(for: receipt))")
-                            }
-
-                            if remainingCount(for: receipt) > 0 {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Remaining Paths")
-                                        .font(.callout.weight(.semibold))
-                                    ForEach(remainingPaths(for: receipt), id: \.self) { path in
-                                        Text(path)
-                                            .font(.caption.weight(.medium))
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
-                                    }
-                                }
-                            }
-                        }
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.primary.opacity(0.04))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.primary.opacity(0.07), lineWidth: 1)
-                        }
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    if let receipt = historyViewModel.selectedReceipt {
+                        historyReceiptDetailCard(receipt)
+                    } else {
+                        ContentUnavailableView("No Receipt Selected", systemImage: "clock")
+                            .frame(maxWidth: .infinity, minHeight: 280)
                     }
                 }
                 .padding(.vertical, 2)
             }
 
             Button(role: .destructive) {
-                historyViewModel.clearHistory()
+                historyViewModel.requestClearHistory()
             } label: {
                 Label("Clear Delete History", systemImage: "trash")
                     .font(.headline.weight(.semibold))
@@ -422,6 +438,98 @@ struct ContentView: View {
             .disabled(historyViewModel.receipts.isEmpty)
         }
         .padding(22)
+        .confirmationDialog(
+            "Clear Delete History?",
+            isPresented: Binding(
+                get: { historyViewModel.isClearHistoryConfirmationPresented },
+                set: { isPresented in
+                    if !isPresented {
+                        historyViewModel.cancelClearHistory()
+                    }
+                }
+            )
+        ) {
+            Button("Clear Delete History", role: .destructive) {
+                historyViewModel.confirmClearHistory()
+            }
+            Button("Cancel", role: .cancel) {
+                historyViewModel.cancelClearHistory()
+            }
+        } message: {
+            Text("This removes local deletion receipts. It does not restore deleted files.")
+        }
+    }
+
+    private func historyReceiptDetailCard(_ receipt: DeletionReceipt) -> some View {
+        let summary = DeletionHistoryReceiptSummary(receipt: receipt)
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(receipt.appName)
+                        .font(.headline.weight(.semibold))
+                    Text(receipt.completedAt.formatted(date: .abbreviated, time: .standard))
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    copyToPasteboard(DeletionReportViewModel(receipt: receipt).copyableReportText)
+                } label: {
+                    Label("Copy Report", systemImage: "doc.on.doc")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .help("Copy Report")
+                Text(summary.statusTitle)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(deletionStatusColor(for: summary.status))
+            }
+
+            Text(receipt.bundlePath)
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .truncationMode(.middle)
+
+            HStack(spacing: 18) {
+                HistoryMetric(title: "Selected", value: "\(receipt.selectedCandidates.count)")
+                HistoryMetric(title: "Deleted", value: "\(summary.deletedCount)")
+                HistoryMetric(title: "Remaining", value: "\(summary.remainingCount)")
+            }
+
+            if summary.remainingCount > 0 {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Remaining Paths")
+                        .font(.callout.weight(.semibold))
+                    ForEach(summary.remainingPaths, id: \.self) { path in
+                        HStack(spacing: 8) {
+                            Text(path)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Button {
+                                copyToPasteboard(path)
+                            } label: {
+                                Label("Copy Path", systemImage: "doc.on.doc")
+                                    .labelStyle(.iconOnly)
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Copy Path")
+                        }
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.04))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private var orphanFilesDetail: some View {
@@ -440,51 +548,64 @@ struct ContentView: View {
                 DeletionReportPanel(report: report)
             }
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    ForEach(orphanFilesViewModel.groups) { group in
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                Text(group.inferredIdentifier)
-                                    .font(.headline.weight(.semibold))
-                                Spacer()
-                                SizeText(bytes: group.totalSize)
-                                    .font(.callout.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                            }
+            if orphanFilesViewModel.isScanning {
+                ProgressView("Scanning Leftovers")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if !orphanFilesViewModel.hasScanned {
+                ContentUnavailableView(
+                    "Scan Leftovers",
+                    systemImage: "folder.badge.questionmark",
+                    description: Text("Use the scan button to review leftover files before deleting anything.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if orphanFilesViewModel.groups.isEmpty {
+                ContentUnavailableView("No Orphan Files", systemImage: "checkmark.circle")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        ForEach(orphanFilesViewModel.groups) { group in
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack {
+                                    Text(group.inferredIdentifier)
+                                        .font(.headline.weight(.semibold))
+                                    Spacer()
+                                    SizeText(bytes: group.totalSize)
+                                        .font(.callout.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
 
-                            ForEach(group.candidates) { candidate in
-                                RelatedFileRow(
-                                    candidate: candidate,
-                                    isSelected: orphanFilesViewModel.selectedCandidateIDs.contains(candidate.id),
-                                    toggle: {
-                                        toggleOrphanCandidate(candidate.id)
-                                    }
-                                )
+                                ForEach(group.candidates) { candidate in
+                                    RelatedFileRow(
+                                        candidate: candidate,
+                                        isSelected: orphanFilesViewModel.selectedCandidateIDs.contains(candidate.id),
+                                        toggle: {
+                                            toggleOrphanCandidate(candidate.id)
+                                        }
+                                    )
+                                }
                             }
+                            .padding(14)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.primary.opacity(0.04))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+                            }
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.primary.opacity(0.04))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.primary.opacity(0.07), lineWidth: 1)
-                        }
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
+                    .padding(.vertical, 2)
                 }
-                .padding(.vertical, 2)
-            }
 
                 DeleteActionButton(
                     selectedCount: orphanFilesViewModel.selectedCandidates.count,
-                    selectedBytes: orphanFilesViewModel.selectedBytes
+                    selectedBytes: orphanFilesViewModel.selectedBytes,
+                    disabledSummary: "Select leftover files first"
                 ) {
-                    confirmationMode = .orphanFiles
-                    confirmationText = ""
-                    forceDelete = false
-                    showsConfirmation = true
+                    presentConfirmation(.orphanFiles)
                 }
+            }
         }
         .padding(22)
     }
@@ -540,13 +661,19 @@ struct ContentView: View {
                 }
                 DeleteActionButton(
                     selectedCount: selectedCandidates.count,
-                    selectedBytes: selectedCandidateBytes
+                    selectedBytes: selectedCandidateBytes,
+                    disabledSummary: viewModel.candidates.isEmpty ? "Scan selected app first" : "Select related files first"
                 ) {
-                    confirmationMode = .application
-                    confirmationText = ""
-                    forceDelete = false
-                    showsConfirmation = true
+                    presentConfirmation(.application)
                 }
+            } else if let report = viewModel.deletionReport {
+                ContentUnavailableView(
+                    "Application Removed",
+                    systemImage: "checkmark.circle",
+                    description: Text("Review remaining items from the last deletion.")
+                )
+                DeletionReportPanel(report: report)
+                Spacer()
             } else {
                 ContentUnavailableView("No App Selected", systemImage: "app.dashed")
             }
@@ -554,33 +681,66 @@ struct ContentView: View {
         .padding(22)
     }
 
-    private var confirmationSheet: some View {
+    private func confirmationSheet(for mode: DeletionConfirmationMode) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             let requiredConfirmation = "DELETE"
+            let isDeleting = confirmationIsDeleting(for: mode)
             Text("Permanent Deletion")
                 .font(.title2.weight(.semibold))
+            VStack(alignment: .leading, spacing: 8) {
+                Text(confirmationTargetTitle(for: mode))
+                    .font(.headline.weight(.semibold))
+                    .lineLimit(1)
+                HStack(spacing: 14) {
+                    Label("\(confirmationSelectedCount(for: mode)) items", systemImage: "checkmark.square")
+                    Label(ByteCountFormatter.string(fromByteCount: confirmationSelectedBytes(for: mode), countStyle: .file), systemImage: "internaldrive")
+                    if confirmationIncludesAppBundle(for: mode) {
+                        Label("Includes app bundle", systemImage: "app.dashed")
+                    }
+                }
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primary.opacity(0.055))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 8))
             Text("Type DELETE to permanently remove selected items. This does not move files to Trash.")
                 .foregroundStyle(.secondary)
             TextField(requiredConfirmation, text: $confirmationText)
                 .textFieldStyle(.roundedBorder)
+                .disabled(isDeleting)
             Toggle("Force delete locked items", isOn: $forceDelete)
                 .toggleStyle(.checkbox)
                 .help("Clears file locks and restores write permission before retrying. This cannot bypass Full Disk Access or administrator-only paths.")
+                .disabled(isDeleting)
+            if forceDelete {
+                Text("Force delete retries locked files, but Full Disk Access and administrator-only paths can still block deletion.")
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
             HStack {
-                Button("Cancel") { showsConfirmation = false }
+                Button("Cancel") { confirmationMode = nil }
+                    .disabled(isDeleting)
                 Spacer()
-                Button("Delete", role: .destructive) {
+                Button(isDeleting ? "Deleting..." : "Delete", role: .destructive) {
                     Task {
-                        switch confirmationMode {
+                        switch mode {
                         case .application:
                             await viewModel.deleteConfirmedItems(confirmation: confirmationText, force: forceDelete)
                         case .orphanFiles:
                             await orphanFilesViewModel.deleteSelectedLeftovers(confirmation: confirmationText, force: forceDelete)
                         }
-                        showsConfirmation = false
+                        confirmationMode = nil
                     }
                 }
-                .disabled(confirmationText != requiredConfirmation)
+                .disabled(confirmationText != requiredConfirmation || isDeleting)
             }
         }
         .padding()
@@ -595,6 +755,51 @@ struct ContentView: View {
         selectedCandidates.reduce(Int64(0)) { $0 + $1.size }
     }
 
+    private func presentConfirmation(_ mode: DeletionConfirmationMode) {
+        confirmationText = ""
+        forceDelete = false
+        confirmationMode = mode
+    }
+
+    private func confirmationSelectedCandidates(for mode: DeletionConfirmationMode) -> [RelatedFileCandidate] {
+        switch mode {
+        case .application:
+            selectedCandidates
+        case .orphanFiles:
+            orphanFilesViewModel.selectedCandidates
+        }
+    }
+
+    private func confirmationSelectedCount(for mode: DeletionConfirmationMode) -> Int {
+        confirmationSelectedCandidates(for: mode).count
+    }
+
+    private func confirmationSelectedBytes(for mode: DeletionConfirmationMode) -> Int64 {
+        confirmationSelectedCandidates(for: mode).reduce(Int64(0)) { $0 + $1.size }
+    }
+
+    private func confirmationTargetTitle(for mode: DeletionConfirmationMode) -> String {
+        switch mode {
+        case .application:
+            viewModel.selectedApp?.displayName ?? "Selected Application"
+        case .orphanFiles:
+            "Orphan Files"
+        }
+    }
+
+    private func confirmationIncludesAppBundle(for mode: DeletionConfirmationMode) -> Bool {
+        confirmationSelectedCandidates(for: mode).contains { $0.kind == .appBundle }
+    }
+
+    private func confirmationIsDeleting(for mode: DeletionConfirmationMode) -> Bool {
+        switch mode {
+        case .application:
+            viewModel.isDeleting
+        case .orphanFiles:
+            orphanFilesViewModel.isDeleting
+        }
+    }
+
     private var activeSection: SidebarDestination {
         navigationState.selectedDestination
     }
@@ -604,36 +809,12 @@ struct ContentView: View {
         orphanFilesViewModel.updateInstalledApps(viewModel.apps)
     }
 
-    private func deletionStatusTitle(for receipt: DeletionReceipt) -> String {
-        if receipt.verificationResults.contains(where: { $0.status == .stillExists || $0.status == .permissionDenied }) {
-            return "Needs Review"
+    private func deletionStatusColor(for status: DeletionHistoryStatus) -> Color {
+        switch status {
+        case .verified: Color.green
+        case .failed: Color.red
+        case .needsReview: Color.orange
         }
-        if receipt.executionResults.contains(where: { !$0.success }) {
-            return "Failed"
-        }
-        return "Verified"
-    }
-
-    private func deletionStatusColor(for receipt: DeletionReceipt) -> Color {
-        switch deletionStatusTitle(for: receipt) {
-        case "Verified": Color.green
-        case "Failed": Color.red
-        default: Color.orange
-        }
-    }
-
-    private func deletedCount(for receipt: DeletionReceipt) -> Int {
-        receipt.verificationResults.filter { $0.status == .deleted }.count
-    }
-
-    private func remainingCount(for receipt: DeletionReceipt) -> Int {
-        receipt.verificationResults.filter { $0.status == .stillExists || $0.status == .permissionDenied }.count
-    }
-
-    private func remainingPaths(for receipt: DeletionReceipt) -> [String] {
-        receipt.verificationResults
-            .filter { $0.status == .stillExists || $0.status == .permissionDenied }
-            .map(\.path)
     }
 
     private func toggleOrphanCandidate(_ id: RelatedFileCandidate.ID) {
@@ -645,9 +826,16 @@ struct ContentView: View {
     }
 }
 
-private enum DeletionConfirmationMode {
+private enum DeletionConfirmationMode: Identifiable {
     case application
     case orphanFiles
+
+    var id: String {
+        switch self {
+        case .application: "application"
+        case .orphanFiles: "orphanFiles"
+        }
+    }
 }
 
 private struct DeletionReportPanel: View {
@@ -655,17 +843,38 @@ private struct DeletionReportPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(report.statusTitle)
-                .font(.headline.weight(.semibold))
+            HStack {
+                Text(report.statusTitle)
+                    .font(.headline.weight(.semibold))
+                Spacer()
+                Button {
+                    copyToPasteboard(report.copyableReportText)
+                } label: {
+                    Label("Copy Report", systemImage: "doc.on.doc")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .help("Copy Report")
+            }
             Text("\(report.deletedCount) deleted, \(report.remainingCount) remaining")
                 .font(.callout.weight(.medium))
                 .foregroundStyle(.secondary)
             ForEach(report.remainingPaths, id: \.self) { path in
-                Text(path)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                HStack(spacing: 8) {
+                    Text(path)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Button {
+                        copyToPasteboard(path)
+                    } label: {
+                        Label("Copy Path", systemImage: "doc.on.doc")
+                            .labelStyle(.iconOnly)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Copy Path")
+                }
             }
         }
         .padding(14)
@@ -677,6 +886,11 @@ private struct DeletionReportPanel: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
+}
+
+private func copyToPasteboard(_ text: String) {
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(text, forType: .string)
 }
 
 private struct HistoryMetric: View {

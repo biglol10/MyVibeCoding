@@ -400,6 +400,49 @@ export async function updateRule(ruleId: string, draft: RuleDraft): Promise<Clas
   return invoke<ClassificationRule>("update_rule", { ruleId, draft });
 }
 
+export async function setRuleEnabled(ruleId: string, isEnabled: boolean): Promise<ClassificationRule> {
+  if (!isDesktopRuntime()) {
+    const existingRule = allDevRules().find((rule) => rule.id === ruleId);
+
+    if (!existingRule) {
+      throw new Error("Rule not found.");
+    }
+
+    const updatedRule: ClassificationRule = {
+      ...existingRule,
+      isEnabled,
+    };
+
+    if (updatedRule.isBuiltin) {
+      builtinDevRules = builtinDevRules.map((rule) => (rule.id === updatedRule.id ? updatedRule : rule));
+    } else {
+      devCustomRules = devCustomRules.map((rule) => (rule.id === updatedRule.id ? updatedRule : rule));
+    }
+
+    return updatedRule;
+  }
+
+  return invoke<ClassificationRule>("set_rule_enabled", { ruleId, isEnabled });
+}
+
+export async function deleteRule(ruleId: string): Promise<void> {
+  if (!isDesktopRuntime()) {
+    const existingRule = allDevRules().find((rule) => rule.id === ruleId);
+
+    if (!existingRule) {
+      throw new Error("Rule not found.");
+    }
+    if (existingRule.isBuiltin) {
+      throw new Error("Only user rules can be deleted.");
+    }
+
+    devCustomRules = devCustomRules.filter((rule) => rule.id !== ruleId);
+    return;
+  }
+
+  await invoke("delete_rule", { ruleId });
+}
+
 export async function getPlatformPermissionStatus(): Promise<PlatformPermissionStatus> {
   if (!isDesktopRuntime()) {
     return {

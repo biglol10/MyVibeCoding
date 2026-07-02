@@ -7,7 +7,7 @@ final class ShortcutManagerTests: XCTestCase {
     func testDefaultBindingsContainAllActions() {
         let manager = ShortcutManager(defaults: isolatedDefaults("defaults"))
 
-        XCTAssertEqual(Set(manager.bindings.keys), Set(ShortcutAction.allCases))
+        XCTAssertEqual(Set(manager.bindings.keys), Set(ShortcutDefinition.customizableActions))
     }
 
     @MainActor
@@ -60,7 +60,12 @@ final class ShortcutManagerTests: XCTestCase {
     }
 
     func testCustomizableActionsIncludeEveryDefaultShortcut() {
-        XCTAssertEqual(ShortcutDefinition.customizableActions, ShortcutAction.allCases)
+        XCTAssertEqual(ShortcutDefinition.customizableActions, [
+            .newScreenshot,
+            .newRecording,
+            .openSettings
+        ])
+        XCTAssertEqual(Set(ShortcutDefinition.defaultBindings.keys), Set(ShortcutDefinition.customizableActions))
     }
 
     private func isolatedDefaults(_ name: String) -> UserDefaults {

@@ -305,16 +305,19 @@ final class CaptureCoordinatorTests: XCTestCase {
     func testScreenshotPermissionFailureShowsActionableStatus() async {
         let appState = AppState()
         let settingsStore = makeSettingsStore("screenshotPermissionDenied")
+        let selectionService = MockSelectionService()
         let coordinator = CaptureCoordinator(
             appState: appState,
             settingsStore: settingsStore,
-            screenshotService: FailingScreenshotService(errorDescription: "사용자가 응용 프로그램, 윈도우, 디스플레이 캡처의 TCC를 거절함"),
-            selectionService: MockSelectionService()
+            screenshotService: MockScreenshotService(),
+            selectionService: selectionService,
+            screenCapturePermissionChecker: MockScreenCapturePermissionChecker(isAuthorized: false)
         )
 
         await coordinator.startScreenshotCapture()
 
         XCTAssertNil(appState.currentDocument)
+        XCTAssertEqual(selectionService.selectionCallCount, 0)
         XCTAssertEqual(
             appState.statusMessage,
             "Screenshot failed: Screen access is off. Enable CaptureStudio in System Settings > Privacy & Security."
@@ -421,7 +424,7 @@ final class CaptureCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testRecordingUsesConfiguredCountdownBeforeSelecting() async {
+    func testRecordingUsesConfiguredCountdown() async {
         let appState = AppState(captureMode: .record)
         let settingsStore = makeSettingsStore("recordCountdown")
         settingsStore.update { settings in
@@ -601,10 +604,10 @@ final class CaptureCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testRecordingHidesAppWindowBeforeCountdownWhenEnabled() async {
+    func testRecordingRunsCountdownAfterAreaSelectionWhenEnabled() async {
         let events = CaptureVisibilityEventLog()
         let appState = AppState(captureMode: .record)
-        let settingsStore = makeSettingsStore("hideBeforeRecordingCountdown")
+        let settingsStore = makeSettingsStore("recordingCountdownAfterSelection")
         settingsStore.update { settings in
             settings.hideAppDuringCapture = true
             settings.automaticallySaveRecordings = true
@@ -622,7 +625,42 @@ final class CaptureCoordinatorTests: XCTestCase {
 
         await coordinator.startScreenRecording()
 
-        XCTAssertEqual(events.values, ["hide", "sleep:2", "select", "record", "restore"])
+        XCTAssertEqual(events.values, ["hide", "select", "sleep:2", "record", "restore"])
+    }
+
+    @MainActor
+    func testStoppingActiveRecordingFinishesRecordingAndClearsProgressState() async throws {
+        let appState = AppState(captureMode: .record)
+        let settingsStore = makeSettingsStore("manualStopRecording")
+        settingsStore.update { settings in
+            settings.automaticallySaveRecordings = true
+            settings.countdownSeconds = 0
+        }
+        let recordingService = ManuallyStoppedRecordingService()
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: settingsStore,
+            screenshotService: MockScreenshotService(),
+            recordingService: recordingService,
+            selectionService: MockSelectionService(),
+            delaySleeper: MockDelaySleeper()
+        )
+
+        let recordingTask = Task {
+            await coordinator.startScreenRecording()
+        }
+        await recordingService.waitUntilRecordingStarted()
+
+        XCTAssertTrue(appState.isRecordingInProgress)
+        await coordinator.stopActiveRecording()
+        await recordingTask.value
+
+        XCTAssertTrue(recordingService.didRequestStop)
+        XCTAssertFalse(appState.isRecordingInProgress)
+        XCTAssertEqual(appState.currentDocument?.kind, .recording)
+        XCTAssertEqual(appState.statusMessage, "Recording saved.")
+        let fileURL = try XCTUnwrap(appState.currentDocument?.fileURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
     }
 
     @MainActor
@@ -632,10 +670,37 @@ final class CaptureCoordinatorTests: XCTestCase {
         settingsStore.update { settings in
             settings.countdownSeconds = 0
         }
+        let selectionService = MockSelectionService()
         let coordinator = CaptureCoordinator(
             appState: appState,
             settingsStore: settingsStore,
-            recordingService: FailingRecordingService(errorDescription: "User declined TCC capture permission"),
+            recordingService: MockRecordingService(),
+            selectionService: selectionService,
+            delaySleeper: MockDelaySleeper(),
+            screenCapturePermissionChecker: MockScreenCapturePermissionChecker(isAuthorized: false)
+        )
+
+        await coordinator.startScreenRecording()
+
+        XCTAssertNil(appState.currentDocument)
+        XCTAssertEqual(selectionService.selectionCallCount, 0)
+        XCTAssertEqual(
+            appState.statusMessage,
+            "Recording failed: Screen access is off. Enable CaptureStudio in System Settings > Privacy & Security."
+        )
+    }
+
+    @MainActor
+    func testRecordingStreamFailurePreservesUnderlyingReason() async {
+        let appState = AppState(captureMode: .record)
+        let settingsStore = makeSettingsStore("recordingStreamFailure")
+        settingsStore.update { settings in
+            settings.countdownSeconds = 0
+        }
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: settingsStore,
+            recordingService: FailingRecordingService(error: RecordingError.streamFailed("Encoder disconnected")),
             selectionService: MockSelectionService(),
             delaySleeper: MockDelaySleeper()
         )
@@ -643,10 +708,7 @@ final class CaptureCoordinatorTests: XCTestCase {
         await coordinator.startScreenRecording()
 
         XCTAssertNil(appState.currentDocument)
-        XCTAssertEqual(
-            appState.statusMessage,
-            "Recording failed: Screen access is off. Enable CaptureStudio in System Settings > Privacy & Security."
-        )
+        XCTAssertEqual(appState.statusMessage, "Recording failed: Recording stopped unexpectedly: Encoder disconnected")
     }
 
     @MainActor
@@ -824,19 +886,27 @@ private final class MockRecordingService: RecordingServicing {
 }
 
 private final class FailingRecordingService: RecordingServicing {
-    private let errorDescription: String
+    private let error: Error
 
-    init(errorDescription: String) {
-        self.errorDescription = errorDescription
+    init(error: Error) {
+        self.error = error
     }
 
     func recordScreen(selection: CaptureSelection, to outputURL: URL, settings: AppSettings) async throws -> RecordingResult {
-        throw TestLocalizedError(errorDescription: errorDescription)
+        throw error
     }
 }
 
 private struct TestLocalizedError: LocalizedError {
     let errorDescription: String?
+}
+
+private struct MockScreenCapturePermissionChecker: ScreenCapturePermissionChecking {
+    let isAuthorized: Bool
+
+    func hasScreenCaptureAccess() -> Bool {
+        isAuthorized
+    }
 }
 
 private final class MockSelectionService: SelectionServicing {
@@ -994,5 +1064,46 @@ private final class EventLoggingStoppedRecordingService: RecordingServicing {
     func recordScreen(selection: CaptureSelection, to outputURL: URL, settings: AppSettings) async throws -> RecordingResult {
         events.values.append("record-stopped")
         throw RecordingError.stoppedByUser
+    }
+}
+
+@MainActor
+private final class ManuallyStoppedRecordingService: RecordingServicing {
+    private var continuation: CheckedContinuation<RecordingResult, Error>?
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var outputURL: URL?
+    private(set) var didRequestStop = false
+
+    func recordScreen(selection: CaptureSelection, to outputURL: URL, settings: AppSettings) async throws -> RecordingResult {
+        self.outputURL = outputURL
+        startWaiters.forEach { $0.resume() }
+        startWaiters.removeAll()
+
+        return try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func stopRecording() async {
+        didRequestStop = true
+        guard let outputURL else {
+            continuation?.resume(throwing: RecordingError.writerUnavailable)
+            continuation = nil
+            return
+        }
+
+        try? Data([0x00, 0x00, 0x00, 0x18]).write(to: outputURL, options: .atomic)
+        continuation?.resume(returning: RecordingResult(fileURL: outputURL, createdAt: Date(timeIntervalSince1970: 40)))
+        continuation = nil
+    }
+
+    func waitUntilRecordingStarted() async {
+        if outputURL != nil {
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            startWaiters.append(continuation)
+        }
     }
 }

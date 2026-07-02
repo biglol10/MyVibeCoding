@@ -43,6 +43,69 @@ final class ScreenCaptureKitIntegrationTests: XCTestCase {
         let fileSize = try XCTUnwrap(attributes[.size] as? NSNumber)
         XCTAssertGreaterThan(fileSize.intValue, 0)
         try await Self.assertVideo(at: result.fileURL, matches: selection)
+
+        let asset = AVURLAsset(url: result.fileURL)
+        let duration = try await asset.load(.duration).seconds
+        XCTAssertGreaterThanOrEqual(duration, 0.9)
+        XCTAssertLessThanOrEqual(duration, 2.0)
+    }
+
+    @MainActor
+    func testActualRecordingWithUIStyleSettingsKeepsRequestedDuration() async throws {
+        try Self.skipUnlessIntegrationIsEnabled()
+        let selection = try await Self.mediumDisplaySelection()
+        var settings = AppSettings.defaults
+        settings.includeSystemAudio = true
+        settings.includeMicrophone = false
+        settings.showCursorInRecordings = true
+        settings.recordingDurationSeconds = 1
+        settings.countdownSeconds = 0
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("mp4")
+
+        let result = try await ScreenCaptureKitRecordingService().recordScreen(
+            selection: selection,
+            to: outputURL,
+            settings: settings
+        )
+        defer { try? FileManager.default.removeItem(at: result.fileURL) }
+
+        try await Self.assertVideo(at: result.fileURL, matches: selection)
+
+        let asset = AVURLAsset(url: result.fileURL)
+        let duration = try await asset.load(.duration).seconds
+        XCTAssertGreaterThanOrEqual(duration, 0.9)
+        XCTAssertLessThanOrEqual(duration, 2.0)
+    }
+
+    @MainActor
+    func testActualFiveSecondRecordingStartsDurationAfterFirstFrame() async throws {
+        try Self.skipUnlessIntegrationIsEnabled()
+        let selection = try await Self.mediumDisplaySelection()
+        var settings = AppSettings.defaults
+        settings.includeSystemAudio = true
+        settings.includeMicrophone = false
+        settings.showCursorInRecordings = true
+        settings.recordingDurationSeconds = 5
+        settings.countdownSeconds = 0
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("mp4")
+
+        let result = try await ScreenCaptureKitRecordingService().recordScreen(
+            selection: selection,
+            to: outputURL,
+            settings: settings
+        )
+        defer { try? FileManager.default.removeItem(at: result.fileURL) }
+
+        try await Self.assertVideo(at: result.fileURL, matches: selection)
+
+        let asset = AVURLAsset(url: result.fileURL)
+        let duration = try await asset.load(.duration).seconds
+        XCTAssertGreaterThanOrEqual(duration, 4.5)
+        XCTAssertLessThanOrEqual(duration, 6.5)
     }
 
     @MainActor
@@ -99,6 +162,21 @@ final class ScreenCaptureKitIntegrationTests: XCTestCase {
             displayID: display.displayID,
             screenFrame: screenFrame,
             rect: CGRect(x: 0, y: 0, width: 160, height: 120),
+            scale: scale
+        )
+    }
+
+    private static func mediumDisplaySelection() async throws -> CaptureSelection {
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        let display = try XCTUnwrap(content.displays.first)
+        let screenFrame = CGRect(x: 0, y: 0, width: display.width, height: display.height)
+        let scale = NSScreen.screens.first { screen in
+            screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID == display.displayID
+        }?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
+        return CaptureSelection(
+            displayID: display.displayID,
+            screenFrame: screenFrame,
+            rect: CGRect(x: 0, y: 0, width: min(500, display.width), height: min(320, display.height)),
             scale: scale
         )
     }

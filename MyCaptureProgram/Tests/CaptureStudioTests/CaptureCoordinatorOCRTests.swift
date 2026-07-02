@@ -46,6 +46,27 @@ final class CaptureCoordinatorOCRTests: XCTestCase {
         XCTAssertEqual(appState.statusMessage, "OCR text copied.")
     }
 
+    func testDismissOCRResultClearsPanelContent() {
+        let appState = AppState()
+        appState.currentDocument = EditorDocument(
+            kind: .screenshot,
+            data: Data([0x89, 0x50, 0x4E, 0x47]),
+            ocrResult: OCRResult(observations: [
+                OCRObservation(text: "first", confidence: 1, boundingBox: CGRect(x: 1, y: 2, width: 3, height: 4))
+            ])
+        )
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: SettingsStore(defaults: isolatedDefaults("dismissOCR")),
+            screenshotService: OCRMockScreenshotService()
+        )
+
+        coordinator.dismissOCRResult()
+
+        XCTAssertNil(appState.currentDocument?.ocrResult)
+        XCTAssertNil(appState.statusMessage)
+    }
+
     private func isolatedDefaults(_ name: String) -> UserDefaults {
         let suiteName = "CaptureCoordinatorOCRTests.\(name)"
         let defaults = UserDefaults(suiteName: suiteName)!

@@ -8,7 +8,7 @@ import {
   type SortingState,
   useReactTable,
 } from "@tanstack/react-table";
-import { createRule, listRules, updateRule } from "../../api/activityApi";
+import { createRule, deleteRule, listRules, setRuleEnabled, updateRule } from "../../api/activityApi";
 import { CATEGORY_LABELS, EMPTY_STATE_TEXT, RULE_SOURCE_LABELS, RULE_TYPE_LABELS } from "../../lib/labels";
 import { cn } from "../../lib/utils";
 import type { ClassificationRule, ProductivityCategory, RuleDraft, RuleType } from "../../types/activity";
@@ -27,13 +27,13 @@ const RULE_CATEGORIES: ProductivityCategory[] = ["productive", "unproductive", "
 const PATTERN_ERROR_ID = "rule-pattern-error";
 const columnHelper = createColumnHelper<ClassificationRule>();
 const RULE_TABLE_COLUMN_CLASSES: Record<string, string> = {
-  actions: "w-[8%] text-right",
+  actions: "w-[18%] text-right",
   categoryLabel: "w-[12%] text-left",
   name: "w-[22%] text-left",
-  pattern: "w-[24%] text-left",
+  pattern: "w-[20%] text-left",
   priority: "w-[10%] text-right",
   ruleTypeLabel: "w-[10%] text-left",
-  sourceLabel: "w-[14%] text-left",
+  sourceLabel: "w-[8%] text-left",
 };
 
 type RulesState =
@@ -53,6 +53,7 @@ function ruleSearchText(rule: ClassificationRule): string {
     CATEGORY_LABELS[rule.category],
     rule.priority,
     rule.isBuiltin ? RULE_SOURCE_LABELS.builtin : RULE_SOURCE_LABELS.custom,
+    rule.isEnabled ? "활성" : "비활성",
   ]
     .join(" ")
     .toLowerCase();
@@ -163,6 +164,51 @@ export function RulesSettings({ refreshVersion = 0 }: RulesSettingsProps) {
     }
   }
 
+  async function handleToggleEnabled(rule: ClassificationRule) {
+    try {
+      setIsSaving(true);
+      setFormError(null);
+      const updatedRule = await setRuleEnabled(rule.id, !rule.isEnabled);
+      setRulesState((current) => {
+        if (current.status !== "ready") {
+          return current;
+        }
+        return {
+          rules: current.rules.map((row) => (row.id === updatedRule.id ? updatedRule : row)),
+          status: "ready",
+        };
+      });
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "규칙 상태를 변경하지 못했습니다.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleDeleteRule(rule: ClassificationRule) {
+    try {
+      setIsSaving(true);
+      setFormError(null);
+      await deleteRule(rule.id);
+      setRulesState((current) => {
+        if (current.status !== "ready") {
+          return current;
+        }
+        return {
+          rules: current.rules.filter((row) => row.id !== rule.id),
+          status: "ready",
+        };
+      });
+      if (editingRule?.id === rule.id) {
+        resetForm();
+      }
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "규칙을 삭제하지 못했습니다.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   const rules = rulesState.status === "ready" ? rulesState.rules : [];
   const [globalFilter, setGlobalFilter] = useState("");
   const [sorting, setSorting] = useState<SortingState>([{ id: "name", desc: false }]);
@@ -204,16 +250,36 @@ export function RulesSettings({ refreshVersion = 0 }: RulesSettingsProps) {
       columnHelper.accessor((rule) => (rule.isBuiltin ? RULE_SOURCE_LABELS.builtin : RULE_SOURCE_LABELS.custom), {
         id: "sourceLabel",
         header: "출처",
-        cell: (info) => info.getValue(),
+        cell: (info) => (
+          <span className="grid gap-1">
+            <span>{info.getValue()}</span>
+            {!info.row.original.isEnabled ? (
+              <Badge variant="secondary">비활성</Badge>
+            ) : null}
+          </span>
+        ),
       }),
       columnHelper.display({
         id: "actions",
         header: "관리",
-        cell: (info) => (
-          <Button size="sm" type="button" onClick={() => handleEditRule(info.row.original)} variant="outline">
-            수정
-          </Button>
-        ),
+        cell: (info) => {
+          const rule = info.row.original;
+          return (
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button size="sm" type="button" onClick={() => handleEditRule(rule)} variant="outline">
+                수정
+              </Button>
+              <Button size="sm" type="button" onClick={() => void handleToggleEnabled(rule)} variant="outline">
+                {rule.isEnabled ? "비활성" : "활성"}
+              </Button>
+              {!rule.isBuiltin ? (
+                <Button size="sm" type="button" onClick={() => void handleDeleteRule(rule)} variant="outline">
+                  삭제
+                </Button>
+              ) : null}
+            </div>
+          );
+        },
         enableSorting: false,
       }),
     ],
@@ -351,7 +417,7 @@ export function RulesSettings({ refreshVersion = 0 }: RulesSettingsProps) {
                         <TableCell
                           className={cn(
                             ruleTableColumnClassName(cell.column.id),
-                            "max-[700px]:mt-3 max-[700px]:flex max-[700px]:items-center max-[700px]:justify-between max-[700px]:gap-4 max-[700px]:p-0",
+                            "max-[700px]:mt-3 max-[700px]:flex max-[700px]:w-full max-[700px]:items-center max-[700px]:justify-between max-[700px]:gap-4 max-[700px]:p-0 max-[700px]:text-left",
                           )}
                           key={cell.id}
                         >

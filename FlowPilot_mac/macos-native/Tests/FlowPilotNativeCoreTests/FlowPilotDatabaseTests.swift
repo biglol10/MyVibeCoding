@@ -129,6 +129,26 @@ final class FlowPilotDatabaseTests: XCTestCase {
         XCTAssertEqual(events.map(\.title), ["ChatGPT", "GitHub"])
     }
 
+    func testSaveBrowserEventPrunesOldEvents() throws {
+        let databaseURL = temporaryDatabaseURL()
+        let database = FlowPilotDatabase(path: databaseURL.path)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let old = now.addingTimeInterval(-8 * 86_400)
+
+        try database.saveBrowserEvent(
+            BrowserEventDraft(domain: "old.example", url: nil, title: "Old"),
+            occurredAt: old
+        )
+        try database.saveBrowserEvent(
+            BrowserEventDraft(domain: "new.example", url: nil, title: "New"),
+            occurredAt: now
+        )
+
+        let events = try database.listRecentBrowserEvents(limit: 10)
+
+        XCTAssertEqual(events.map(\.domain), ["new.example"])
+    }
+
     func testSavesAndListsClassificationRules() throws {
         let databaseURL = temporaryDatabaseURL()
         let database = FlowPilotDatabase(path: databaseURL.path)
@@ -188,6 +208,60 @@ final class FlowPilotDatabaseTests: XCTestCase {
         let rules = try database.listRules()
 
         XCTAssertEqual(rules.map(\.name), ["Atlassian", "Code", "Zed"])
+    }
+
+    func testUpdatesRuleEnabledState() throws {
+        let databaseURL = temporaryDatabaseURL()
+        let database = FlowPilotDatabase(path: databaseURL.path)
+        let rule = try FlowPilotDatabase.userRule(
+            ruleType: .domain,
+            pattern: "example.com",
+            category: .productive
+        )
+
+        try database.saveRule(rule)
+        try database.setRuleEnabled(id: rule.id, isEnabled: false)
+
+        XCTAssertFalse(try database.listRules()[0].isEnabled)
+    }
+
+    func testDeletesOnlyUserRules() throws {
+        let databaseURL = temporaryDatabaseURL()
+        try createDatabase(at: databaseURL)
+        let database = FlowPilotDatabase(path: databaseURL.path)
+        let userRule = try FlowPilotDatabase.userRule(
+            ruleType: .app,
+            pattern: "Finder",
+            category: .ignored
+        )
+
+        try database.saveRule(userRule)
+        try insertRule(
+            databaseURL,
+            id: "builtin:domain:chatgpt.com",
+            name: "ChatGPT",
+            type: "domain",
+            pattern: "chatgpt.com",
+            category: "productive",
+            priority: 0,
+            isBuiltin: true
+        )
+
+        try database.deleteUserRule(id: userRule.id)
+        XCTAssertThrowsError(try database.deleteUserRule(id: "builtin:domain:chatgpt.com"))
+
+        XCTAssertEqual(try database.listRules().map(\.id), ["builtin:domain:chatgpt.com"])
+    }
+
+    func testUserRuleCanBeCreatedDisabledForReclassification() throws {
+        let rule = try FlowPilotDatabase.userRule(
+            ruleType: .domain,
+            pattern: "example.com",
+            category: .neutral,
+            isEnabled: false
+        )
+
+        XCTAssertFalse(rule.isEnabled)
     }
 
     func testWeeklyDashboardIncludesPreviousSixLocalDays() throws {

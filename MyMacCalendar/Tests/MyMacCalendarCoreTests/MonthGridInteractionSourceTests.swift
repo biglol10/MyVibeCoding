@@ -15,15 +15,15 @@ final class MonthGridInteractionSourceTests: XCTestCase {
 
         XCTAssertTrue(source.contains(".clipShape(Rectangle())"))
         XCTAssertTrue(source.contains(".padding(.horizontal, 10)"))
-        XCTAssertTrue(source.contains("minHeight: CalendarGridLayout.entryHeight"))
-        XCTAssertTrue(source.contains("static let entryHeight: CGFloat = 16"))
+        XCTAssertTrue(source.contains("minHeight: CalendarGridLayout.entryHeight(for: density)"))
+        XCTAssertTrue(source.contains("static func entryHeight(for density: CalendarDensityMode) -> CGFloat"))
     }
 
     func testMonthGridShowsTwoEntriesBeforeOverflowSummary() throws {
         let source = try String(contentsOfFile: sourcePath("Sources/MyMacCalendar/Views/MonthGridView.swift"), encoding: .utf8)
 
-        XCTAssertTrue(source.contains("static let visibleEntryLimit = 2"))
-        XCTAssertTrue(source.contains("let visibleEntries = Array(dayEntries.prefix(CalendarGridLayout.visibleEntryLimit))"))
+        XCTAssertTrue(source.contains("density == .compact ? 3 : 2"))
+        XCTAssertTrue(source.contains("let visibleEntries = Array(dayEntries.prefix(CalendarGridLayout.visibleEntryLimit(for: density)))"))
         XCTAssertTrue(source.contains("let overflowCount = max(0, dayEntries.count - visibleEntries.count)"))
         XCTAssertTrue(source.contains("Text(\"+\\(overflowCount)개\")"))
     }
@@ -32,7 +32,8 @@ final class MonthGridInteractionSourceTests: XCTestCase {
         let source = try String(contentsOfFile: sourcePath("Sources/MyMacCalendar/Views/MonthGridView.swift"), encoding: .utf8)
 
         XCTAssertTrue(source.contains("static let dateTopPadding: CGFloat = 2"))
-        XCTAssertTrue(source.contains("static let entryTopPadding: CGFloat = 4"))
+        XCTAssertTrue(source.contains("static func entryTopPadding(for density: CalendarDensityMode) -> CGFloat"))
+        XCTAssertTrue(source.contains("density == .compact ? 2 : 4"))
         XCTAssertTrue(source.contains("static let bottomPadding: CGFloat = 4"))
     }
 

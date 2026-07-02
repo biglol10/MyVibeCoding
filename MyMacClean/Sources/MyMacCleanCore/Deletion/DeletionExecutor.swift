@@ -1,5 +1,11 @@
 import Foundation
 
+enum DeletionExecutionErrorMessage {
+    static let confirmationMismatch = "confirmation phrase mismatch"
+    static let protectedPathSkipped = "protected path skipped"
+    static let pathNotFoundBeforeDelete = "path not found before delete"
+}
+
 public struct DeletionExecutor: Sendable {
     public init() {}
 
@@ -10,18 +16,24 @@ public struct DeletionExecutor: Sendable {
     public func execute(plan: DeletionPlan, confirmation: String, force: Bool = false) async -> [DeletionItemResult] {
         guard confirmation == requiredConfirmationPhrase(for: plan.app) else {
             return plan.candidates.map {
-                DeletionItemResult(path: $0.url.path, success: false, errorMessage: "confirmation phrase mismatch")
+                DeletionItemResult(path: $0.url.path, success: false, errorMessage: DeletionExecutionErrorMessage.confirmationMismatch)
             }
         }
 
         return plan.candidates.map { candidate in
+            guard !candidate.isProtected else {
+                return DeletionItemResult(path: candidate.url.path, success: false, errorMessage: DeletionExecutionErrorMessage.protectedPathSkipped)
+            }
+
             do {
-                if FileManager.default.fileExists(atPath: candidate.url.path) {
-                    if force {
-                        try prepareForForcedRemoval(at: candidate.url)
-                    }
-                    try FileManager.default.removeItem(at: candidate.url)
+                guard FileManager.default.fileExists(atPath: candidate.url.path) else {
+                    return DeletionItemResult(path: candidate.url.path, success: false, errorMessage: DeletionExecutionErrorMessage.pathNotFoundBeforeDelete)
                 }
+
+                if force {
+                    try prepareForForcedRemoval(at: candidate.url)
+                }
+                try FileManager.default.removeItem(at: candidate.url)
                 return DeletionItemResult(path: candidate.url.path, success: true, errorMessage: nil)
             } catch {
                 return DeletionItemResult(path: candidate.url.path, success: false, errorMessage: error.localizedDescription)

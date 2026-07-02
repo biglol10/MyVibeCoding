@@ -1,10 +1,14 @@
 import Foundation
 
 public struct ProtectionPolicy: Sendable {
+    private let allowedUserApplicationRoots: [URL]
     private let allowedUserLibraryAppDataRoots: [URL]
     private let protectedRoots: [URL]
 
     public init(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) {
+        self.allowedUserApplicationRoots = [
+            homeDirectory.appendingPathComponent("Applications", isDirectory: true)
+        ]
         self.allowedUserLibraryAppDataRoots = [
             homeDirectory.appendingPathComponent("Library/Application Support", isDirectory: true),
             homeDirectory.appendingPathComponent("Library/Caches", isDirectory: true),
@@ -36,9 +40,30 @@ public struct ProtectionPolicy: Sendable {
     }
 
     public func isProtected(_ url: URL) -> Bool {
-        if allowedUserLibraryAppDataRoots.contains(where: { PathUtilities.isDescendant(url, of: $0) }) {
-            return false
+        if isAllowedUserDataPath(url) {
+            return isLexicallyAllowedButResolvesOutsideAllowedRoots(url) && isProtectedByDeclaredRoots(url)
         }
-        return protectedRoots.contains { PathUtilities.isDescendant(url, of: $0) }
+        return isProtectedByDeclaredRoots(url)
+    }
+
+    private func isAllowedUserDataPath(_ url: URL) -> Bool {
+        allowedRoots.contains {
+            PathUtilities.isDescendant(url, of: $0) || PathUtilities.isDescendantResolvingSymlinks(url, of: $0)
+        }
+    }
+
+    private func isLexicallyAllowedButResolvesOutsideAllowedRoots(_ url: URL) -> Bool {
+        allowedRoots.contains { PathUtilities.isDescendant(url, of: $0) }
+            && !allowedRoots.contains { PathUtilities.isDescendantResolvingSymlinks(url, of: $0) }
+    }
+
+    private func isProtectedByDeclaredRoots(_ url: URL) -> Bool {
+        protectedRoots.contains {
+            PathUtilities.isDescendant(url, of: $0) || PathUtilities.isDescendantResolvingSymlinks(url, of: $0)
+        }
+    }
+
+    private var allowedRoots: [URL] {
+        allowedUserApplicationRoots + allowedUserLibraryAppDataRoots
     }
 }

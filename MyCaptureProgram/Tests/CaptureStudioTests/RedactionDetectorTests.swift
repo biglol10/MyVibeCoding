@@ -15,4 +15,17 @@ final class RedactionDetectorTests: XCTestCase {
 
         XCTAssertEqual(Set(candidates.map(\.kind)), [.email, .phone, .url, .longToken, .longNumber])
     }
+
+    func testRedactionCandidateBoundsOnlyMatchedTextWithinObservation() throws {
+        let observationBox = CGRect(x: 10, y: 20, width: 240, height: 24)
+        let result = OCRResult(observations: [
+            OCRObservation(text: "Email user@example.com now", confidence: 1, boundingBox: observationBox)
+        ])
+
+        let candidate = try XCTUnwrap(RedactionDetector().detect(in: result).first { $0.kind == .email })
+
+        XCTAssertGreaterThan(candidate.boundingBox.minX, observationBox.minX)
+        XCTAssertLessThan(candidate.boundingBox.width, observationBox.width)
+        XCTAssertEqual(candidate.text, "user@example.com")
+    }
 }

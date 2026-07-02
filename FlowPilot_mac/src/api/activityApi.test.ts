@@ -1,10 +1,12 @@
 import {
   createRule,
+  deleteRule,
   exportTodayCsv,
   getTodaySessions,
   getTodaySummary,
   listRules,
   resetDevActivityFallbackForTest,
+  setRuleEnabled,
   updateRule,
 } from "./activityApi";
 
@@ -89,6 +91,38 @@ describe("updateRule dev fallback", () => {
       isBuiltin: false,
     });
     await expect(listRules()).resolves.toContainEqual(updated);
+  });
+});
+
+describe("rule lifecycle dev fallback", () => {
+  it("disables and re-enables rules", async () => {
+    const created = await createRule({
+      name: "Example",
+      ruleType: "domain",
+      pattern: "example.com",
+      category: "neutral",
+    });
+
+    const disabled = await setRuleEnabled(created.id, false);
+    expect(disabled.isEnabled).toBe(false);
+    await expect(listRules()).resolves.toContainEqual(disabled);
+
+    const enabled = await setRuleEnabled(created.id, true);
+    expect(enabled.isEnabled).toBe(true);
+  });
+
+  it("deletes user rules but rejects built-in rules", async () => {
+    const created = await createRule({
+      name: "Example",
+      ruleType: "domain",
+      pattern: "example.com",
+      category: "neutral",
+    });
+
+    await deleteRule(created.id);
+
+    await expect(listRules()).resolves.not.toEqual(expect.arrayContaining([expect.objectContaining({ id: created.id })]));
+    await expect(deleteRule("builtin:domain:chatgpt.com")).rejects.toThrow("Only user rules can be deleted.");
   });
 });
 

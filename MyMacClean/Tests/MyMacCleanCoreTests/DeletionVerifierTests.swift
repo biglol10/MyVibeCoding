@@ -71,4 +71,40 @@ final class DeletionVerifierTests: XCTestCase {
         XCTAssertEqual(result.status, .skipped)
         XCTAssertEqual(result.path, skippedURL.path)
     }
+
+    func testVerifierClassifiesPathsMissingBeforeDeleteFromExecutionResults() async throws {
+        let root = try TestFixtures.temporaryDirectory(named: "verifier-missing-before-delete")
+        let missingURL = root.appendingPathComponent("missing-cache", isDirectory: true)
+        let app = InstalledApp(
+            displayName: "Verifier",
+            bundleIdentifier: "com.example.verifier",
+            version: nil,
+            executableName: nil,
+            bundleURL: root.appendingPathComponent("Verifier.app"),
+            iconIdentifier: nil,
+            bundleSize: 0,
+            lastOpenedAt: nil
+        )
+        let candidate = RelatedFileCandidate(
+            url: missingURL,
+            kind: .cache,
+            size: 1,
+            matchReason: "test",
+            confidence: .high,
+            safety: .safe,
+            defaultSelected: true,
+            requiresManualReview: false,
+            isProtected: false
+        )
+        let plan = DeletionPlan(app: app, candidates: [candidate])
+        let executionResults = [
+            DeletionItemResult(path: missingURL.path, success: false, errorMessage: "path not found before delete")
+        ]
+
+        let results = await DeletionVerifier().verify(plan: plan, executionResults: executionResults)
+
+        XCTAssertEqual(results, [
+            DeletionVerificationResult(path: missingURL.path, status: .notFoundBeforeDelete, errorMessage: "path not found before delete")
+        ])
+    }
 }

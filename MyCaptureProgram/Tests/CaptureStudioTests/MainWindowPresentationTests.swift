@@ -102,6 +102,7 @@ final class MainWindowPresentationTests: XCTestCase {
         XCTAssertEqual(result.detail, "Press Save to write the file.")
         XCTAssertEqual(result.systemImage, "record.circle")
         XCTAssertFalse(result.canCopy)
+        XCTAssertFalse(result.canReveal)
         XCTAssertTrue(result.canSave)
         XCTAssertTrue(result.canDelete)
         XCTAssertTrue(result.requiresSave)

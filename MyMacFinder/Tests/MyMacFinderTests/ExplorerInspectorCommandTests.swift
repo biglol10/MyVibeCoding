@@ -59,6 +59,25 @@ final class ExplorerInspectorCommandTests: XCTestCase {
         XCTAssertEqual(folderSize.requestedURL, folder.url)
     }
 
+    func testCalculateFolderSizeRunsOffMainThread() async {
+        let folder = folderEntry()
+        let folderSize = ThreadRecordingFolderSizeService(size: 42)
+        let store = ExplorerStore(
+            initialURL: URL(fileURLWithPath: "/tmp"),
+            fileSystemService: StubFileSystemService(entries: [folder]),
+            settingsStore: InMemoryExplorerSettingsStore(),
+            directoryWatcher: nil,
+            folderSizeService: folderSize
+        )
+        await store.loadInitialDirectory()
+        store.updateSelection([folder.url])
+
+        await store.perform(.calculateFolderSize)
+
+        XCTAssertEqual(store.calculatedFolderSize(for: folder.url), 42)
+        XCTAssertEqual(folderSize.wasMainThread, false)
+    }
+
     private func folderEntry() -> FileEntry {
         FileEntry(
             url: URL(fileURLWithPath: "/tmp/Folder", isDirectory: true),
@@ -104,6 +123,29 @@ private final class StubFolderSizeService: FolderSizeCalculating, @unchecked Sen
 
     func size(of folder: URL) throws -> Int64 {
         requestedURL = folder
+        return size
+    }
+}
+
+private final class ThreadRecordingFolderSizeService: FolderSizeCalculating, @unchecked Sendable {
+    private let lock = NSLock()
+    private let size: Int64
+    private var recordedWasMainThread: Bool?
+
+    init(size: Int64) {
+        self.size = size
+    }
+
+    var wasMainThread: Bool? {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordedWasMainThread
+    }
+
+    func size(of folder: URL) throws -> Int64 {
+        lock.lock()
+        recordedWasMainThread = Thread.isMainThread
+        lock.unlock()
         return size
     }
 }

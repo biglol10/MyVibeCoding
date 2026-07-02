@@ -1002,7 +1002,7 @@ public final class ExplorerStore: ObservableObject {
                 await refresh()
                 await reporter.complete()
             case .calculateFolderSize:
-                try calculateSelectedFolderSize()
+                try await calculateSelectedFolderSize()
             case .refresh:
                 await refresh()
             case .focusSearch:
@@ -1685,7 +1685,7 @@ public final class ExplorerStore: ObservableObject {
         try FileManager.default.moveItem(at: source, to: destination)
     }
 
-    private func calculateSelectedFolderSize() throws {
+    private func calculateSelectedFolderSize() async throws {
         guard
             activePane.selectedURLs.count == 1,
             let url = selectedURLs.first,
@@ -1694,7 +1694,10 @@ public final class ExplorerStore: ObservableObject {
             return
         }
 
-        let size = try folderSizeService.size(of: url)
+        let service = folderSizeService
+        let size = try await Task.detached {
+            try service.size(of: url)
+        }.value
         calculatedFolderSizes[url.standardizedFileURL] = size
     }
 

@@ -19,6 +19,7 @@ final class SettingsPresentationTests: XCTestCase {
 
     func testGuideSectionsCoverPrimaryWorkflows() {
         let titles = CaptureStudioGuidePresentation.sections.map(\.title)
+        let editorItems = CaptureStudioGuidePresentation.sections.first { $0.id == "editor" }?.items ?? []
 
         XCTAssertEqual(titles, [
             "Capture",
@@ -29,6 +30,8 @@ final class SettingsPresentationTests: XCTestCase {
             "Permissions"
         ])
         XCTAssertTrue(CaptureStudioGuidePresentation.sections.allSatisfy { !$0.items.isEmpty })
+        XCTAssertTrue(editorItems.contains { $0.contains("Quick Redact") })
+        XCTAssertFalse(editorItems.contains { $0.localizedCaseInsensitiveContains("blur") })
     }
 
     func testGuideLaunchPolicyShowsUntilUserHasSeenGuide() {
@@ -49,13 +52,46 @@ final class SettingsPresentationTests: XCTestCase {
     }
 
     func testAdvancedPermissionCopyUsesUserFacingLanguage() {
+        let screenAllowed = AdvancedPermissionStatusPresentation.screenRecordingRow(isAuthorized: true)
+        let screenBlocked = AdvancedPermissionStatusPresentation.screenRecordingRow(isAuthorized: false)
+        let microphoneOff = AdvancedPermissionStatusPresentation.microphoneRow(
+            includeMicrophone: false,
+            authorization: .denied
+        )
+        let microphonePending = AdvancedPermissionStatusPresentation.microphoneRow(
+            includeMicrophone: true,
+            authorization: .notDetermined
+        )
+        let microphoneBlocked = AdvancedPermissionStatusPresentation.microphoneRow(
+            includeMicrophone: true,
+            authorization: .denied
+        )
+
         XCTAssertEqual(
-            AdvancedPermissionStatusPresentation.screenRecording,
-            "Checked automatically when you start capture or recording."
+            screenAllowed,
+            AdvancedPermissionStatusPresentation.Row(
+                title: "Screen Recording",
+                status: "Allowed",
+                detail: "CaptureStudio can capture screenshots and screen recordings.",
+                actionTitle: nil,
+                tone: .positive
+            )
         )
         XCTAssertEqual(
-            AdvancedPermissionStatusPresentation.microphone,
-            "Checked automatically when microphone recording is enabled."
+            screenBlocked.actionTitle,
+            "Open Privacy Settings"
+        )
+        XCTAssertEqual(
+            microphoneOff.status,
+            "Off"
+        )
+        XCTAssertEqual(
+            microphonePending.status,
+            "Needs approval"
+        )
+        XCTAssertEqual(
+            microphoneBlocked.actionTitle,
+            "Open Privacy Settings"
         )
     }
 

@@ -19,7 +19,9 @@ public final class ShortcutManager: ObservableObject {
 
         if let data = defaults.data(forKey: storageKey),
            let decoded = try? JSONDecoder().decode([ShortcutAction: ShortcutBinding].self, from: data) {
-            self.bindings = ShortcutDefinition.defaultBindings.merging(decoded) { _, custom in custom }
+            let supportedActions = Set(ShortcutDefinition.customizableActions)
+            let filteredDecoded = decoded.filter { supportedActions.contains($0.key) }
+            self.bindings = ShortcutDefinition.defaultBindings.merging(filteredDecoded) { _, custom in custom }
         } else {
             self.bindings = ShortcutDefinition.defaultBindings
         }
@@ -30,12 +32,16 @@ public final class ShortcutManager: ObservableObject {
             throw ShortcutError.duplicateBinding(existingAction: duplicate)
         }
 
-        bindings[action] = binding
+        var updatedBindings = bindings
+        updatedBindings[action] = binding
+        bindings = updatedBindings
         persist()
     }
 
     public func resetToDefault(_ action: ShortcutAction) {
-        bindings[action] = ShortcutDefinition.defaultBinding(for: action)
+        var updatedBindings = bindings
+        updatedBindings[action] = ShortcutDefinition.defaultBinding(for: action)
+        bindings = updatedBindings
         persist()
     }
 
@@ -47,6 +53,14 @@ public final class ShortcutManager: ObservableObject {
 
     public func markRegistrationFailed(for action: ShortcutAction, reason: String) {
         registrationFailures[action] = reason
+    }
+
+    public func clearRegistrationFailure(for action: ShortcutAction) {
+        registrationFailures[action] = nil
+    }
+
+    public func clearAllRegistrationFailures() {
+        registrationFailures = [:]
     }
 
     private func persist() {

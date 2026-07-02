@@ -1,4 +1,6 @@
 import AppKit
+import AVFoundation
+import CoreGraphics
 import SwiftUI
 
 struct SettingsView: View {
@@ -7,6 +9,7 @@ struct SettingsView: View {
     @AppStorage(SettingsTab.storageKey) private var selectedTab = SettingsTab.defaultOpen.rawValue
     @State private var shortcutDraftKeys: [ShortcutAction: String] = [:]
     @State private var shortcutErrorMessage: String?
+    @State private var permissionSnapshot = PermissionSnapshot.current(includeMicrophone: false)
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -31,105 +34,180 @@ struct SettingsView: View {
                 .tag(SettingsTab.advanced.rawValue)
         }
         .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onAppear(perform: refreshPermissionSnapshot)
+        .onChange(of: selectedTab) { _, newValue in
+            if newValue == SettingsTab.advanced.rawValue {
+                refreshPermissionSnapshot()
+            }
+        }
+        .onChange(of: settingsStore.settings.includeMicrophone) { _, _ in
+            refreshPermissionSnapshot()
+        }
     }
 
     private var outputSettings: some View {
-        Form {
-            Toggle("Automatically save screenshots", isOn: binding(\.automaticallySaveScreenshots))
-            Toggle("Automatically save recordings", isOn: binding(\.automaticallySaveRecordings))
-            Toggle("Show in Finder after save", isOn: binding(\.showInFinderAfterSave))
+        settingsPage(
+            title: "Output",
+            subtitle: "Choose where captures are written and whether files save immediately."
+        ) {
+            settingsSection("Save behavior") {
+                Toggle("Automatically save screenshots", isOn: binding(\.automaticallySaveScreenshots))
+                Toggle("Automatically save recordings", isOn: binding(\.automaticallySaveRecordings))
+                Toggle("Show in Finder after save", isOn: binding(\.showInFinderAfterSave))
+            }
 
-            folderRow(
-                title: "Screenshot folder",
-                path: settingsStore.settings.screenshotFolderPath,
-                setting: \.screenshotFolderPath
-            )
-            folderRow(
-                title: "Recording folder",
-                path: settingsStore.settings.recordingFolderPath,
-                setting: \.recordingFolderPath
-            )
+            settingsSection("Folders") {
+                folderRow(
+                    title: "Screenshot folder",
+                    path: settingsStore.settings.screenshotFolderPath,
+                    setting: \.screenshotFolderPath
+                )
+                folderRow(
+                    title: "Recording folder",
+                    path: settingsStore.settings.recordingFolderPath,
+                    setting: \.recordingFolderPath
+                )
+            }
 
-            Button("Reset Output Defaults") {
-                settingsStore.update { settings in
-                    let defaults = AppSettings.defaults
-                    settings.automaticallySaveScreenshots = defaults.automaticallySaveScreenshots
-                    settings.automaticallySaveRecordings = defaults.automaticallySaveRecordings
-                    settings.screenshotFolderPath = defaults.screenshotFolderPath
-                    settings.recordingFolderPath = defaults.recordingFolderPath
-                    settings.showInFinderAfterSave = defaults.showInFinderAfterSave
+            trailingActionRow {
+                Button("Reset Output Defaults") {
+                    settingsStore.update { settings in
+                        let defaults = AppSettings.defaults
+                        settings.automaticallySaveScreenshots = defaults.automaticallySaveScreenshots
+                        settings.automaticallySaveRecordings = defaults.automaticallySaveRecordings
+                        settings.screenshotFolderPath = defaults.screenshotFolderPath
+                        settings.recordingFolderPath = defaults.recordingFolderPath
+                        settings.showInFinderAfterSave = defaults.showInFinderAfterSave
+                    }
                 }
             }
         }
     }
 
     private var captureSettings: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Toggle("Copy captured image to clipboard", isOn: binding(\.copyCapturedImageToClipboard))
-            timeControl(
-                SettingsTimeControl.captureDelay,
-                value: timeBinding(\.defaultDelaySeconds, control: .captureDelay)
-            )
+        settingsPage(
+            title: "Capture",
+            subtitle: "Tune screenshot timing and clipboard behavior."
+        ) {
+            settingsSection("Behavior") {
+                Toggle("Copy captured image to clipboard", isOn: binding(\.copyCapturedImageToClipboard))
+            }
 
-            Spacer()
+            settingsSection("Timing") {
+                timeControl(
+                    SettingsTimeControl.captureDelay,
+                    value: timeBinding(\.defaultDelaySeconds, control: .captureDelay)
+                )
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(.top, 24)
     }
 
     private var recordSettings: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Toggle("Include system audio", isOn: binding(\.includeSystemAudio))
-            Toggle("Include microphone", isOn: binding(\.includeMicrophone))
-            Toggle("Show cursor in recordings", isOn: binding(\.showCursorInRecordings))
-            timeControl(
-                SettingsTimeControl.recordingCountdown,
-                value: timeBinding(\.countdownSeconds, control: .recordingCountdown)
-            )
-            timeControl(
-                SettingsTimeControl.recordingDuration,
-                value: timeBinding(\.recordingDurationSeconds, control: .recordingDuration)
-            )
-            Picker("Quality", selection: recordingQualityBinding) {
-                ForEach(AppSettings.RecordingQuality.allCases) { quality in
-                    Text(quality.rawValue.capitalized).tag(quality)
-                }
+        settingsPage(
+            title: "Record",
+            subtitle: "Control audio sources, capture timing, and recording quality."
+        ) {
+            settingsSection("Audio & cursor") {
+                Toggle("Include system audio", isOn: binding(\.includeSystemAudio))
+                Toggle("Include microphone", isOn: binding(\.includeMicrophone))
+                Toggle("Show cursor in recordings", isOn: binding(\.showCursorInRecordings))
             }
 
-            Spacer()
+            settingsSection("Timing") {
+                timeControl(
+                    SettingsTimeControl.recordingCountdown,
+                    value: timeBinding(\.countdownSeconds, control: .recordingCountdown)
+                )
+                Divider()
+                timeControl(
+                    SettingsTimeControl.recordingDuration,
+                    value: timeBinding(\.recordingDurationSeconds, control: .recordingDuration)
+                )
+            }
+
+            settingsSection("Quality") {
+                Picker("Quality", selection: recordingQualityBinding) {
+                    ForEach(AppSettings.RecordingQuality.allCases) { quality in
+                        Text(quality.rawValue.capitalized).tag(quality)
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 260, alignment: .leading)
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(.top, 24)
     }
 
     private var shortcutSettings: some View {
-        Form {
-            Text(ShortcutErrorPresentation.displayMessage(for: shortcutErrorMessage))
-                .font(.caption)
-                .foregroundStyle(.red)
-                .opacity(ShortcutErrorPresentation.opacity(for: shortcutErrorMessage))
-                .frame(height: ShortcutErrorPresentation.reservedMessageHeight, alignment: .center)
+        settingsPage(
+            title: "Shortcuts",
+            subtitle: "Customize keyboard shortcuts without leaving this window."
+        ) {
+            settingsSection("Actions") {
+                Text(ShortcutErrorPresentation.displayMessage(for: shortcutErrorMessage))
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .opacity(ShortcutErrorPresentation.opacity(for: shortcutErrorMessage))
+                    .frame(height: ShortcutErrorPresentation.reservedMessageHeight, alignment: .center)
 
-            ForEach(implementedShortcutActions) { action in
-                shortcutRow(for: action)
+                ForEach(Array(implementedShortcutActions.enumerated()), id: \.element.id) { index, action in
+                    shortcutRow(for: action)
+                    if index < implementedShortcutActions.count - 1 {
+                        Divider()
+                    }
+                }
             }
 
-            Button("Reset All Defaults") {
-                shortcutManager.resetAllToDefaults()
-                shortcutDraftKeys.removeAll()
-                shortcutErrorMessage = nil
+            trailingActionRow {
+                Button("Reset All Defaults") {
+                    shortcutManager.resetAllToDefaults()
+                    shortcutDraftKeys.removeAll()
+                    shortcutErrorMessage = nil
+                }
             }
         }
     }
 
     private var advancedSettings: some View {
-        Form {
-            LabeledContent("Screen Recording", value: AdvancedPermissionStatusPresentation.screenRecording)
-            LabeledContent("Microphone", value: AdvancedPermissionStatusPresentation.microphone)
+        settingsPage(
+            title: "Advanced",
+            subtitle: "Check privacy access and reset local app state when something gets stuck."
+        ) {
+            settingsSection("Permissions") {
+                permissionRow(
+                    AdvancedPermissionStatusPresentation.screenRecordingRow(
+                        isAuthorized: permissionSnapshot.screenRecordingAuthorized
+                    ),
+                    action: openScreenRecordingSettings
+                )
+                Divider()
+                permissionRow(
+                    AdvancedPermissionStatusPresentation.microphoneRow(
+                        includeMicrophone: settingsStore.settings.includeMicrophone,
+                        authorization: permissionSnapshot.microphoneAuthorization
+                    ),
+                    action: openMicrophoneSettings
+                )
+                trailingActionRow {
+                    Button("Refresh Status") {
+                        refreshPermissionSnapshot()
+                    }
+                }
+            }
 
-            Button("Reset All Settings") {
-                settingsStore.reset()
-                shortcutManager.resetAllToDefaults()
+            settingsSection("Reset") {
+                Text("Reset settings and shortcut overrides back to their defaults.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                trailingActionRow {
+                    Button("Reset All Settings") {
+                        settingsStore.reset()
+                        shortcutManager.resetAllToDefaults()
+                        shortcutDraftKeys.removeAll()
+                        shortcutErrorMessage = nil
+                        refreshPermissionSnapshot()
+                    }
+                }
             }
         }
     }
@@ -194,7 +272,7 @@ struct SettingsView: View {
             }
         }
         .padding(.vertical, 4)
-        .frame(maxWidth: 480, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var implementedShortcutActions: [ShortcutAction] {
@@ -206,9 +284,10 @@ struct SettingsView: View {
         path: String,
         setting: WritableKeyPath<AppSettings, String>
     ) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
+                    .font(.subheadline.weight(.semibold))
                 Text(path)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -245,8 +324,10 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(action.title)
+                    .font(.subheadline.weight(.semibold))
                 Spacer()
                 Text(displayValue(for: action))
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
             }
 
@@ -272,6 +353,13 @@ struct SettingsView: View {
                     shortcutDraftKeys[action] = nil
                     shortcutErrorMessage = nil
                 }
+            }
+
+            if let registrationFailure = shortcutManager.registrationFailures[action] {
+                Text(registrationFailure)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.vertical, 4)
@@ -343,6 +431,122 @@ struct SettingsView: View {
         }
     }
 
+    private func settingsPage<Content: View>(
+        title: String,
+        subtitle: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.title3.weight(.semibold))
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                content()
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.top, 8)
+            .padding(.bottom, 12)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func settingsSection<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.headline)
+
+            content()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func trailingActionRow<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        HStack {
+            Spacer()
+            content()
+        }
+    }
+
+    private func permissionRow(
+        _ row: AdvancedPermissionStatusPresentation.Row,
+        action: @escaping () -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(row.title)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(row.status)
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(statusColor(for: row.tone).opacity(0.18), in: Capsule())
+                    .foregroundStyle(statusColor(for: row.tone))
+            }
+
+            Text(row.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let actionTitle = row.actionTitle {
+                Button(actionTitle) {
+                    action()
+                }
+            }
+        }
+    }
+
+    private func statusColor(for tone: AdvancedPermissionStatusPresentation.Tone) -> Color {
+        switch tone {
+        case .neutral:
+            return .secondary
+        case .positive:
+            return .green
+        case .caution:
+            return .orange
+        }
+    }
+
+    private func refreshPermissionSnapshot() {
+        permissionSnapshot = PermissionSnapshot.current(includeMicrophone: settingsStore.settings.includeMicrophone)
+    }
+
+    private func openScreenRecordingSettings() {
+        openSystemSettings(primaryURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+    }
+
+    private func openMicrophoneSettings() {
+        openSystemSettings(primaryURL: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+    }
+
+    private func openSystemSettings(primaryURL: String) {
+        let candidates: [URL?] = [
+            URL(string: primaryURL),
+            URL(string: "x-apple.systempreferences:com.apple.preference.security"),
+            URL(fileURLWithPath: "/System/Applications/System Settings.app")
+        ]
+
+        for candidate in candidates.compactMap({ $0 }) {
+            if NSWorkspace.shared.open(candidate) {
+                return
+            }
+        }
+    }
+
     private var recordingQualityBinding: Binding<AppSettings.RecordingQuality> {
         Binding(
             get: { settingsStore.settings.recordingQuality },
@@ -360,6 +564,37 @@ struct SettingsView: View {
         }
 
         return "Unassigned"
+    }
+}
+
+private struct PermissionSnapshot: Equatable {
+    let screenRecordingAuthorized: Bool
+    let microphoneAuthorization: AdvancedPermissionStatusPresentation.MicrophoneAuthorizationState
+
+    static func current(includeMicrophone: Bool) -> PermissionSnapshot {
+        PermissionSnapshot(
+            screenRecordingAuthorized: CGPreflightScreenCaptureAccess(),
+            microphoneAuthorization: includeMicrophone
+                ? mapMicrophoneStatus(AVCaptureDevice.authorizationStatus(for: .audio))
+                : .notDetermined
+        )
+    }
+
+    private static func mapMicrophoneStatus(
+        _ status: AVAuthorizationStatus
+    ) -> AdvancedPermissionStatusPresentation.MicrophoneAuthorizationState {
+        switch status {
+        case .notDetermined:
+            return .notDetermined
+        case .restricted:
+            return .restricted
+        case .denied:
+            return .denied
+        case .authorized:
+            return .authorized
+        @unknown default:
+            return .denied
+        }
     }
 }
 

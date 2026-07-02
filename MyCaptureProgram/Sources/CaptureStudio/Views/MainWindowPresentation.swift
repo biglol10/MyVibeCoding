@@ -78,7 +78,7 @@ public enum MainWindowPresentation {
                 detail: statusMessage ?? (document.isDirty ? "Press Save to write the file." : fileLocationText(for: document)),
                 systemImage: "record.circle",
                 canCopy: false,
-                canReveal: document.fileURL != nil,
+                canReveal: !document.isDirty && document.fileURL != nil,
                 canSave: canSave,
                 canDelete: true,
                 requiresSave: canSave

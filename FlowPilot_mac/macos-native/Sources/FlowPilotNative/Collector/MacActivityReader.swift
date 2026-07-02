@@ -11,6 +11,7 @@ struct MacActivityReader: ActivitySampleReader {
         let observedAt = Date()
         let frontmost = NSWorkspace.shared.frontmostApplication
         let observations = visibleWindowObservations(observedAt: observedAt, frontmost: frontmost)
+        let isIdle = currentIdleState()
 
         if let primary = choosePrimaryObservation(from: observations) {
             let browserTab = safariTabInfoIfAvailable(for: primary)
@@ -21,7 +22,7 @@ struct MacActivityReader: ActivitySampleReader {
                     processName: primary.processName,
                     windowTitle: browserTab?.title ?? primary.windowTitle ?? primary.appName,
                     domain: browserTab?.domain,
-                    isIdle: false
+                    isIdle: isIdle
                 ),
                 visibleWindows: observations.map { observation in
                     WindowObservationRecord(
@@ -51,10 +52,19 @@ struct MacActivityReader: ActivitySampleReader {
                 processName: processName,
                 windowTitle: appName,
                 domain: nil,
-                isIdle: false
+                isIdle: isIdle
             ),
             visibleWindows: []
         )
+    }
+
+    private func currentIdleState() -> Bool {
+        let anyInputEventType = CGEventType(rawValue: ~UInt32(0)) ?? .null
+        let secondsSinceLastInput = CGEventSource.secondsSinceLastEventType(
+            .combinedSessionState,
+            eventType: anyInputEventType
+        )
+        return IdleStateEvaluator.isIdle(secondsSinceLastInput: secondsSinceLastInput)
     }
 
     private func visibleWindowObservations(

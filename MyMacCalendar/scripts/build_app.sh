@@ -1,17 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="MyMacCalendar"
 BUILD_DIR=""
-LOCAL_APP_DIR="$ROOT_DIR/build/MyMacCalendar.app"
-DIST_DIR="$ROOT_DIR/dist"
-PACKAGE_DIR="$DIST_DIR/MyMacCalendar"
-PACKAGE_APP_DIR="$PACKAGE_DIR/MyMacCalendar.app"
-ZIP_PATH="$DIST_DIR/MyMacCalendar-test-build.zip"
-FIRST_RUN_SOURCE="$ROOT_DIR/scripts/first-run.command"
-INSTALLER_SOURCE="$ROOT_DIR/scripts/install.command"
-APP_DIR="$LOCAL_APP_DIR"
+APP_DIR="$ROOT_DIR/build/MyMacCalendar.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
@@ -30,7 +24,7 @@ if [[ ! -x "$EXECUTABLE" ]]; then
   exit 1
 fi
 
-rm -rf "$LOCAL_APP_DIR" "$PACKAGE_DIR" "$ZIP_PATH"
+rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR"
 mkdir -p "$RESOURCES_DIR"
 cp "$EXECUTABLE" "$MACOS_DIR/$APP_NAME"
@@ -77,13 +71,7 @@ PLIST
 
 /usr/bin/plutil -lint "$CONTENTS_DIR/Info.plist" >/dev/null
 printf "APPL????" > "$CONTENTS_DIR/PkgInfo"
-
-if command -v xattr >/dev/null 2>&1; then
-  xattr -cr "$APP_DIR" 2>/dev/null || true
-fi
-
 codesign --force --deep --sign - "$APP_DIR" >/dev/null
-codesign --verify --deep --strict "$APP_DIR"
 /usr/bin/touch "$APP_DIR"
 
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
@@ -91,40 +79,4 @@ if [[ -x "$LSREGISTER" ]]; then
   "$LSREGISTER" -f "$APP_DIR" >/dev/null 2>&1 || true
 fi
 
-mkdir -p "$PACKAGE_DIR"
-ditto "$APP_DIR" "$PACKAGE_APP_DIR"
-cp "$FIRST_RUN_SOURCE" "$PACKAGE_DIR/Open MyMacCalendar.command"
-cp "$INSTALLER_SOURCE" "$PACKAGE_DIR/Install MyMacCalendar.command"
-chmod +x "$PACKAGE_DIR/Open MyMacCalendar.command"
-chmod +x "$PACKAGE_DIR/Install MyMacCalendar.command"
-
-cat > "$PACKAGE_DIR/READ ME FIRST.txt" <<'README'
-MyMacCalendar test build
-
-If macOS says the app is damaged or should be moved to Trash, do not open
-MyMacCalendar.app directly.
-
-Install on your personal Mac:
-1. Open this folder after unzipping.
-2. Double-click "Install MyMacCalendar.command".
-3. The installer removes macOS download quarantine, copies MyMacCalendar.app to
-   /Applications, verifies the installed app, and opens it.
-
-Run without installing:
-Double-click "Open MyMacCalendar.command".
-
-For a double-clickable public release, build with a Developer ID Application
-certificate and Apple notarization credentials.
-README
-
-if command -v xattr >/dev/null 2>&1; then
-  xattr -cr "$PACKAGE_DIR" 2>/dev/null || true
-fi
-
-codesign --verify --deep --strict "$PACKAGE_APP_DIR"
-COPYFILE_DISABLE=1 ditto -c -k --norsrc --noextattr --noqtn --noacl --keepParent "$PACKAGE_DIR" "$ZIP_PATH"
-
 echo "$APP_DIR"
-echo "$PACKAGE_DIR"
-echo "$PACKAGE_APP_DIR"
-echo "$ZIP_PATH"

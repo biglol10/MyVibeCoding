@@ -48,8 +48,88 @@ public enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
 }
 
 public enum AdvancedPermissionStatusPresentation {
-    public static let screenRecording = "Checked automatically when you start capture or recording."
-    public static let microphone = "Checked automatically when microphone recording is enabled."
+    public enum Tone: String, Equatable, Sendable {
+        case neutral
+        case positive
+        case caution
+    }
+
+    public enum MicrophoneAuthorizationState: String, Equatable, Sendable {
+        case notDetermined
+        case restricted
+        case denied
+        case authorized
+    }
+
+    public struct Row: Equatable, Sendable {
+        public let title: String
+        public let status: String
+        public let detail: String
+        public let actionTitle: String?
+        public let tone: Tone
+    }
+
+    public static func screenRecordingRow(isAuthorized: Bool) -> Row {
+        if isAuthorized {
+            return Row(
+                title: "Screen Recording",
+                status: "Allowed",
+                detail: "CaptureStudio can capture screenshots and screen recordings.",
+                actionTitle: nil,
+                tone: .positive
+            )
+        }
+
+        return Row(
+            title: "Screen Recording",
+            status: "Action needed",
+            detail: "Turn on Screen & System Audio Recording for CaptureStudio, then reopen the app.",
+            actionTitle: "Open Privacy Settings",
+            tone: .caution
+        )
+    }
+
+    public static func microphoneRow(
+        includeMicrophone: Bool,
+        authorization: MicrophoneAuthorizationState
+    ) -> Row {
+        guard includeMicrophone else {
+            return Row(
+                title: "Microphone",
+                status: "Off",
+                detail: "Microphone access is only needed when Include microphone is turned on in the Record tab.",
+                actionTitle: nil,
+                tone: .neutral
+            )
+        }
+
+        switch authorization {
+        case .authorized:
+            return Row(
+                title: "Microphone",
+                status: "Allowed",
+                detail: "CaptureStudio can include microphone audio in recordings.",
+                actionTitle: nil,
+                tone: .positive
+            )
+        case .notDetermined:
+            return Row(
+                title: "Microphone",
+                status: "Needs approval",
+                detail: "macOS will ask for microphone access the first time you start a microphone recording.",
+                actionTitle: nil,
+                tone: .caution
+            )
+        case .restricted, .denied:
+            return Row(
+                title: "Microphone",
+                status: "Action needed",
+                detail: "Enable microphone access for CaptureStudio in System Settings before recording with mic input.",
+                actionTitle: "Open Privacy Settings",
+                tone: .caution
+            )
+        }
+    }
 }
 
 public enum ShortcutErrorPresentation {
@@ -139,8 +219,9 @@ public enum CaptureStudioGuidePresentation {
             title: "Editor",
             systemImage: "pencil.and.outline",
             items: [
-                "Use the toolbar to draw, add arrows, boxes, circles, text, blur, OCR, and redactions.",
+                "Use the toolbar to draw, add arrows, boxes, circles, text, OCR, and redactions.",
                 "Copy exports the edited image to clipboard; Save writes the edited result to disk.",
+                "Quick Redact finds OCR matches and adds redactions for them automatically.",
                 "Delete removes the current result from the app and moves saved files to Trash."
             ]
         ),

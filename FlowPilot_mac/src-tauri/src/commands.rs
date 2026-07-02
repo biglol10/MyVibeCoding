@@ -160,6 +160,40 @@ pub fn update_rule(
     update_rule_from_draft(&repository, &rule_id, draft)
 }
 
+#[tauri::command]
+pub fn set_rule_enabled(
+    state: State<AppState>,
+    rule_id: String,
+    is_enabled: bool,
+) -> Result<ClassificationRule, String> {
+    let repository = state
+        .repository
+        .lock()
+        .map_err(|_| "Repository lock poisoned.".to_string())?;
+
+    repository
+        .set_rule_enabled(&rule_id, is_enabled)
+        .map_err(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => "Rule not found.".to_string(),
+            other => other.to_string(),
+        })
+}
+
+#[tauri::command]
+pub fn delete_rule(state: State<AppState>, rule_id: String) -> Result<(), String> {
+    let repository = state
+        .repository
+        .lock()
+        .map_err(|_| "Repository lock poisoned.".to_string())?;
+
+    repository
+        .delete_user_rule(&rule_id)
+        .map_err(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => "Only user rules can be deleted.".to_string(),
+            other => other.to_string(),
+        })
+}
+
 fn create_rule_from_draft(
     repository: &Repository,
     draft: RuleDraftDto,

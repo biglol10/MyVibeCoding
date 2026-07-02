@@ -23,6 +23,7 @@ public enum FlowPilotDatabaseError: Error, LocalizedError {
 
 public final class FlowPilotDatabase {
     private static let windowObservationRetentionInterval: TimeInterval = 2 * 86_400
+    private static let browserEventRetentionInterval: TimeInterval = 7 * 86_400
     private let path: String
 
     public init(path: String) {
@@ -86,7 +87,25 @@ public final class FlowPilotDatabase {
     public func saveBrowserEvent(_ draft: BrowserEventDraft, occurredAt: Date = Date()) throws {
         try withConnection(flags: SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX) { db in
             try Self.initializeSchema(db: db)
+            try Self.pruneBrowserEvents(
+                db: db,
+                before: occurredAt.addingTimeInterval(-Self.browserEventRetentionInterval)
+            )
             try Self.saveBrowserEvent(db: db, draft: draft, occurredAt: occurredAt)
+        }
+    }
+
+    public func setRuleEnabled(id: String, isEnabled: Bool) throws {
+        try withConnection(flags: SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX) { db in
+            try Self.initializeSchema(db: db)
+            try Self.setRuleEnabled(db: db, id: id, isEnabled: isEnabled)
+        }
+    }
+
+    public func deleteUserRule(id: String) throws {
+        try withConnection(flags: SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX) { db in
+            try Self.initializeSchema(db: db)
+            try Self.deleteUserRule(db: db, id: id)
         }
     }
 
@@ -311,6 +330,21 @@ public final class FlowPilotDatabase {
         }
     }
 
+    private static func pruneBrowserEvents(db: OpaquePointer, before cutoff: Date) throws {
+        let sql = "DELETE FROM browser_events WHERE julianday(occurred_at) < julianday(?1)"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw FlowPilotDatabaseError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(statement) }
+
+        bindText(statement, index: 1, value: formatDate(cutoff))
+
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw FlowPilotDatabaseError.stepFailed(String(cString: sqlite3_errmsg(db)))
+        }
+    }
+
     private static func saveRule(db: OpaquePointer, rule: ClassificationRule) throws {
         let sql = """
             INSERT INTO classification_rules (
@@ -347,6 +381,44 @@ public final class FlowPilotDatabase {
 
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw FlowPilotDatabaseError.stepFailed(String(cString: sqlite3_errmsg(db)))
+        }
+    }
+
+    private static func setRuleEnabled(db: OpaquePointer, id: String, isEnabled: Bool) throws {
+        let sql = "UPDATE classification_rules SET is_enabled = ?1, updated_at = ?2 WHERE id = ?3"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw FlowPilotDatabaseError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_int64(statement, 1, isEnabled ? 1 : 0)
+        bindText(statement, index: 2, value: formatDate(Date()))
+        bindText(statement, index: 3, value: id)
+
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw FlowPilotDatabaseError.stepFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        guard sqlite3_changes(db) == 1 else {
+            throw FlowPilotDatabaseError.stepFailed("Rule not found.")
+        }
+    }
+
+    private static func deleteUserRule(db: OpaquePointer, id: String) throws {
+        let sql = "DELETE FROM classification_rules WHERE id = ?1 AND is_builtin = 0"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw FlowPilotDatabaseError.prepareFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(statement) }
+
+        bindText(statement, index: 1, value: id)
+
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw FlowPilotDatabaseError.stepFailed(String(cString: sqlite3_errmsg(db)))
+        }
+        guard sqlite3_changes(db) == 1 else {
+            throw FlowPilotDatabaseError.stepFailed("Only user rules can be deleted.")
         }
     }
 
@@ -504,7 +576,8 @@ public final class FlowPilotDatabase {
         ruleType: RuleType,
         pattern: String,
         category: ActivityCategory,
-        name: String? = nil
+        name: String? = nil,
+        isEnabled: Bool = true
     ) throws -> ClassificationRule {
         guard category != .uncategorized, category != .idle else {
             throw FlowPilotDatabaseError.stepFailed("Uncategorized or idle cannot be used for rules.")
@@ -521,7 +594,7 @@ public final class FlowPilotDatabase {
             category: category,
             priority: 100,
             isBuiltin: false,
-            isEnabled: true
+            isEnabled: isEnabled
         )
     }
 

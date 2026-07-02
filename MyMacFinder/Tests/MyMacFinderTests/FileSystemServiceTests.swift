@@ -92,6 +92,23 @@ final class FileSystemServiceTests: XCTestCase {
         XCTAssertEqual(entry.finderTags, [])
     }
 
+    func testSkipsEntryWhenMetadataCannotBeRead() async throws {
+        let readable = tempDirectory.appendingPathComponent("readable.txt")
+        let unreadableMetadata = tempDirectory.appendingPathComponent("unreadable-metadata.txt")
+        try "ok".write(to: readable, atomically: true, encoding: .utf8)
+        try "skip".write(to: unreadableMetadata, atomically: true, encoding: .utf8)
+        let service = FileSystemService(
+            resourceValueReader: ThrowingResourceValueReader(failingLastPathComponent: unreadableMetadata.lastPathComponent)
+        )
+
+        let entries = try await service.contentsOfDirectory(
+            at: tempDirectory,
+            options: DirectoryReadOptions(showHiddenFiles: false)
+        )
+
+        XCTAssertEqual(entries.map(\.name), ["readable.txt"])
+    }
+
     func testFolderSymlinkIsDirectoryLike() async throws {
         let target = tempDirectory.appendingPathComponent("Target", isDirectory: true)
         let link = tempDirectory.appendingPathComponent("Target Link")
@@ -159,4 +176,15 @@ private struct FailingIfCalledFinderTagService: FinderTagServicing {
     }
 
     func setTags(_ tags: [FinderTag], for url: URL) throws {}
+}
+
+private struct ThrowingResourceValueReader: FileResourceValueReading {
+    var failingLastPathComponent: String
+
+    func resourceValues(for url: URL, keys: Set<URLResourceKey>) throws -> URLResourceValues {
+        if url.lastPathComponent == failingLastPathComponent {
+            throw ExplorerError.readFailed("metadata failed")
+        }
+        return try url.resourceValues(forKeys: keys)
+    }
 }

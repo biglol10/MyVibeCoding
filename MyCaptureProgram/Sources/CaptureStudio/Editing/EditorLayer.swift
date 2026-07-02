@@ -163,6 +163,27 @@ public enum EditorLayer: Codable, Equatable, Identifiable, Sendable {
         return nil
     }
 
+    public var textFontSize: CGFloat? {
+        if case .text(let layer) = self {
+            return layer.fontSize
+        }
+
+        return nil
+    }
+
+    public var lineWidth: CGFloat? {
+        switch self {
+        case .freehand(let layer), .highlighter(let layer):
+            return layer.style.lineWidth
+        case .arrow(let layer):
+            return layer.style.lineWidth
+        case .rectangle(let layer), .ellipse(let layer):
+            return layer.style.lineWidth
+        case .text, .redaction:
+            return nil
+        }
+    }
+
     public mutating func moveBy(dx: CGFloat, dy: CGFloat) {
         switch self {
         case .freehand(var layer):
@@ -205,6 +226,46 @@ public enum EditorLayer: Codable, Equatable, Identifiable, Sendable {
             layer.frame = frame.standardized
             self = .redaction(layer)
         case .freehand, .highlighter, .arrow:
+            return
+        }
+    }
+
+    public mutating func setTextContent(_ text: String) {
+        guard case .text(var layer) = self else {
+            return
+        }
+
+        layer.text = text
+        self = .text(layer)
+    }
+
+    public mutating func setTextFontSize(_ size: CGFloat) {
+        guard case .text(var layer) = self else {
+            return
+        }
+
+        layer.fontSize = size
+        self = .text(layer)
+    }
+
+    public mutating func setLineWidth(_ width: CGFloat) {
+        switch self {
+        case .freehand(var layer):
+            layer.style.lineWidth = width
+            self = .freehand(layer)
+        case .highlighter(var layer):
+            layer.style.lineWidth = width
+            self = .highlighter(layer)
+        case .arrow(var layer):
+            layer.style.lineWidth = width
+            self = .arrow(layer)
+        case .rectangle(var layer):
+            layer.style.lineWidth = width
+            self = .rectangle(layer)
+        case .ellipse(var layer):
+            layer.style.lineWidth = width
+            self = .ellipse(layer)
+        case .text, .redaction:
             return
         }
     }

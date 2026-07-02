@@ -18,6 +18,7 @@ public struct EditorDocument: Equatable, Identifiable {
     public var ocrResult: OCRResult?
     public var undoStack: [EditorSnapshot]
     public var redoStack: [EditorSnapshot]
+    public var savedSnapshot: EditorSnapshot?
     public var isDirty: Bool
 
     public init(
@@ -33,6 +34,7 @@ public struct EditorDocument: Equatable, Identifiable {
         ocrResult: OCRResult? = nil,
         undoStack: [EditorSnapshot] = [],
         redoStack: [EditorSnapshot] = [],
+        savedSnapshot: EditorSnapshot? = nil,
         isDirty: Bool = true
     ) {
         self.id = id
@@ -47,6 +49,12 @@ public struct EditorDocument: Equatable, Identifiable {
         self.ocrResult = ocrResult
         self.undoStack = undoStack
         self.redoStack = redoStack
+        self.savedSnapshot = savedSnapshot ?? Self.defaultSavedSnapshot(
+            fileURL: fileURL,
+            layers: layers,
+            selectedLayerID: selectedLayerID,
+            isDirty: isDirty
+        )
         self.isDirty = isDirty
     }
 
@@ -56,5 +64,31 @@ public struct EditorDocument: Equatable, Identifiable {
 
     public var currentImageData: Data? {
         renderedImageData ?? data ?? baseImageData
+    }
+
+    public var currentSnapshot: EditorSnapshot {
+        EditorSnapshot(layers: layers, selectedLayerID: selectedLayerID)
+    }
+
+    public mutating func refreshDirtyState() {
+        guard let savedSnapshot else {
+            isDirty = true
+            return
+        }
+
+        isDirty = layers != savedSnapshot.layers
+    }
+
+    private static func defaultSavedSnapshot(
+        fileURL: URL?,
+        layers: [EditorLayer],
+        selectedLayerID: UUID?,
+        isDirty: Bool
+    ) -> EditorSnapshot? {
+        guard fileURL != nil, !isDirty else {
+            return nil
+        }
+
+        return EditorSnapshot(layers: layers, selectedLayerID: selectedLayerID)
     }
 }

@@ -25,6 +25,7 @@ struct MainWindowView: View {
                     selectedDate: $selectedDate,
                     events: events,
                     holidays: holidays,
+                    density: calendarDensity,
                     onCreateEvent: { date in
                         selectedDate = date
                         activeSheet = .newEvent(date)
@@ -77,6 +78,12 @@ struct MainWindowView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .openSettingsSheet)) { _ in
             activeSheet = .settings
+        }
+        .onAppear {
+            notifyAppSettingsChanged()
+        }
+        .onChange(of: appSettingsRefreshToken) {
+            notifyAppSettingsChanged()
         }
     }
 
@@ -154,6 +161,30 @@ struct MainWindowView: View {
         return formatter.string(from: displayedMonth)
     }
 
+    private var calendarDensity: CalendarDensityMode {
+        CalendarDensityMode(rawValue: settingsRows.first?.calendarDensity ?? "comfortable") ?? .comfortable
+    }
+
+    private var appSettingsRefreshToken: String {
+        guard let settings = settingsRows.first else { return "default" }
+        return [
+            settings.launchAtLogin.description,
+            settings.showMenuBar.description,
+            settings.calendarDensity
+        ].joined(separator: "|")
+    }
+
+    private func notifyAppSettingsChanged() {
+        let settings = settingsRows.first
+        NotificationCenter.default.post(
+            name: .appSettingsDidChange,
+            object: nil,
+            userInfo: [
+                "showMenuBar": settings?.showMenuBar ?? true
+            ]
+        )
+    }
+
     private var widgetRefreshToken: String {
         let settingsToken: String
         if let settings = settingsRows.first {
@@ -161,7 +192,8 @@ struct MainWindowView: View {
                 settings.floatingWidgetEnabled.description,
                 settings.floatingWidgetAlwaysOnTop.description,
                 String(settings.floatingWidgetOpacity),
-                String(settings.floatingWidgetVisibleCount)
+                String(settings.floatingWidgetVisibleCount),
+                settings.calendarDensity
             ].joined(separator: "|")
         } else {
             settingsToken = "default"

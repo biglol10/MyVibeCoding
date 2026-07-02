@@ -7,6 +7,7 @@ struct EditorCanvasView: View {
     @State private var draftStart: CGPoint?
     @State private var draftEnd: CGPoint?
     @State private var draftPoints: [CGPoint] = []
+    @State private var isDraggingSelectedLayer = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -214,7 +215,22 @@ struct EditorCanvasView: View {
                 case .rectangle, .ellipse, .arrow, .redaction:
                     draftStart = geometry.imagePoint(forViewPoint: value.startLocation)
                     draftEnd = point
-                case .select, .text, .ocr:
+                case .select:
+                    if !isDraggingSelectedLayer,
+                       isPointInsideSelectedLayer(geometry.imagePoint(forViewPoint: value.startLocation)) {
+                        isDraggingSelectedLayer = true
+                        editorViewModel.beginSelectedLayerDrag()
+                    }
+
+                    if isDraggingSelectedLayer {
+                        editorViewModel.updateSelectedLayerDrag(
+                            translation: CGSize(
+                                width: point.x - geometry.imagePoint(forViewPoint: value.startLocation).x,
+                                height: point.y - geometry.imagePoint(forViewPoint: value.startLocation).y
+                            )
+                        )
+                    }
+                case .text, .ocr:
                     break
                 }
             }
@@ -229,7 +245,11 @@ struct EditorCanvasView: View {
                 case .text:
                     editorViewModel.addTextLayer(at: end)
                 case .select:
-                    selectLayer(at: end)
+                    if isDraggingSelectedLayer {
+                        editorViewModel.endSelectedLayerDrag()
+                    } else {
+                        selectLayer(at: end)
+                    }
                 case .ocr:
                     break
                 }
@@ -244,10 +264,21 @@ struct EditorCanvasView: View {
         editorViewModel.selectLayer(id: selected?.id)
     }
 
+    private func isPointInsideSelectedLayer(_ point: CGPoint) -> Bool {
+        guard let selectedLayerID = document.selectedLayerID,
+              let selectedLayer = document.layers.first(where: { $0.id == selectedLayerID })
+        else {
+            return false
+        }
+
+        return selectedLayer.frame.insetBy(dx: -4, dy: -4).contains(point)
+    }
+
     private func clearDraft() {
         draftStart = nil
         draftEnd = nil
         draftPoints = []
+        isDraggingSelectedLayer = false
     }
 }
 

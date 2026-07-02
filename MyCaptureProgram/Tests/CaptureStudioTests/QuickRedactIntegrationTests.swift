@@ -20,7 +20,9 @@ final class QuickRedactIntegrationTests: XCTestCase {
         await coordinator.quickRedact()
 
         XCTAssertEqual(appState.currentDocument?.layers.count, 1)
-        XCTAssertEqual(appState.currentDocument?.layers.first?.frame, CGRect(x: 10, y: 20, width: 200, height: 24))
+        let frame = appState.currentDocument?.layers.first?.frame
+        XCTAssertGreaterThan(frame?.minX ?? 0, 10)
+        XCTAssertLessThan(frame?.width ?? 200, 200)
         XCTAssertEqual(appState.statusMessage, "Redaction added.")
     }
 

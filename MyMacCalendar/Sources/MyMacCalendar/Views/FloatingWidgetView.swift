@@ -6,6 +6,7 @@ struct FloatingWidgetView: View {
     let occurrences: [EventOccurrence]
     let onSelect: (EventOccurrence) -> Void
     let onShowAll: () -> Void
+    @State private var now = Date()
 
     var body: some View {
         let visibleOccurrences = Array(occurrences.prefix(FloatingWidgetConstants.visibleOccurrenceLimit))
@@ -26,7 +27,7 @@ struct FloatingWidgetView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(visibleOccurrences, id: \.eventID) { occurrence in
+                ForEach(visibleOccurrences, id: \.occurrenceID) { occurrence in
                     Button { onSelect(occurrence) } label: {
                         HStack(spacing: 10) {
                             RoundedRectangle(cornerRadius: 2)
@@ -84,10 +85,13 @@ struct FloatingWidgetView: View {
                 .frame(width: FloatingWidgetConstants.width, height: FloatingWidgetConstants.dragHandleHeight)
         }
         .shadow(color: .black.opacity(0.24), radius: 16, x: 0, y: 8)
+        .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { currentDate in
+            now = currentDate
+        }
     }
 
     private func isToday(_ occurrence: EventOccurrence) -> Bool {
-        Calendar.current.isDateInToday(occurrence.startDate)
+        Calendar.current.isDate(occurrence.startDate, inSameDayAs: now)
     }
 }
 

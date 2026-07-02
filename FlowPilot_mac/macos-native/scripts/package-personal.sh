@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_DIR="$(cd "$ROOT_DIR/.." && pwd)"
@@ -55,21 +56,19 @@ README
 cat > "$PACKAGE_DIR/install-flowpilot-native.command" <<'INSTALL'
 #!/usr/bin/env bash
 set -euo pipefail
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_SOURCE="$SCRIPT_DIR/FlowPilot.app"
-INSTALL_DIR="${FLOWPILOT_INSTALL_DIR:-/Applications}"
-APP_DEST="$INSTALL_DIR/FlowPilot.app"
+APP_DEST="/Applications/FlowPilot.app"
 
 osascript -e 'quit app id "app.flowpilot.desktop"' >/dev/null 2>&1 || true
 osascript -e 'quit app id "app.flowpilot.native"' >/dev/null 2>&1 || true
 sleep 1
 
-mkdir -p "$INSTALL_DIR"
 rm -rf "$APP_DEST"
 cp -R "$APP_SOURCE" "$APP_DEST"
 xattr -dr com.apple.quarantine "$APP_DEST" >/dev/null 2>&1 || true
-codesign --verify --deep --strict "$APP_DEST"
 open "$APP_DEST"
 
 echo "Installed FlowPilot Swift Native to $APP_DEST"

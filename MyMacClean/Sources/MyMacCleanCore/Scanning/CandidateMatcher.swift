@@ -9,6 +9,15 @@ public struct CandidateMatch: Equatable, Sendable {
 }
 
 public struct CandidateMatcher: Sendable {
+    private static let sharedVendorFolderNames: Set<String> = [
+        "adobe",
+        "autodesk",
+        "google",
+        "jetbrains",
+        "microsoft",
+        "oracle"
+    ]
+
     public init() {}
 
     public func match(url: URL, app: InstalledApp, kind: RelatedFileKind) -> CandidateMatch? {
@@ -34,12 +43,28 @@ public struct CandidateMatcher: Sendable {
         let candidateTokens = tokenSequence(from: normalizedPath)
         let candidateCompact = compactIdentifier(from: normalizedPath)
         let nameSequences = [app.displayName, app.executableName ?? ""]
-            .map(tokenSequence(from:))
-            .filter { !$0.isEmpty }
+            .map { (name: $0, tokens: tokenSequence(from: $0)) }
+            .filter { !$0.tokens.isEmpty }
 
-        if nameSequences.contains(where: { sequence in
-            candidateTokens.containsContiguous(sequence) || compactNameMatch(sequence, in: candidateCompact)
+        if let matchedName = nameSequences.first(where: { sequence in
+            candidateTokens.containsContiguous(sequence.tokens) || compactNameMatch(sequence.tokens, in: candidateCompact)
         }) {
+            if isKnownSharedVendorFolder(normalizedPath, matchedNameTokens: matchedName.tokens) {
+                let evidence = MatchEvidence(
+                    type: .weakName,
+                    matchedValue: matchedName.name,
+                    sourcePath: url.path,
+                    strength: .weak
+                )
+                return CandidateMatch(
+                    matchReason: "known shared vendor folder name",
+                    confidence: .low,
+                    evidence: [evidence],
+                    defaultSelected: false,
+                    requiresManualReview: true
+                )
+            }
+
             let evidence = MatchEvidence(
                 type: .exactAppName,
                 matchedValue: app.displayName,
@@ -70,6 +95,12 @@ public struct CandidateMatcher: Sendable {
         guard sequence.count > 1 else { return false }
         let compactName = sequence.joined()
         return compactName.count >= 6 && candidateCompact.contains(compactName)
+    }
+
+    private func isKnownSharedVendorFolder(_ normalizedPath: String, matchedNameTokens: [String]) -> Bool {
+        matchedNameTokens.count == 1
+            && CandidateMatcher.sharedVendorFolderNames.contains(matchedNameTokens[0])
+            && tokenSequence(from: normalizedPath) == matchedNameTokens
     }
 
     private func compactIdentifier(from value: String) -> String {

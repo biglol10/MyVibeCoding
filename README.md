@@ -10,7 +10,7 @@
 | MyMacClean | macOS 앱 삭제와 잔여 파일 정리를 돕는 SwiftUI 유틸리티 | [MyMacClean](./MyMacClean) | [MyMacClean-test-build.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacClean/MyMacClean-test-build.zip) |
 | MyMacFinder | 듀얼 패널, 경로 명령, 강화된 인스펙터 미리보기를 갖춘 SwiftUI/AppKit 로컬 파일 관리자 | [MyMacFinder](./MyMacFinder) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacFinder/MyMacFinder-personal-mac.zip) |
 | MyMacStats | CPU, RAM, Disk, Network, Battery, Processes 상태와 원인 앱을 보여주는 SwiftUI 시스템 모니터 | [MyMacStats](./MyMacStats) | [MyMacStats-test-build.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacStats/MyMacStats-test-build.zip) |
-| MyMacCalendar | 로컬 우선 일정 관리, 반복 일정, 휴일, 메뉴바/플로팅 위젯을 제공하는 SwiftUI 캘린더 | [MyMacCalendar](./MyMacCalendar) | [테스트 빌드 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacCalendar/MyMacCalendar-test-build.zip), [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacCalendar/MyMacCalendar-personal-mac.zip) |
+| MyMacCalendar | 로컬 우선 일정 관리, 반복 일정, 휴일, 메뉴바/플로팅 위젯을 제공하는 SwiftUI 캘린더 | [MyMacCalendar](./MyMacCalendar) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacCalendar/MyMacCalendar-personal-mac.zip), [test-build 호환 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacCalendar/MyMacCalendar-test-build.zip) |
 | FlowPilot_mac | SwiftUI 네이티브 macOS 활동 추적 앱, 기존 Tauri/Windows 빌드 포함 | [FlowPilot_mac](./FlowPilot_mac) | [Swift Native zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.zip), [Swift Native DMG](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.dmg), [Tauri macOS zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_personal_mac_arm64.zip), [Tauri macOS DMG](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_0.1.0_aarch64.dmg), [Windows setup](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_0.1.0_x64-setup.exe), [Windows portable](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot-0.1.0-portable.zip), [Windows exe](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/flowpilot.exe) |
 
 ## 클론
@@ -101,6 +101,14 @@ npm run tauri -- dev
 
 ## 다운로드 파일 관리
 
-다운로드 파일은 `downloads/` 아래에 함께 커밋합니다. 새 빌드를 만들면 같은 파일명으로 교체한 뒤 커밋/푸시하면 README의 GitHub raw 링크가 그대로 최신 파일을 가리킵니다. MyMacFinder 개인 설치 zip은 `MyMacFinder/scripts/package_personal.sh`로 생성한 뒤 `downloads/MyMacFinder/MyMacFinder-personal-mac.zip`으로 복사합니다.
+다운로드 파일은 `downloads/` 아래에 함께 커밋합니다. 새 빌드를 만들면 같은 파일명으로 교체한 뒤 커밋/푸시하면 README의 GitHub raw 링크가 그대로 최신 파일을 가리킵니다.
 
-macOS 앱을 다른 Mac에서 앱 더블클릭만으로 실행할 수 있게 공개 배포하려면 Apple Developer ID 서명과 notarization이 필요합니다. 개인 Mac에 설치하는 용도라면 각 앱 zip에 포함된 설치 스크립트를 사용하세요. CaptureStudio 개인용 zip은 `MyCaptureProgram/scripts/package_personal.sh`, MyMacFinder 개인용 zip은 `MyMacFinder/scripts/package_personal.sh`, MyMacStats 개인용 zip은 `MyMacStats/scripts/build-app-bundle.sh --deploy-personal`, MyMacCalendar 테스트 zip은 `MyMacCalendar/scripts/build_app.sh`, MyMacCalendar 개인용 zip은 `MyMacCalendar/scripts/package_personal.sh`, FlowPilot Swift Native 개인용 zip은 `FlowPilot_mac`에서 `npm run package:macos:native`, FlowPilot Tauri 개인용 zip은 `npm run package:macos:personal`로 만들 수 있습니다.
+macOS 앱을 다른 Mac에서 앱 더블클릭만으로 실행할 수 있게 공개 배포하려면 Apple Developer ID 서명과 notarization이 필요합니다. 개인 Mac에 설치하는 용도라면 각 앱 zip에 포함된 설치 스크립트를 사용하세요.
+
+- CaptureStudio 개인용 zip: `MyCaptureProgram/scripts/package_personal.sh`
+- MyMacClean 테스트/개인 설치 zip: `MyMacClean/scripts/build-app-bundle.sh`
+- MyMacFinder 개인용 zip: `MyMacFinder/scripts/package_personal.sh`
+- MyMacStats 개인용 zip: `MyMacStats/scripts/build-app-bundle.sh --deploy-personal`
+- MyMacCalendar 개인용 zip: `MyMacCalendar/scripts/package_personal.sh`. 기존 `MyMacCalendar-test-build.zip` 링크는 같은 개인 설치 패키지로 갱신합니다.
+- FlowPilot Swift Native 개인용 zip/DMG: `FlowPilot_mac`에서 `npm run package:macos:native`, `npm run package:macos:native:dmg`
+- FlowPilot Tauri legacy 개인용 zip: `FlowPilot_mac`에서 `npm run package:macos:personal`

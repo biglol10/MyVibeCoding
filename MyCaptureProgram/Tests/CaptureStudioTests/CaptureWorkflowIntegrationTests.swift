@@ -116,7 +116,7 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
             settings.automaticallySaveRecordings = true
             settings.countdownSeconds = 0
             settings.recordingDurationSeconds = 1
-            settings.includeSystemAudio = false
+            settings.includeSystemAudio = true
             settings.includeMicrophone = false
             settings.showCursorInRecordings = false
             settings.recordingQuality = .standard
@@ -181,6 +181,38 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
         XCTAssertFalse(appState.currentDocument?.isDirty ?? true)
     }
 
+    func testActualRecordingWithCountdownKeepsMediaDurationNearRecordingDuration() async throws {
+        try Self.skipUnlessIntegrationIsEnabled()
+        let appState = AppState(captureMode: .record)
+        let settingsStore = SettingsStore(defaults: Self.isolatedDefaults("actualRecordingCountdownDuration"))
+        settingsStore.update { settings in
+            settings.automaticallySaveRecordings = false
+            settings.countdownSeconds = 3
+            settings.recordingDurationSeconds = 5
+            settings.includeSystemAudio = false
+            settings.includeMicrophone = false
+            settings.showCursorInRecordings = true
+            settings.recordingQuality = .standard
+        }
+        let selection = try await Self.mediumDisplaySelection()
+        let coordinator = try await Self.makeCoordinator(
+            appState: appState,
+            settingsStore: settingsStore,
+            selection: selection
+        )
+
+        await coordinator.startNewCapture()
+
+        let temporaryRecordingURL = try XCTUnwrap(appState.currentDocument?.fileURL)
+        defer { try? FileManager.default.removeItem(at: temporaryRecordingURL) }
+
+        try await Self.assertVideo(at: temporaryRecordingURL, matches: selection)
+        let asset = AVURLAsset(url: temporaryRecordingURL)
+        let duration = try await asset.load(.duration).seconds
+        XCTAssertGreaterThanOrEqual(duration, 4.5)
+        XCTAssertLessThanOrEqual(duration, 6.5)
+    }
+
     private static func makeCoordinator(
         appState: AppState,
         settingsStore: SettingsStore,
@@ -217,6 +249,21 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
             displayID: display.displayID,
             screenFrame: screenFrame,
             rect: CGRect(x: 0, y: 0, width: 160, height: 120),
+            scale: scale
+        )
+    }
+
+    private static func mediumDisplaySelection() async throws -> CaptureSelection {
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        let display = try XCTUnwrap(content.displays.first)
+        let screenFrame = CGRect(x: 0, y: 0, width: display.width, height: display.height)
+        let scale = NSScreen.screens.first { screen in
+            screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID == display.displayID
+        }?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
+        return CaptureSelection(
+            displayID: display.displayID,
+            screenFrame: screenFrame,
+            rect: CGRect(x: 0, y: 0, width: min(500, display.width), height: min(320, display.height)),
             scale: scale
         )
     }

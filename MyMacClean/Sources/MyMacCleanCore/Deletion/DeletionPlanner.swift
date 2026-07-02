@@ -1,7 +1,14 @@
 import Foundation
 
-public enum DeletionPlannerError: Error, Equatable {
+public enum DeletionPlannerError: LocalizedError, Equatable {
     case emptySelection
+
+    public var errorDescription: String? {
+        switch self {
+        case .emptySelection:
+            "Select at least one deletable item."
+        }
+    }
 }
 
 public struct DeletionPlanner: Sendable {

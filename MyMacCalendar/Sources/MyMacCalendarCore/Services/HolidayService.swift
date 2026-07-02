@@ -1,6 +1,6 @@
 import Foundation
 
-public struct HolidayImport: Equatable {
+public struct HolidayImport: Equatable, Sendable {
     public let date: Date
     public let title: String
     public let providerKey: String

@@ -16,14 +16,30 @@ public struct RecordingResult: Equatable, Sendable {
 @MainActor
 public protocol RecordingServicing {
     func recordScreen(selection: CaptureSelection, to outputURL: URL, settings: AppSettings) async throws -> RecordingResult
+    func stopRecording() async
 }
 
-public struct ScreenCaptureKitRecordingService: RecordingServicing {
+public extension RecordingServicing {
+    func stopRecording() async {}
+}
+
+@MainActor
+public final class ScreenCaptureKitRecordingService: RecordingServicing {
+    public static let shared = ScreenCaptureKitRecordingService()
+
+    private var activeRecorder: ScreenRecorder?
+
     public init() {}
 
     public func recordScreen(selection: CaptureSelection, to outputURL: URL, settings: AppSettings) async throws -> RecordingResult {
         let recorder = ScreenRecorder(selection: selection, outputURL: outputURL, settings: settings)
+        activeRecorder = recorder
+        defer { activeRecorder = nil }
         return try await recorder.record()
+    }
+
+    public func stopRecording() async {
+        await activeRecorder?.stop()
     }
 }
 
@@ -38,7 +54,9 @@ private final class ScreenRecorder: NSObject, @preconcurrency SCStreamDelegate, 
     private var microphoneInput: AVAssetWriterInput?
     private var stream: SCStream?
     private var firstVideoTime: CMTime?
+    private var lastVideoTime: CMTime?
     private var finishContinuation: CheckedContinuation<RecordingResult, Error>?
+    private var recordingTask: Task<Void, Never>?
     private var didFinish = false
 
     init(selection: CaptureSelection, outputURL: URL, settings: AppSettings) {
@@ -133,12 +151,14 @@ private final class ScreenRecorder: NSObject, @preconcurrency SCStreamDelegate, 
         let durationSeconds = settings.recordingDurationSeconds
         return try await withCheckedThrowingContinuation { continuation in
             finishContinuation = continuation
-            Task { @MainActor in
+            recordingTask = Task { @MainActor in
                 do {
                     try await stream.startCapture()
                     try await Task.sleep(nanoseconds: UInt64(durationSeconds) * 1_000_000_000)
                     try await stream.stopCapture()
                     finishIfNeeded()
+                } catch is CancellationError {
+                    return
                 } catch {
                     finishWithError(error)
                 }
@@ -146,8 +166,27 @@ private final class ScreenRecorder: NSObject, @preconcurrency SCStreamDelegate, 
         }
     }
 
+    func stop() async {
+        guard !didFinish else {
+            return
+        }
+
+        recordingTask?.cancel()
+        do {
+            try await stream?.stopCapture()
+            finishIfNeeded()
+        } catch {
+            finishWithError(error)
+        }
+    }
+
     func stream(_ stream: SCStream, didStopWithError error: any Error) {
-        finishWithError(RecordingError.stoppedByUser)
+        if isUserStoppedStreamError(error) {
+            finishIfNeeded()
+            return
+        }
+
+        finishWithError(RecordingError.streamFailed(error.localizedDescription))
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
@@ -184,6 +223,7 @@ private final class ScreenRecorder: NSObject, @preconcurrency SCStreamDelegate, 
 
         if videoInput.isReadyForMoreMediaData {
             videoInput.append(sampleBuffer)
+            lastVideoTime = presentationTime
         }
     }
 
@@ -218,6 +258,16 @@ private final class ScreenRecorder: NSObject, @preconcurrency SCStreamDelegate, 
             return
         }
 
+        if let lastVideoTime {
+            writer.endSession(atSourceTime: lastVideoTime)
+        } else if let firstVideoTime {
+            let requestedDuration = CMTime(
+                seconds: Double(settings.recordingDurationSeconds),
+                preferredTimescale: 600
+            )
+            writer.endSession(atSourceTime: firstVideoTime + requestedDuration)
+        }
+
         writer.finishWriting { [outputURL, finishContinuation] in
             if writer.status == .completed {
                 finishContinuation?.resume(returning: RecordingResult(fileURL: outputURL))
@@ -238,6 +288,12 @@ private final class ScreenRecorder: NSObject, @preconcurrency SCStreamDelegate, 
         finishContinuation?.resume(throwing: error)
         finishContinuation = nil
     }
+
+    private func isUserStoppedStreamError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == SCStreamErrorDomain
+            && nsError.code == SCStreamError.Code.userStopped.rawValue
+    }
 }
 
 public enum RecordingError: LocalizedError, Equatable {
@@ -247,6 +303,7 @@ public enum RecordingError: LocalizedError, Equatable {
     case noVideoFramesCaptured
     case writerFailed
     case stoppedByUser
+    case streamFailed(String)
 
     public var errorDescription: String? {
         switch self {
@@ -262,6 +319,8 @@ public enum RecordingError: LocalizedError, Equatable {
             return "The recording writer failed."
         case .stoppedByUser:
             return "The recording was stopped."
+        case .streamFailed(let reason):
+            return "Recording stopped unexpectedly: \(reason)"
         }
     }
 }

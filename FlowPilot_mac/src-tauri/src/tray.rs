@@ -30,7 +30,13 @@ struct SummaryLines {
 
 pub fn setup_tray(app: &mut App) -> tauri::Result<()> {
     let summary_items = TraySummaryItems {
-        total: MenuItem::with_id(app, "summary_total", "오늘 기록: 계산 중", false, None::<&str>)?,
+        total: MenuItem::with_id(
+            app,
+            "summary_total",
+            "오늘 기록: 계산 중",
+            false,
+            None::<&str>,
+        )?,
         productive: MenuItem::with_id(
             app,
             "summary_productive",
@@ -186,21 +192,16 @@ fn read_today_summary(app: &AppHandle) -> Result<(TodaySummaryDto, String), Stri
 }
 
 fn start_tray_summary_refresh_loop(app: AppHandle, items: TraySummaryItems) {
-    tauri::async_runtime::spawn_blocking(move || {
-        loop {
-            std::thread::sleep(std::time::Duration::from_secs(60));
-            refresh_tray_summary(&app, &items);
-        }
+    tauri::async_runtime::spawn_blocking(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(60));
+        refresh_tray_summary(&app, &items);
     });
 }
 
 fn build_summary_lines(summary: &TodaySummaryDto, status: &str) -> SummaryLines {
     SummaryLines {
         total: format!("오늘 기록: {}", format_duration_ko(summary.tracked_seconds)),
-        productive: format!(
-            "생산적: {}",
-            format_duration_ko(summary.productive_seconds)
-        ),
+        productive: format!("생산적: {}", format_duration_ko(summary.productive_seconds)),
         unproductive: format!(
             "비생산: {}",
             format_duration_ko(summary.unproductive_seconds)

@@ -5,6 +5,17 @@ import XCTest
 final class CalendarWorkflowE2ETests: XCTestCase {
     private let calendar = Calendar(identifier: .gregorian)
 
+    func testNotificationOffsetsUsePrimitiveStorageForSwiftDataSchema() throws {
+        let source = try String(contentsOfFile: sourcePath("Sources/MyMacCalendarCore/Models/CalendarEvent.swift"), encoding: .utf8)
+
+        XCTAssertNil(
+            source.range(of: #"public\s+var\s+notificationOffsetsDays:\s*\[Int\]\s*$"#, options: .regularExpression),
+            "SwiftData should not persist Array<Int> directly because CoreData logs materialization faults for Array<Int> attributes."
+        )
+        XCTAssertTrue(source.contains("public var notificationOffsetsRaw: String"))
+        XCTAssertTrue(source.contains("public var notificationOffsetsDays: [Int] {"))
+    }
+
     func testCreateEditAndDeleteEventWorkflow() throws {
         let container = try CalendarStore.makeInMemoryContainer()
         let context = ModelContext(container)
@@ -176,5 +187,15 @@ final class CalendarWorkflowE2ETests: XCTestCase {
             .filter { calendar.isDate($0.startDate, inSameDayAs: date) }
             .map(\.title)
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private func sourcePath(_ relativePath: String) -> String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        return testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(relativePath)
+            .path
     }
 }

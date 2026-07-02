@@ -33,8 +33,8 @@ open /path/to/FlowPilot.app
 예를 들어 다운로드 폴더에서 zip 압축을 풀었다면 다음처럼 실행할 수 있습니다.
 
 ```bash
-xattr -dr com.apple.quarantine ~/Downloads/FlowPilot_personal_mac_arm64/App/FlowPilot.app
-open ~/Downloads/FlowPilot_personal_mac_arm64/App/FlowPilot.app
+xattr -dr com.apple.quarantine ~/Downloads/FlowPilot_native_mac_arm64/FlowPilot.app
+open ~/Downloads/FlowPilot_native_mac_arm64/FlowPilot.app
 ```
 
 방법 3: 소스에서 직접 실행

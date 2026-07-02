@@ -4,25 +4,47 @@ import SwiftUI
 @MainActor
 public final class EditorViewModel: ObservableObject {
     private let appState: AppState
+    private var dragBaseline: EditorSnapshot?
 
     @Published public var activeTool: EditorTool = .select
     @Published public var style = LayerStyle(strokeColor: .red, fillColor: .clear, lineWidth: 3)
     @Published public var textSize: CGFloat = 20
-    @Published public var blurRadius: CGFloat = 8
 
     public init(appState: AppState) {
         self.appState = appState
     }
 
+    public var selectedLayer: EditorLayer? {
+        guard let document = appState.currentDocument,
+              let selectedLayerID = document.selectedLayerID
+        else {
+            return nil
+        }
+
+        return document.layers.first(where: { $0.id == selectedLayerID })
+    }
+
+    public var editableText: String {
+        selectedLayer?.textContent ?? ""
+    }
+
+    public var displayedTextSize: CGFloat {
+        selectedLayer?.textFontSize ?? textSize
+    }
+
+    public var displayedLineWidth: CGFloat {
+        selectedLayer?.lineWidth ?? style.lineWidth
+    }
+
     public func addLayer(_ layer: EditorLayer) {
         mutateDocument { document in
-            let snapshot = EditorSnapshot(layers: document.layers, selectedLayerID: document.selectedLayerID)
+            let snapshot = document.currentSnapshot
             document.undoStack.append(snapshot)
             document.redoStack.removeAll()
             document.layers.append(layer)
             document.selectedLayerID = layer.id
             document.renderedImageData = nil
-            document.isDirty = true
+            document.refreshDirtyState()
         }
     }
 
@@ -98,13 +120,13 @@ public final class EditorViewModel: ObservableObject {
                 return
             }
 
-            let snapshot = EditorSnapshot(layers: document.layers, selectedLayerID: document.selectedLayerID)
+            let snapshot = document.currentSnapshot
             document.undoStack.append(snapshot)
             document.redoStack.removeAll()
             document.layers.removeAll { $0.id == selectedLayerID }
             document.selectedLayerID = nil
             document.renderedImageData = nil
-            document.isDirty = true
+            document.refreshDirtyState()
         }
     }
 
@@ -114,12 +136,12 @@ public final class EditorViewModel: ObservableObject {
                 return
             }
 
-            let current = EditorSnapshot(layers: document.layers, selectedLayerID: document.selectedLayerID)
+            let current = document.currentSnapshot
             document.redoStack.append(current)
             document.layers = previous.layers
             document.selectedLayerID = previous.selectedLayerID
             document.renderedImageData = nil
-            document.isDirty = true
+            document.refreshDirtyState()
         }
     }
 
@@ -129,12 +151,82 @@ public final class EditorViewModel: ObservableObject {
                 return
             }
 
-            let current = EditorSnapshot(layers: document.layers, selectedLayerID: document.selectedLayerID)
+            let current = document.currentSnapshot
             document.undoStack.append(current)
             document.layers = next.layers
             document.selectedLayerID = next.selectedLayerID
             document.renderedImageData = nil
-            document.isDirty = true
+            document.refreshDirtyState()
+        }
+    }
+
+    public func beginSelectedLayerDrag() {
+        guard dragBaseline == nil,
+              let document = appState.currentDocument,
+              document.selectedLayerID != nil
+        else {
+            return
+        }
+
+        dragBaseline = document.currentSnapshot
+    }
+
+    public func updateSelectedLayerDrag(translation: CGSize) {
+        guard let baseline = dragBaseline else {
+            return
+        }
+
+        mutateDocument { document in
+            guard let selectedLayerID = baseline.selectedLayerID else {
+                return
+            }
+
+            var movedLayers = baseline.layers
+            guard let index = movedLayers.firstIndex(where: { $0.id == selectedLayerID }) else {
+                return
+            }
+
+            movedLayers[index].moveBy(dx: translation.width, dy: translation.height)
+            document.layers = movedLayers
+            document.selectedLayerID = selectedLayerID
+            document.renderedImageData = nil
+            document.refreshDirtyState()
+        }
+    }
+
+    public func endSelectedLayerDrag() {
+        guard let baseline = dragBaseline else {
+            return
+        }
+        defer { dragBaseline = nil }
+
+        mutateDocument { document in
+            guard document.currentSnapshot != baseline else {
+                return
+            }
+
+            document.undoStack.append(baseline)
+            document.redoStack.removeAll()
+        }
+    }
+
+    public func updateSelectedText(_ text: String) {
+        mutateSelectedLayer { layer in
+            layer.setTextContent(text)
+        }
+    }
+
+    public func updateDisplayedTextSize(_ size: CGFloat) {
+        textSize = size
+        mutateSelectedLayer { layer in
+            layer.setTextFontSize(size)
+        }
+    }
+
+    public func updateDisplayedLineWidth(_ width: CGFloat) {
+        style.lineWidth = width
+        mutateSelectedLayer { layer in
+            layer.setLineWidth(width)
         }
     }
 
@@ -145,5 +237,29 @@ public final class EditorViewModel: ObservableObject {
 
         mutate(&document)
         appState.currentDocument = document
+    }
+
+    private func mutateSelectedLayer(_ mutate: (inout EditorLayer) -> Void) {
+        mutateDocument { document in
+            guard let selectedLayerID = document.selectedLayerID,
+                  let index = document.layers.firstIndex(where: { $0.id == selectedLayerID })
+            else {
+                return
+            }
+
+            var updatedLayer = document.layers[index]
+            let originalLayer = updatedLayer
+            mutate(&updatedLayer)
+            guard updatedLayer != originalLayer else {
+                return
+            }
+
+            let snapshot = document.currentSnapshot
+            document.undoStack.append(snapshot)
+            document.redoStack.removeAll()
+            document.layers[index] = updatedLayer
+            document.renderedImageData = nil
+            document.refreshDirtyState()
+        }
     }
 }

@@ -44,10 +44,11 @@ MyMacFinder는 macOS Finder를 Windows 파일 탐색기와 ForkLift에 가까운
 - binary 또는 읽을 수 없는 텍스트 preview는 아이콘과 상태 메시지로 fallback
 - 일반 검색과 고급 Tag 필터가 Finder Tags를 기준으로 필터링
 - 기본 파일 listing은 Finder tag metadata 지연으로 막히지 않으며, tag 검색/편집 시 필요한 항목만 tag를 읽음
+- 파일 하나의 metadata 읽기 실패가 폴더 전체 listing 실패로 번지지 않고 해당 항목만 건너뜀
 - ZIP 내부 가상 항목에서는 파일 시스템 변경 명령과 Edit Tags 비노출
 - ZIP 내부 가상 항목은 drag pasteboard에 실제 파일 URL처럼 기록하지 않음
 - 열려 있는 ZIP의 host 파일이 외부에서 변경되면 watcher가 archive pane을 다시 읽음
-- 잘못된 ZIP 압축 해제 실패 시 빈 폴더를 남기거나 기존 폴더를 교체하지 않음
+- 잘못된 ZIP 압축 해제나 중간 실패 시 빈/부분 폴더를 남기거나 기존 폴더를 교체하지 않음
 - Sidebar Favorites 추가, 삭제, 이동, 누락 경로 처리
 - Locations의 mounted volume 클릭 시 사라진 볼륨은 목록에서 제거하고, 읽을 수 없는 볼륨은 이동하지 않고 권한 오류 표시
 - 파일 작업 컨텍스트 메뉴와 단축키 동작
@@ -60,6 +61,9 @@ MyMacFinder는 macOS Finder를 Windows 파일 탐색기와 ForkLift에 가까운
 - 폴더를 자기 하위 경로로 copy/move/paste/drop 하는 edge case 차단
 - 같은 폴더에 같은 이름으로 copy할 때 원본을 replace하지 않고 `copy` 이름으로 분기
 - 충돌 처리, replace 실패 rollback, Undo, 대용량 작업 progress banner
+- 일반 파일 복사는 byte manifest 기반 진행률을 표시하고, 단일 대용량 파일도 스트리밍 복사 중 중간 진행률/취소를 처리
+- 휴지통 이동 중 일부 항목 처리 후 후속 항목이 실패하면 이미 이동한 항목을 원래 위치로 복구
+- Inspector 폴더 크기 계산은 백그라운드에서 실행해 큰 폴더 선택 시 메인 UI 정지를 줄임
 - 권한 안내, 선택 폴더 grant 저장/초기화, sandboxed launch 시 persisted grant resolve와 stale/unavailable 표시
 - 외부에서 Finder tag 변경 후 Refresh로 table과 inspector 동기화
 
@@ -151,14 +155,15 @@ swift test
 
 현재 테스트 범위:
 
-- 파일 시스템 listing, hidden file, symlink, Finder tag lazy loading/read fallback
-- 파일 작업 copy/move/rename/duplicate/trash, source preflight, conflict decision, replace rollback
+- 파일 시스템 listing, hidden file, symlink, Finder tag lazy loading/read fallback, 항목별 metadata 실패 skip
+- 파일 작업 copy/move/rename/duplicate/trash, source preflight, conflict decision, replace rollback, trash partial rollback
 - copy/move descendant guard, same-folder copy naming, rename separator validation
+- copy byte progress, single-file streaming progress, mid-copy cancellation cleanup
 - drag and drop pasteboard/validator/store flow, descendant drop guard, archive-backed drag 차단
 - undo action과 undo command
 - 정렬, 검색, 고급 검색, Finder tag 검색, 태그 편집 후 필터/selection 동기화, 탭별 검색 상태 복원
 - ZIP 탐색, 압축, 압축 해제
-- invalid/unsafe ZIP extraction side-effect 방지, unsafe archive entry path filtering
+- invalid/unsafe ZIP extraction side-effect 방지, unsafe archive entry path filtering, extraction partial folder cleanup
 - preview content loader: 텍스트 판별, byte limit, main-thread read 방지, stale read cancellation, binary fallback, read error fallback
 - tabs, layout settings, sidebar favorites add/reorder/remove/load dedupe, recent folder load dedupe, full-row sidebar hit targets, mounted volume sorting/stale/unreadable handling
 - root 상위 폴더 이동 비활성화와 path input focus clear
@@ -166,7 +171,7 @@ swift test
 - path input command resolver, Terminal fire-and-forget launch, Open With menu routing, external app launcher duplicate-completion guard
 - permission guidance, security-scoped bookmark store, persisted grant resolution/access lifecycle
 - AppKit table bridge, column sizing, location-change scroll reset, supported-column sort affordance, context menu command availability, responder-chain shortcuts, system pasteboard file copy/paste
-- inspector model, thumbnail/Quick Look wiring
+- inspector model, thumbnail/Quick Look wiring, folder size background execution
 
 수동 QA 기록:
 
@@ -227,4 +232,4 @@ git diff --check
 ./scripts/package_personal.sh
 ```
 
-최근 검증 기준으로 `swift test --enable-code-coverage`는 326 tests / 0 failures로 통과했습니다. `./scripts/build_app.sh`, `./scripts/verify-app-icon.sh`, `./scripts/package_personal.sh`도 통과했고, 개인 설치 zip은 `dist/MyMacFinder-personal-mac.zip`에 생성됩니다. 최근 수동 QA에서는 `build/MyMacFinder.app`을 직접 실행해 선택 후 Return 탐색, 검색 결과 Return 탐색과 search clear, Recent Folders 경로 갱신, 대량 목록 스크롤, 컬럼 읽기성, range selection, 빠른 더블클릭 폴더 이동을 확인했습니다.
+최근 검증 기준으로 `swift test --enable-code-coverage`는 334 tests / 0 failures로 통과했습니다. `./scripts/build_app.sh`, `./scripts/verify-app-icon.sh`, `./scripts/package_personal.sh`도 통과했고, 개인 설치 zip은 `dist/MyMacFinder-personal-mac.zip`에 생성됩니다. 최근 수동 QA에서는 `build/MyMacFinder.app`을 직접 실행해 선택 후 Return 탐색, 검색 결과 Return 탐색과 search clear, Recent Folders 경로 갱신, 대량 목록 스크롤, 컬럼 읽기성, range selection, 빠른 더블클릭 폴더 이동을 확인했습니다.

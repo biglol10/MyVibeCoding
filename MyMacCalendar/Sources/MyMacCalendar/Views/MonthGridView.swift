@@ -1,11 +1,17 @@
 import SwiftUI
 import MyMacCalendarCore
 
+enum CalendarDensityMode: String {
+    case comfortable
+    case compact
+}
+
 struct MonthGridView: View {
     let displayedMonth: Date
     @Binding var selectedDate: Date
     let events: [CalendarEvent]
     let holidays: [HolidayRecord]
+    let density: CalendarDensityMode
     let onCreateEvent: (Date) -> Void
     let onSelectEvent: (CalendarEvent) -> Void
     @State private var overflowDate: Date?
@@ -14,12 +20,27 @@ struct MonthGridView: View {
     private let weekdaySymbols = ["일", "월", "화", "수", "목", "금", "토"]
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 7)
     private enum CalendarGridLayout {
-        static let visibleEntryLimit = 2
-        static let entryHeight: CGFloat = 16
-        static let entrySpacing: CGFloat = 2
+        static func visibleEntryLimit(for density: CalendarDensityMode) -> Int {
+            density == .compact ? 3 : 2
+        }
+
+        static func entryHeight(for density: CalendarDensityMode) -> CGFloat {
+            density == .compact ? 14 : 16
+        }
+
+        static func entrySpacing(for density: CalendarDensityMode) -> CGFloat {
+            density == .compact ? 1 : 2
+        }
+
         static let dateTopPadding: CGFloat = 2
-        static let dateHorizontalPadding: CGFloat = 14
-        static let entryTopPadding: CGFloat = 4
+        static func dateHorizontalPadding(for density: CalendarDensityMode) -> CGFloat {
+            density == .compact ? 10 : 14
+        }
+
+        static func entryTopPadding(for density: CalendarDensityMode) -> CGFloat {
+            density == .compact ? 2 : 4
+        }
+
         static let bottomPadding: CGFloat = 4
     }
     private enum CalendarGridTypography {
@@ -67,7 +88,7 @@ struct MonthGridView: View {
 
     private func dayCell(_ cell: CalendarDayCell, height: CGFloat) -> some View {
         let dayEntries = entries(for: cell.date)
-        let visibleEntries = Array(dayEntries.prefix(CalendarGridLayout.visibleEntryLimit))
+        let visibleEntries = Array(dayEntries.prefix(CalendarGridLayout.visibleEntryLimit(for: density)))
         let overflowCount = max(0, dayEntries.count - visibleEntries.count)
 
         return ZStack(alignment: .topLeading) {
@@ -79,9 +100,9 @@ struct MonthGridView: View {
                     dateLabel(for: cell)
                 }
                 .padding(.top, CalendarGridLayout.dateTopPadding)
-                .padding(.horizontal, CalendarGridLayout.dateHorizontalPadding)
+                .padding(.horizontal, CalendarGridLayout.dateHorizontalPadding(for: density))
 
-                VStack(alignment: .leading, spacing: CalendarGridLayout.entrySpacing) {
+                VStack(alignment: .leading, spacing: CalendarGridLayout.entrySpacing(for: density)) {
                     ForEach(visibleEntries) { entry in
                         entryPill(entry)
                     }
@@ -96,7 +117,7 @@ struct MonthGridView: View {
                                 .foregroundStyle(AppTheme.secondaryText)
                                 .padding(.horizontal, 9)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .frame(height: CalendarGridLayout.entryHeight)
+                                .frame(height: CalendarGridLayout.entryHeight(for: density))
                         }
                         .buttonStyle(.plain)
                         .popover(isPresented: overflowPopoverBinding(for: cell.date)) {
@@ -111,7 +132,7 @@ struct MonthGridView: View {
                     }
                 }
                 .padding(.horizontal, 10)
-                .padding(.top, CalendarGridLayout.entryTopPadding)
+                .padding(.top, CalendarGridLayout.entryTopPadding(for: density))
 
                 Spacer(minLength: 0)
             }
@@ -199,7 +220,11 @@ struct MonthGridView: View {
             }
             .padding(.leading, entry.kind == .holiday ? 3 : 9)
             .padding(.trailing, 9)
-            .frame(maxWidth: .infinity, minHeight: CalendarGridLayout.entryHeight, maxHeight: CalendarGridLayout.entryHeight)
+            .frame(
+                maxWidth: .infinity,
+                minHeight: CalendarGridLayout.entryHeight(for: density),
+                maxHeight: CalendarGridLayout.entryHeight(for: density)
+            )
             .background(entry.background)
             .clipShape(Capsule())
         }

@@ -65,7 +65,7 @@ public final class CalendarEvent {
     public var categoryRaw: String = EventCategory.personal.rawValue
     public var notes: String
     public var recurrenceRaw: String
-    public var notificationOffsetsDays: [Int]
+    public var notificationOffsetsRaw: String
     public var createdAt: Date
     public var updatedAt: Date
 
@@ -90,9 +90,14 @@ public final class CalendarEvent {
         self.categoryRaw = category.rawValue
         self.notes = notes
         self.recurrenceRaw = recurrence.rawValue
-        self.notificationOffsetsDays = notificationOffsetsDays
+        self.notificationOffsetsRaw = Self.encodeNotificationOffsets(notificationOffsetsDays)
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+
+    public var notificationOffsetsDays: [Int] {
+        get { Self.decodeNotificationOffsets(notificationOffsetsRaw) }
+        set { notificationOffsetsRaw = Self.encodeNotificationOffsets(newValue) }
     }
 
     public var recurrence: EventRecurrence {
@@ -106,5 +111,17 @@ public final class CalendarEvent {
             categoryRaw = newValue.rawValue
             colorHex = newValue.colorHex
         }
+    }
+
+    private static func encodeNotificationOffsets(_ offsets: [Int]) -> String {
+        offsets
+            .map(String.init)
+            .joined(separator: ",")
+    }
+
+    private static func decodeNotificationOffsets(_ rawValue: String) -> [Int] {
+        rawValue
+            .split(separator: ",")
+            .compactMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
     }
 }

@@ -12,6 +12,9 @@ use crate::domain::presets::default_rules;
 use crate::domain::rules::{ClassificationRule, ProductivityCategory, RuleType};
 use crate::storage::schema::initialize_schema;
 
+const BROWSER_EVENT_RETENTION_DAYS: i64 = 7;
+const WINDOW_OBSERVATION_RETENTION_DAYS: i64 = 2;
+
 #[derive(Debug, PartialEq)]
 pub struct BrowserEvent {
     pub id: String,
@@ -131,6 +134,10 @@ impl Repository {
     }
 
     pub fn save_browser_event(&self, draft: BrowserEventDraft) -> rusqlite::Result<()> {
+        let occurred_at = Utc::now();
+        self.prune_browser_events_before(
+            occurred_at - chrono::Duration::days(BROWSER_EVENT_RETENTION_DAYS),
+        )?;
         self.conn.execute(
             r#"
             INSERT INTO browser_events (id, occurred_at, domain, url, title)
@@ -138,7 +145,7 @@ impl Repository {
             "#,
             params![
                 Uuid::new_v4().to_string(),
-                Utc::now().to_rfc3339(),
+                occurred_at.to_rfc3339(),
                 draft.domain,
                 draft.url,
                 draft.title,
@@ -153,6 +160,15 @@ impl Repository {
         observations: &[WindowObservation],
     ) -> rusqlite::Result<()> {
         let now = Utc::now().to_rfc3339();
+        if let Some(latest_observed_at) = observations
+            .iter()
+            .map(|observation| observation.observed_at)
+            .max()
+        {
+            self.prune_window_observations_before(
+                latest_observed_at - chrono::Duration::days(WINDOW_OBSERVATION_RETENTION_DAYS),
+            )?;
+        }
 
         for observation in observations {
             self.conn.execute(
@@ -179,6 +195,22 @@ impl Repository {
             )?;
         }
 
+        Ok(())
+    }
+
+    fn prune_browser_events_before(&self, cutoff: DateTime<Utc>) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "DELETE FROM browser_events WHERE occurred_at < ?1",
+            [cutoff.to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    fn prune_window_observations_before(&self, cutoff: DateTime<Utc>) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "DELETE FROM window_observations WHERE observed_at < ?1",
+            [cutoff.to_rfc3339()],
+        )?;
         Ok(())
     }
 
@@ -240,6 +272,37 @@ impl Repository {
         Ok(())
     }
 
+    pub fn set_rule_enabled(
+        &self,
+        rule_id: &str,
+        is_enabled: bool,
+    ) -> rusqlite::Result<ClassificationRule> {
+        self.conn.execute(
+            r#"
+            UPDATE classification_rules
+            SET is_enabled = ?1, updated_at = ?2
+            WHERE id = ?3
+            "#,
+            params![bool_to_db(is_enabled), Utc::now().to_rfc3339(), rule_id],
+        )?;
+
+        self.rule_by_id(rule_id)?
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)
+    }
+
+    pub fn delete_user_rule(&self, rule_id: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "DELETE FROM classification_rules WHERE id = ?1 AND is_builtin = 0",
+            [rule_id],
+        )?;
+
+        if self.conn.changes() == 1 {
+            Ok(())
+        } else {
+            Err(rusqlite::Error::QueryReturnedNoRows)
+        }
+    }
+
     pub fn list_rules(&self) -> rusqlite::Result<Vec<ClassificationRule>> {
         let mut stmt = self.conn.prepare(
             r#"
@@ -266,6 +329,34 @@ impl Repository {
         })?;
 
         rows.collect()
+    }
+
+    fn rule_by_id(&self, rule_id: &str) -> rusqlite::Result<Option<ClassificationRule>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT id, name, rule_type, pattern, category, priority, is_builtin, is_enabled
+            FROM classification_rules
+            WHERE id = ?1
+            "#,
+        )?;
+
+        let mut rows = stmt.query([rule_id])?;
+        let Some(row) = rows.next()? else {
+            return Ok(None);
+        };
+        let rule_type: String = row.get(2)?;
+        let category: String = row.get(4)?;
+
+        Ok(Some(ClassificationRule {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            rule_type: rule_type_from_db(2, &rule_type)?,
+            pattern: row.get(3)?,
+            category: productivity_category_from_db(4, &category)?,
+            priority: row.get(5)?,
+            is_builtin: row.get::<_, i64>(6)? == 1,
+            is_enabled: row.get::<_, i64>(7)? == 1,
+        }))
     }
 }
 
@@ -501,6 +592,55 @@ mod tests {
     }
 
     #[test]
+    fn save_window_observations_prunes_old_rows() {
+        let repo = Repository::in_memory_for_test().expect("repo");
+        let started_at = Utc::now();
+        let old_observed_at = started_at - chrono::Duration::days(3);
+        let session = test_session("session-with-pruned-windows", started_at);
+        repo.save_session(&session).expect("session saved");
+        repo.conn
+            .execute(
+                r#"
+                INSERT INTO window_observations (
+                  id, session_id, observed_at, app_name, process_name, pid, bundle_identifier,
+                  window_title, is_visible, is_frontmost, is_primary, created_at
+                ) VALUES (
+                  'old-window', ?1, ?2, 'Old App', 'Old App', 10, NULL,
+                  'Old', 1, 0, 0, ?2
+                )
+                "#,
+                params![&session.id, old_observed_at.to_rfc3339()],
+            )
+            .expect("old observation inserted");
+
+        repo.save_window_observations(
+            &session.id,
+            &[WindowObservation {
+                observed_at: started_at,
+                app_name: "New App".into(),
+                process_name: "New App".into(),
+                pid: Some(20),
+                bundle_identifier: None,
+                window_title: Some("New".into()),
+                is_visible: true,
+                is_frontmost: true,
+                is_primary: true,
+            }],
+        )
+        .expect("new observation saved");
+
+        let old_count: i64 = repo
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM window_observations WHERE id='old-window'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("old count");
+        assert_eq!(old_count, 0);
+    }
+
+    #[test]
     fn opens_database_at_explicit_path() {
         let path = std::env::temp_dir().join(format!(
             "time-manager-repository-{}.sqlite3",
@@ -626,6 +766,50 @@ mod tests {
     }
 
     #[test]
+    fn updates_rule_enabled_state() {
+        let repo = Repository::in_memory_for_test().expect("repo");
+        let disabled = repo
+            .set_rule_enabled("builtin:domain:chatgpt.com", false)
+            .expect("disabled");
+
+        assert!(!disabled.is_enabled);
+        assert!(
+            !repo
+                .list_rules()
+                .expect("rules")
+                .into_iter()
+                .find(|rule| rule.id == "builtin:domain:chatgpt.com")
+                .expect("rule")
+                .is_enabled
+        );
+    }
+
+    #[test]
+    fn deletes_only_user_rules() {
+        let repo = Repository::in_memory_for_test().expect("repo");
+        let custom = ClassificationRule {
+            id: "user:domain:example.com".into(),
+            name: "Example".into(),
+            rule_type: RuleType::Domain,
+            pattern: "example.com".into(),
+            category: ProductivityCategory::Neutral,
+            priority: 100,
+            is_builtin: false,
+            is_enabled: true,
+        };
+
+        repo.save_rule(&custom).expect("rule saved");
+        repo.delete_user_rule(&custom.id).expect("deleted");
+
+        assert!(repo.delete_user_rule("builtin:domain:chatgpt.com").is_err());
+        assert!(!repo
+            .list_rules()
+            .expect("rules")
+            .into_iter()
+            .any(|rule| rule.id == custom.id));
+    }
+
+    #[test]
     fn repository_initialization_persists_builtin_rules_for_classification_results() {
         let repo = Repository::in_memory_for_test().expect("repo");
         let started_at = Utc::now();
@@ -697,5 +881,36 @@ mod tests {
 
         assert_eq!(events[0].domain, "youtube.com");
         assert_eq!(events[0].url, None);
+    }
+
+    #[test]
+    fn save_browser_event_prunes_old_rows() {
+        let repo = Repository::in_memory_for_test().expect("repo");
+        let old = Utc::now() - chrono::Duration::days(8);
+        repo.conn
+            .execute(
+                r#"
+                INSERT INTO browser_events (id, occurred_at, domain, url, title)
+                VALUES ('old-event', ?1, 'old.example', NULL, 'Old')
+                "#,
+                [old.to_rfc3339()],
+            )
+            .expect("old event inserted");
+
+        repo.save_browser_event(BrowserEventDraft {
+            domain: "new.example".into(),
+            url: None,
+            title: "New".into(),
+        })
+        .expect("saved");
+
+        let domains: Vec<String> = repo
+            .list_recent_browser_events(10)
+            .expect("events")
+            .into_iter()
+            .map(|event| event.domain)
+            .collect();
+
+        assert_eq!(domains, vec!["new.example"]);
     }
 }

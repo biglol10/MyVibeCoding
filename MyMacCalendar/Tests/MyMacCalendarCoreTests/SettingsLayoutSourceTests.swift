@@ -33,6 +33,15 @@ final class SettingsLayoutSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("Text(\"12개\").tag(12)"))
     }
 
+    func testSettingsSheetHasExplicitDismissAction() throws {
+        let source = try String(contentsOfFile: sourcePath("Sources/MyMacCalendar/Views/SettingsView.swift"), encoding: .utf8)
+
+        XCTAssertTrue(source.contains("@Environment(\\.dismiss)"))
+        XCTAssertTrue(source.contains("Button(\"완료\")"))
+        XCTAssertTrue(source.contains("dismiss()"))
+        XCTAssertTrue(source.contains(".keyboardShortcut(.cancelAction)"))
+    }
+
     private func sourcePath(_ relativePath: String) -> String {
         let testFile = URL(fileURLWithPath: #filePath)
         return testFile

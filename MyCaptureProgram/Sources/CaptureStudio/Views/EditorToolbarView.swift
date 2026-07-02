@@ -27,7 +27,7 @@ struct EditorToolbarView: View {
                 toolbarButton("arrow.uturn.backward", "Undo", action: onUndo)
                 toolbarButton("arrow.uturn.forward", "Redo", action: onRedo)
                 toolbarButton("text.viewfinder", "OCR", action: onOCR)
-                toolbarButton("eye.slash", "Quick Redact", action: onQuickRedact)
+                toolbarButton("sparkles", "Quick Redact", action: onQuickRedact)
             }
 
             if canCopy || canSave {

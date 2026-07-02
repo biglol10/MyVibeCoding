@@ -104,7 +104,7 @@ public struct ZipExtractionService: ZipExtracting, @unchecked Sendable {
                     }
                 }
             } catch {
-                rollbackReplacement(resolution.replacedItem, partialDestination: extractionFolder)
+                rollbackFailedExtraction(resolution.replacedItem, partialDestination: extractionFolder)
                 throw error
             }
 
@@ -171,8 +171,11 @@ public struct ZipExtractionService: ZipExtracting, @unchecked Sendable {
         return FileTrashRecord(original: url, trashed: result as URL)
     }
 
-    private func rollbackReplacement(_ record: FileTrashRecord?, partialDestination: URL) {
+    private func rollbackFailedExtraction(_ record: FileTrashRecord?, partialDestination: URL) {
         guard let record else {
+            if fileManager.fileExists(atPath: partialDestination.path) {
+                try? fileManager.removeItem(at: partialDestination)
+            }
             return
         }
         if fileManager.fileExists(atPath: partialDestination.path) {

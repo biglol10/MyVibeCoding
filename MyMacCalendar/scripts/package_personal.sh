@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="${MYMACCALENDAR_APP_NAME:-MyMacCalendar}"
@@ -32,6 +33,7 @@ codesign --verify --deep --strict "$APP_BUNDLE_TARGET"
 cat > "$INSTALLER" <<'INSTALLER_SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_SOURCE="$SCRIPT_DIR/MyMacCalendar.app"
