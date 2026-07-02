@@ -28,6 +28,25 @@ final class ImageRenderServiceTests: XCTestCase {
         XCTAssertNotEqual(result, basePNG)
         XCTAssertTrue(result.starts(with: [0x89, 0x50, 0x4E, 0x47]))
     }
+
+    func testBlurRedactionDoesNotRenderAsSolidBlackBox() throws {
+        let basePNG = try TestImageFactory.pngData(width: 80, height: 60, color: .white)
+        let layer = EditorLayer.redaction(
+            RedactionLayer(
+                frame: CGRect(x: 20, y: 20, width: 30, height: 20),
+                mode: .blur(radius: 6),
+                style: LayerStyle(strokeColor: .black, fillColor: .black, lineWidth: 1)
+            )
+        )
+        let renderer = AppKitImageRenderService()
+
+        let result = try renderer.renderPNG(basePNGData: basePNG, layers: [layer])
+        let sampledColor = try TestImageFactory.pixelColor(in: result, x: 30, y: 30)
+
+        XCTAssertGreaterThan(sampledColor.redComponent, 0.7)
+        XCTAssertGreaterThan(sampledColor.greenComponent, 0.7)
+        XCTAssertGreaterThan(sampledColor.blueComponent, 0.7)
+    }
 }
 
 private enum TestImageFactory {
@@ -46,5 +65,15 @@ private enum TestImageFactory {
         }
 
         return data
+    }
+
+    static func pixelColor(in pngData: Data, x: Int, y: Int) throws -> NSColor {
+        guard let bitmap = NSBitmapImageRep(data: pngData),
+              let color = bitmap.colorAt(x: x, y: y)
+        else {
+            throw NSError(domain: "TestImageFactory", code: 2)
+        }
+
+        return color.usingColorSpace(.deviceRGB) ?? color
     }
 }

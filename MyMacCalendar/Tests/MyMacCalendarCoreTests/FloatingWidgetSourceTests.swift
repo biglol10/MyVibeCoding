@@ -58,14 +58,26 @@ final class FloatingWidgetSourceTests: XCTestCase {
     func testFloatingWidgetKeepsTodayStateFreshAndRestoresOntoVisibleScreen() throws {
         let viewSource = try String(contentsOfFile: sourcePath("Sources/MyMacCalendar/Views/FloatingWidgetView.swift"), encoding: .utf8)
         let controllerSource = try String(contentsOfFile: sourcePath("Sources/MyMacCalendar/Controllers/FloatingWidgetController.swift"), encoding: .utf8)
+        let coordinatorSource = try String(contentsOfFile: sourcePath("Sources/MyMacCalendar/Controllers/WidgetCoordinator.swift"), encoding: .utf8)
 
         XCTAssertTrue(viewSource.contains("@State private var now = Date()"))
         XCTAssertTrue(viewSource.contains("Timer.publish(every: 60"))
         XCTAssertTrue(viewSource.contains("Calendar.current.isDate(occurrence.startDate, inSameDayAs: now)"))
+        XCTAssertTrue(coordinatorSource.contains("Timer.scheduledTimer"))
+        XCTAssertTrue(coordinatorSource.contains("render()"))
         XCTAssertTrue(controllerSource.contains("validatedFrame"))
         XCTAssertTrue(controllerSource.contains("NSScreen.screens"))
         XCTAssertTrue(controllerSource.contains("visibleFrame"))
         XCTAssertTrue(controllerSource.contains("intersects(frame)"))
+    }
+
+    func testFloatingWidgetShowAllUsesLatestOccurrencesAfterRefresh() throws {
+        let controllerSource = try String(contentsOfFile: sourcePath("Sources/MyMacCalendar/Controllers/FloatingWidgetController.swift"), encoding: .utf8)
+
+        XCTAssertTrue(controllerSource.contains("private var latestOccurrences: [EventOccurrence]"))
+        XCTAssertTrue(controllerSource.contains("latestOccurrences = occurrences"))
+        XCTAssertTrue(controllerSource.contains("showAll(occurrences: self.latestOccurrences"))
+        XCTAssertTrue(controllerSource.contains("refreshOpenListWindow()"))
     }
 
     func testFloatingWidgetRefreshDoesNotStealKeyboardFocusFromMainWindow() throws {

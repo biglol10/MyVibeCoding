@@ -43,4 +43,27 @@ final class SettingsStoreTests: XCTestCase {
 
         XCTAssertEqual(store.settings, .defaults)
     }
+
+    @MainActor
+    func testPersistenceEncodingFailureIsExposed() {
+        let defaults = UserDefaults(suiteName: "SettingsStoreTests.encodingFailure")!
+        defaults.removePersistentDomain(forName: "SettingsStoreTests.encodingFailure")
+        let store = SettingsStore(defaults: defaults, encodeSettings: { _ in
+            throw TestEncodingError.expected
+        })
+
+        store.update { settings in
+            settings.screenshotFolderPath = "/tmp/failed"
+        }
+
+        XCTAssertEqual(store.persistenceErrorMessage, TestEncodingError.expected.localizedDescription)
+    }
+}
+
+private enum TestEncodingError: LocalizedError {
+    case expected
+
+    var errorDescription: String? {
+        "expected encoding failure"
+    }
 }

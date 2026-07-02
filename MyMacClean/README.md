@@ -55,7 +55,9 @@ swift run MyMacCleanApp
 - 앱 삭제 전 관련 파일 후보와 크기 표시
 - 삭제 영수증 저장 및 Delete History 조회
 - 이미 삭제된 앱의 잔여 파일을 찾는 Orphan Files 스캔
-- 시스템 보호 정책을 둔 위험 경로 제외
+- 기본 삭제는 휴지통으로 이동하며, 사용자가 명시적으로 선택한 경우에만 영구 삭제
+- 잠긴 파일 force unlock 옵션과 심볼릭 링크 대상 보호
+- 시스템/사용자 핵심 경로와 현재 실행 중인 MyMacClean 앱 번들 보호
 - 향후 확장용 메뉴: Startup Items, System Cleanup, Large Files, Maintenance
 
 ## 소스 실행

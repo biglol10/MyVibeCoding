@@ -81,9 +81,27 @@ final class ZipCompressionServiceTests: XCTestCase {
         do {
             _ = try await service.compress([note], to: tempDirectory)
             XCTFail("Expected compression to fail after replacement trash step")
-        } catch {
+        } catch let error as ExplorerError {
+            if case .archiveFailed = error {
+                // Expected classification.
+            } else {
+                XCTFail("Expected archive failure, got \(error)")
+            }
             XCTAssertTrue(FileManager.default.fileExists(atPath: existingArchive.path))
             XCTAssertEqual(try String(contentsOf: existingArchive, encoding: .utf8), "existing archive")
+        } catch {
+            XCTFail("Expected archive failure, got \(error)")
+        }
+    }
+
+    func testCompressionWriteFailureIsNotReportedAsReadFailure() async throws {
+        let missing = tempDirectory.appendingPathComponent("missing-source.txt")
+
+        do {
+            _ = try await ZipCompressionService().compress([missing], to: tempDirectory)
+            XCTFail("Expected compression to fail for a missing source")
+        } catch let error as ExplorerError {
+            XCTAssertEqual(error, .pathDoesNotExist(missing.path))
         }
     }
 

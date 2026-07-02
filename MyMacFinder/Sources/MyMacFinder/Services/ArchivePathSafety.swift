@@ -25,7 +25,7 @@ enum ArchivePathSafety {
 
     static func validateEntryPath(_ rawPath: String) throws {
         guard isSafeEntryPath(rawPath) else {
-            throw ExplorerError.readFailed("ZIP entry attempted to extract outside destination: \(rawPath)")
+            throw ExplorerError.archiveFailed("ZIP entry attempted to extract outside destination: \(rawPath)")
         }
     }
 }

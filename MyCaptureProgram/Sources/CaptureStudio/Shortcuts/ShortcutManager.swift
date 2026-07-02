@@ -9,12 +9,18 @@ public final class ShortcutManager: ObservableObject {
 
     @Published public private(set) var bindings: [ShortcutAction: ShortcutBinding]
     @Published public private(set) var registrationFailures: [ShortcutAction: String]
+    @Published public private(set) var persistenceErrorMessage: String?
 
     private let defaults: UserDefaults
     private let storageKey = "CaptureStudio.ShortcutBindings.v1"
+    private let encodeBindings: ([ShortcutAction: ShortcutBinding]) throws -> Data
 
-    public init(defaults: UserDefaults = .standard) {
+    public init(
+        defaults: UserDefaults = .standard,
+        encodeBindings: @escaping ([ShortcutAction: ShortcutBinding]) throws -> Data = { try JSONEncoder().encode($0) }
+    ) {
         self.defaults = defaults
+        self.encodeBindings = encodeBindings
         self.registrationFailures = [:]
 
         if let data = defaults.data(forKey: storageKey),
@@ -64,7 +70,12 @@ public final class ShortcutManager: ObservableObject {
     }
 
     private func persist() {
-        let data = try? JSONEncoder().encode(bindings)
-        defaults.set(data, forKey: storageKey)
+        do {
+            let data = try encodeBindings(bindings)
+            defaults.set(data, forKey: storageKey)
+            persistenceErrorMessage = nil
+        } catch {
+            persistenceErrorMessage = error.localizedDescription
+        }
     }
 }

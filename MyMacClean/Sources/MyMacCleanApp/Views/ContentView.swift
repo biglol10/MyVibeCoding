@@ -4,13 +4,27 @@ import MyMacCleanCore
 import MyMacCleanAppSupport
 
 struct ContentView: View {
-    @State private var viewModel = ApplicationListViewModel()
+    @State private var viewModel = ApplicationListViewModel(
+        executor: DeletionExecutor(protectionPolicy: ContentView.deletionProtectionPolicy)
+    )
     @State private var historyViewModel = DeleteHistoryViewModel()
-    @State private var orphanFilesViewModel = OrphanFilesViewModel(installedApps: [])
+    @State private var orphanFilesViewModel = OrphanFilesViewModel(
+        installedApps: [],
+        executor: DeletionExecutor(protectionPolicy: ContentView.deletionProtectionPolicy)
+    )
     @State private var navigationState = SidebarNavigationState()
     @State private var confirmationText = ""
     @State private var confirmationMode: DeletionConfirmationMode?
     @State private var forceDelete = false
+    @State private var permanentDelete = false
+
+    private static var deletionProtectionPolicy: ProtectionPolicy {
+        ProtectionPolicy(additionalProtectedRoots: currentApplicationProtectedRoots)
+    }
+
+    private static var currentApplicationProtectedRoots: [URL] {
+        Bundle.main.bundleURL.pathExtension == "app" ? [Bundle.main.bundleURL] : []
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -117,7 +131,7 @@ struct ContentView: View {
                 VStack(alignment: .leading) {
                     Text("Applications")
                         .font(.title2.weight(.semibold))
-                    Text("Review installed apps and related files before permanent deletion.")
+                    Text("Review installed apps and related files before removing them.")
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -685,7 +699,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 16) {
             let requiredConfirmation = "DELETE"
             let isDeleting = confirmationIsDeleting(for: mode)
-            Text("Permanent Deletion")
+            Text(permanentDelete ? "Permanent Deletion" : "Move to Trash")
                 .font(.title2.weight(.semibold))
             VStack(alignment: .leading, spacing: 8) {
                 Text(confirmationTargetTitle(for: mode))
@@ -711,17 +725,20 @@ struct ContentView: View {
                     .stroke(Color.primary.opacity(0.08), lineWidth: 1)
             }
             .clipShape(RoundedRectangle(cornerRadius: 8))
-            Text("Type DELETE to permanently remove selected items. This does not move files to Trash.")
+            Text(permanentDelete ? "Type DELETE to permanently remove selected items. This cannot be undone from Trash." : "Type DELETE to move selected items to Trash.")
                 .foregroundStyle(.secondary)
             TextField(requiredConfirmation, text: $confirmationText)
                 .textFieldStyle(.roundedBorder)
                 .disabled(isDeleting)
-            Toggle("Force delete locked items", isOn: $forceDelete)
+            Toggle("Permanently delete instead", isOn: $permanentDelete)
+                .toggleStyle(.checkbox)
+                .disabled(isDeleting)
+            Toggle("Force unlock locked items", isOn: $forceDelete)
                 .toggleStyle(.checkbox)
                 .help("Clears file locks and restores write permission before retrying. This cannot bypass Full Disk Access or administrator-only paths.")
                 .disabled(isDeleting)
             if forceDelete {
-                Text("Force delete retries locked files, but Full Disk Access and administrator-only paths can still block deletion.")
+                Text("Force unlock retries locked files, but Full Disk Access and administrator-only paths can still block deletion.")
                     .font(.callout.weight(.medium))
                     .foregroundStyle(.secondary)
             }
@@ -729,13 +746,14 @@ struct ContentView: View {
                 Button("Cancel") { confirmationMode = nil }
                     .disabled(isDeleting)
                 Spacer()
-                Button(isDeleting ? "Deleting..." : "Delete", role: .destructive) {
+                Button(isDeleting ? "Deleting..." : (permanentDelete ? "Permanently Delete" : "Move to Trash"), role: .destructive) {
                     Task {
+                        let deletionMode: DeletionMode = permanentDelete ? .permanent : .moveToTrash
                         switch mode {
                         case .application:
-                            await viewModel.deleteConfirmedItems(confirmation: confirmationText, force: forceDelete)
+                            await viewModel.deleteConfirmedItems(confirmation: confirmationText, force: forceDelete, mode: deletionMode)
                         case .orphanFiles:
-                            await orphanFilesViewModel.deleteSelectedLeftovers(confirmation: confirmationText, force: forceDelete)
+                            await orphanFilesViewModel.deleteSelectedLeftovers(confirmation: confirmationText, force: forceDelete, mode: deletionMode)
                         }
                         confirmationMode = nil
                     }
@@ -758,6 +776,7 @@ struct ContentView: View {
     private func presentConfirmation(_ mode: DeletionConfirmationMode) {
         confirmationText = ""
         forceDelete = false
+        permanentDelete = false
         confirmationMode = mode
     }
 

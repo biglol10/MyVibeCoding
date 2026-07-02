@@ -53,6 +53,17 @@ final class DistributionPackagingTests: XCTestCase {
         XCTAssertTrue(script.contains("CaptureStudio-personal-mac.zip"))
     }
 
+    func testRepositoryDefinesSwiftPackageCIWorkflow() throws {
+        let workflowURL = repositoryRoot
+            .appendingPathComponent(".github")
+            .appendingPathComponent("workflows")
+            .appendingPathComponent("ci.yml")
+        let workflow = try String(contentsOf: workflowURL, encoding: .utf8)
+
+        XCTAssertTrue(workflow.contains("swift test"))
+        XCTAssertTrue(workflow.contains("macos-"))
+    }
+
     private var releaseScriptURL: URL {
         repositoryRoot
             .appendingPathComponent("scripts")

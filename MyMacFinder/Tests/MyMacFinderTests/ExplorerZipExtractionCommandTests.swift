@@ -4,11 +4,17 @@ import XCTest
 
 private final class CapturingZipExtractor: ZipExtracting, @unchecked Sendable {
     var result: FileOperationResult
+    var error: (any Error)?
     private(set) var capturedURLs: [URL] = []
     private(set) var capturedDestination: URL?
 
     init(result: FileOperationResult) {
         self.result = result
+    }
+
+    init(error: any Error) {
+        self.result = FileOperationResult()
+        self.error = error
     }
 
     func extract(
@@ -18,6 +24,9 @@ private final class CapturingZipExtractor: ZipExtracting, @unchecked Sendable {
     ) async throws -> FileOperationResult {
         capturedURLs = zipURLs
         capturedDestination = destinationFolder
+        if let error {
+            throw error
+        }
         return result
     }
 }
@@ -101,5 +110,24 @@ final class ExplorerZipExtractionCommandTests: XCTestCase {
         XCTAssertEqual(extractor.capturedURLs, [zipURL.standardizedFileURL])
         XCTAssertEqual(extractor.capturedDestination, tempDirectory.standardizedFileURL)
         XCTAssertTrue(store.canUndo)
+    }
+
+    func testGenericExtractionFailureIsReportedAsArchiveFailure() async throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MyMacFinderExtractStore-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+        let zipURL = tempDirectory.appendingPathComponent("a.zip")
+        try "zip data".write(to: zipURL, atomically: true, encoding: .utf8)
+        let extractor = CapturingZipExtractor(
+            error: NSError(domain: "ZipExtractionTest", code: 7, userInfo: [NSLocalizedDescriptionKey: "extract failed"])
+        )
+        let store = ExplorerStore(initialURL: tempDirectory, directoryWatcher: nil, zipExtractor: extractor)
+        await store.refresh()
+        store.updateSelection([zipURL.standardizedFileURL])
+
+        await store.perform(.extractZip)
+
+        XCTAssertEqual(store.visibleError, .archiveFailed("extract failed"))
     }
 }

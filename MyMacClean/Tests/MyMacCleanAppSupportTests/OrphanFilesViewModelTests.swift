@@ -286,7 +286,7 @@ final class OrphanFilesViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.groups.map(\.inferredIdentifier), ["com.example.deleted"])
     }
 
-    func testFailedLoadGroupsClearsPreviousGroupsAndSelection() async throws {
+    func testLoadGroupsSkipsUnreadableRootsAndClearsPreviousSelection() async throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("MyMacCleanOrphanFailedScan-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: home) }
         let libraryURL = home.appendingPathComponent("Library", isDirectory: true)
@@ -313,8 +313,8 @@ final class OrphanFilesViewModelTests: XCTestCase {
 
         await viewModel.loadGroups()
 
+        XCTAssertNil(viewModel.errorMessage)
         XCTAssertTrue(viewModel.groups.isEmpty)
         XCTAssertTrue(viewModel.selectedCandidateIDs.isEmpty)
-        XCTAssertNotNil(viewModel.errorMessage)
     }
 }

@@ -63,6 +63,14 @@ public struct DeletionReceiptStore: Sendable {
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
+    public static func defaultFileURL(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+        homeDirectory.appendingPathComponent("Library/Application Support/MyMacClean/deletion-receipts.jsonl")
+    }
+
+    public static func `default`(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> DeletionReceiptStore {
+        DeletionReceiptStore(fileURL: defaultFileURL(homeDirectory: homeDirectory))
+    }
+
     public init(fileURL: URL) {
         self.fileURL = fileURL
         self.encoder = JSONEncoder()
@@ -72,6 +80,10 @@ public struct DeletionReceiptStore: Sendable {
     }
 
     public func append(_ receipt: DeletionReceipt) throws {
+        let lock = ReceiptFileLockRegistry.shared.lock(for: fileURL)
+        lock.lock()
+        defer { lock.unlock() }
+
         try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         var data = try encoder.encode(receipt)
         data.append(0x0A)
@@ -86,6 +98,10 @@ public struct DeletionReceiptStore: Sendable {
     }
 
     public func readReceipts() throws -> [DeletionReceipt] {
+        let lock = ReceiptFileLockRegistry.shared.lock(for: fileURL)
+        lock.lock()
+        defer { lock.unlock() }
+
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
         let text = try String(contentsOf: fileURL, encoding: .utf8)
         return text.split(separator: "\n").compactMap { line in
@@ -94,8 +110,33 @@ public struct DeletionReceiptStore: Sendable {
     }
 
     public func clear() throws {
+        let lock = ReceiptFileLockRegistry.shared.lock(for: fileURL)
+        lock.lock()
+        defer { lock.unlock() }
+
         if FileManager.default.fileExists(atPath: fileURL.path) {
             try FileManager.default.removeItem(at: fileURL)
         }
+    }
+}
+
+private final class ReceiptFileLockRegistry: @unchecked Sendable {
+    static let shared = ReceiptFileLockRegistry()
+
+    private let registryLock = NSLock()
+    private var locks: [String: NSLock] = [:]
+
+    func lock(for fileURL: URL) -> NSLock {
+        let key = fileURL.standardizedFileURL.path
+        registryLock.lock()
+        defer { registryLock.unlock() }
+
+        if let existing = locks[key] {
+            return existing
+        }
+
+        let lock = NSLock()
+        locks[key] = lock
+        return lock
     }
 }

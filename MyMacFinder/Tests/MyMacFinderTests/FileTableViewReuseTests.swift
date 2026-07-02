@@ -214,6 +214,98 @@ final class FileTableViewReuseTests: XCTestCase {
         XCTAssertTrue(commands.isEmpty)
     }
 
+    func testInlineRenameRequestShowsManagedEditorWithEntryName() throws {
+        let entry = makeTableEntry(name: "rename-me.txt")
+        let paneID = PaneID()
+        let request = InlineRenameRequest(paneID: paneID, url: entry.url)
+        let harness = makeTableHarness(
+            entries: [entry],
+            selectedRowIndexes: IndexSet(integer: 0),
+            canPaste: false,
+            canUndo: false,
+            inlineRenameRequest: request,
+            onCommand: { _ in }
+        )
+
+        harness.coordinator.syncInlineRenameRequest()
+
+        let editor = try XCTUnwrap(harness.tableView.inlineRenameEditor)
+        XCTAssertEqual(editor.stringValue, "rename-me.txt")
+        XCTAssertEqual(harness.tableView.selectedRowIndexes, IndexSet(integer: 0))
+    }
+
+    func testInlineRenameManagedEditorIgnoresContaminatedReusableCellValue() throws {
+        let entry = makeTableEntry(name: "rename-me.txt")
+        let harness = makeTableHarness(
+            entries: [entry],
+            selectedRowIndexes: IndexSet(integer: 0),
+            canPaste: false,
+            canUndo: false,
+            currentLocation: .fileSystem(URL(fileURLWithPath: "/tmp/current-folder", isDirectory: true)),
+            onCommand: { _ in }
+        )
+        let nameCell = try XCTUnwrap(harness.tableView.view(atColumn: 0, row: 0, makeIfNecessary: true) as? NSTableCellView)
+        nameCell.textField?.stringValue = "/tmp/current-folder"
+
+        XCTAssertTrue(harness.coordinator.performCommand(.rename))
+
+        let editor = try XCTUnwrap(harness.tableView.inlineRenameEditor)
+        XCTAssertEqual(editor.stringValue, "rename-me.txt")
+    }
+
+    func testInlineRenameBeginEditingRestoresEntryNameWhenEditorIsContaminatedByPath() throws {
+        let entry = makeTableEntry(name: "rename-me.txt")
+        let harness = makeTableHarness(
+            entries: [entry],
+            selectedRowIndexes: IndexSet(integer: 0),
+            canPaste: false,
+            canUndo: false,
+            currentLocation: .fileSystem(URL(fileURLWithPath: "/tmp/current-folder", isDirectory: true)),
+            onCommand: { _ in }
+        )
+
+        XCTAssertTrue(harness.coordinator.performCommand(.rename))
+        let editor = try XCTUnwrap(harness.tableView.inlineRenameEditor)
+        let fieldEditor = NSText()
+        editor.stringValue = "/tmp/current-folder"
+        fieldEditor.string = "/tmp/current-folder"
+
+        harness.coordinator.controlTextDidBeginEditing(
+            Notification(
+                name: NSControl.textDidBeginEditingNotification,
+                object: editor,
+                userInfo: ["NSFieldEditor": fieldEditor]
+            )
+        )
+
+        XCTAssertEqual(editor.stringValue, "rename-me.txt")
+        XCTAssertEqual(fieldEditor.string, "rename-me.txt")
+        XCTAssertEqual(fieldEditor.selectedRange, NSRange(location: 0, length: "rename-me.txt".count))
+    }
+
+    func testInlineRenameCommitRoutesNewNameToRenameHandler() throws {
+        let entry = makeTableEntry(name: "rename-me.txt")
+        var renamedNames: [String] = []
+        let harness = makeTableHarness(
+            entries: [entry],
+            selectedRowIndexes: IndexSet(integer: 0),
+            canPaste: false,
+            canUndo: false,
+            onRename: { renamedNames.append($0) },
+            onCommand: { _ in }
+        )
+
+        XCTAssertTrue(harness.coordinator.performCommand(.rename))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        let editor = try XCTUnwrap(harness.tableView.inlineRenameEditor)
+        editor.stringValue = "renamed.txt"
+        editor.delegate?.controlTextDidEndEditing?(
+            Notification(name: NSControl.textDidEndEditingNotification, object: editor)
+        )
+
+        XCTAssertEqual(renamedNames, ["renamed.txt"])
+    }
+
     func testCellsHaveStableReuseIdentifiersPerColumn() {
         let entry = FileEntry(
             url: URL(fileURLWithPath: "/tmp/report.txt"),
@@ -387,6 +479,141 @@ final class FileTableViewReuseTests: XCTestCase {
         XCTAssertEqual(cell.textField?.stringValue, "readme.txt")
         XCTAssertNotNil(cell.imageView)
         XCTAssertNotNil(cell.imageView?.image)
+    }
+
+    func testNameColumnReusesResolvedIconForSameEntry() throws {
+        let entry = makeArchiveBackedTableEntry(name: "readme.txt")
+        let fileTable = FileTableView(
+            entries: [entry],
+            selectedURLs: [],
+            canPaste: false,
+            canUndo: false,
+            canCloseTab: false,
+            currentURL: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            currentLocation: .archive(ArchiveLocation(archiveURL: URL(fileURLWithPath: "/tmp/archive.zip"), internalPath: "")),
+            currentSort: EntrySortDescriptor(),
+            showsPathColumn: false,
+            onSelectionChange: { _ in },
+            onOpen: { _ in },
+            onCommand: { _ in },
+            onDropItems: { _, _, _ in },
+            onSortChange: { _ in }
+        )
+        let coordinator = fileTable.makeCoordinator()
+        let tableView = NSTableView()
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
+        tableView.addTableColumn(column)
+
+        let firstCell = try XCTUnwrap(coordinator.tableView(tableView, viewFor: column, row: 0) as? NSTableCellView)
+        let secondCell = try XCTUnwrap(coordinator.tableView(tableView, viewFor: column, row: 0) as? NSTableCellView)
+
+        XCTAssertTrue(firstCell.imageView?.image === secondCell.imageView?.image)
+    }
+
+    func testNameColumnReusesMetadataIconForSameKindAndExtension() throws {
+        let entries = [
+            makeTableEntry(name: "alpha.txt"),
+            makeTableEntry(name: "beta.txt")
+        ]
+        var resolveCount = 0
+        let icon = NSImage(size: NSSize(width: 16, height: 16))
+        let fileTable = FileTableView(
+            entries: entries,
+            selectedURLs: [],
+            canPaste: false,
+            canUndo: false,
+            canCloseTab: false,
+            currentURL: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            currentLocation: .fileSystem(URL(fileURLWithPath: "/tmp", isDirectory: true)),
+            currentSort: EntrySortDescriptor(),
+            showsPathColumn: false,
+            onSelectionChange: { _ in },
+            onOpen: { _ in },
+            onCommand: { _ in },
+            iconResolver: FileTableIconResolver { _ in
+                resolveCount += 1
+                return icon
+            },
+            onDropItems: { _, _, _ in },
+            onSortChange: { _ in }
+        )
+        let coordinator = fileTable.makeCoordinator()
+        let tableView = NSTableView()
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
+        tableView.addTableColumn(column)
+
+        let firstCell = try XCTUnwrap(coordinator.tableView(tableView, viewFor: column, row: 0) as? NSTableCellView)
+        let secondCell = try XCTUnwrap(coordinator.tableView(tableView, viewFor: column, row: 1) as? NSTableCellView)
+
+        XCTAssertTrue(firstCell.imageView?.image === secondCell.imageView?.image)
+        XCTAssertEqual(resolveCount, 1)
+    }
+
+    func testMetadataOnlyEntryChangesReloadOnlyChangedRows() {
+        let first = makeTableEntry(name: "alpha.txt")
+        let second = makeTableEntry(name: "beta.txt")
+        let fileTable = FileTableView(
+            entries: [first, second],
+            selectedURLs: [],
+            canPaste: false,
+            canUndo: false,
+            canCloseTab: false,
+            currentURL: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            currentLocation: .fileSystem(URL(fileURLWithPath: "/tmp", isDirectory: true)),
+            currentSort: EntrySortDescriptor(),
+            showsPathColumn: false,
+            onSelectionChange: { _ in },
+            onOpen: { _ in },
+            onCommand: { _ in },
+            onDropItems: { _, _, _ in },
+            onSortChange: { _ in }
+        )
+        let coordinator = fileTable.makeCoordinator()
+        let tableView = ReloadRecordingTableView()
+        tableView.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name")))
+        tableView.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("tags")))
+        coordinator.tableView = tableView
+
+        coordinator.reloadDataIfNeeded()
+        tableView.resetRecordedReloads()
+
+        let updatedFirst = FileEntry(
+            url: first.url,
+            name: first.name,
+            kind: first.kind,
+            typeDescription: first.typeDescription,
+            fileExtension: first.fileExtension,
+            size: first.size,
+            dateModified: first.dateModified,
+            dateCreated: first.dateCreated,
+            dateAccessed: first.dateAccessed,
+            isHidden: first.isHidden,
+            isDirectoryLike: first.isDirectoryLike,
+            isReadable: first.isReadable,
+            finderTags: [FinderTag("Work")],
+            source: first.source
+        )
+        coordinator.parent = FileTableView(
+            entries: [updatedFirst, second],
+            selectedURLs: [],
+            canPaste: false,
+            canUndo: false,
+            canCloseTab: false,
+            currentURL: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            currentLocation: .fileSystem(URL(fileURLWithPath: "/tmp", isDirectory: true)),
+            currentSort: EntrySortDescriptor(),
+            showsPathColumn: false,
+            onSelectionChange: { _ in },
+            onOpen: { _ in },
+            onCommand: { _ in },
+            onDropItems: { _, _, _ in },
+            onSortChange: { _ in }
+        )
+
+        coordinator.reloadDataIfNeeded()
+
+        XCTAssertEqual(tableView.fullReloadCount, 0)
+        XCTAssertEqual(tableView.rowReloads, [IndexSet(integer: 0)])
     }
 
     func testArchiveBackedRowsAreNotWrittenToDragPasteboard() {
@@ -744,11 +971,13 @@ private func makeTableHarness(
     canPaste: Bool,
     canUndo: Bool,
     currentLocation: PaneLocation = .fileSystem(URL(fileURLWithPath: "/tmp", isDirectory: true)),
+    inlineRenameRequest: InlineRenameRequest? = nil,
     openWithApplications: [OpenWithApplication] = [],
     onFocus: @escaping () -> Void = {},
     onSelectionChange: @escaping (Set<URL>) -> Void = { _ in },
     onOpen: @escaping (URL) -> Void = { _ in },
     onOpenWithApplication: @escaping (OpenWithApplication) -> Void = { _ in },
+    onRename: @escaping (String) -> Void = { _ in },
     onCommand: @escaping (ExplorerCommand) -> Void
 ) -> (fileTable: FileTableView, coordinator: FileTableView.Coordinator, tableView: FileTableView.ContextMenuTableView) {
     let selectedURLs = Set(selectedRowIndexes.compactMap { index in
@@ -764,9 +993,11 @@ private func makeTableHarness(
         currentLocation: currentLocation,
         currentSort: EntrySortDescriptor(),
         showsPathColumn: false,
+        inlineRenameRequest: inlineRenameRequest,
         onFocus: onFocus,
         onSelectionChange: onSelectionChange,
         onOpen: onOpen,
+        onRename: onRename,
         onCommand: onCommand,
         openWithApplications: openWithApplications,
         onOpenWithApplication: onOpenWithApplication,
@@ -800,5 +1031,43 @@ private final class ClickedRowTableView: NSTableView {
 
     override var clickedRow: Int {
         clickedRowOverride
+    }
+}
+
+@MainActor
+private final class ReloadRecordingTableView: NSTableView {
+    private(set) var fullReloadCount = 0
+    private(set) var rowReloads: [IndexSet] = []
+
+    override func reloadData() {
+        fullReloadCount += 1
+        super.reloadData()
+    }
+
+    override func reloadData(forRowIndexes rowIndexes: IndexSet, columnIndexes: IndexSet) {
+        rowReloads.append(rowIndexes)
+        super.reloadData(forRowIndexes: rowIndexes, columnIndexes: columnIndexes)
+    }
+
+    func resetRecordedReloads() {
+        fullReloadCount = 0
+        rowReloads = []
+    }
+}
+
+@MainActor
+private extension NSView {
+    var inlineRenameEditor: NSTextField? {
+        if let textField = self as? NSTextField,
+           textField.accessibilityIdentifier() == "FileTableInlineRenameField" {
+            return textField
+        }
+
+        for subview in subviews {
+            if let match = subview.inlineRenameEditor {
+                return match
+            }
+        }
+        return nil
     }
 }

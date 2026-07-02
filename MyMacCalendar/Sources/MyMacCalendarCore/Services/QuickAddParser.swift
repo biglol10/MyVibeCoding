@@ -28,7 +28,7 @@ public struct QuickAddParser {
         let pattern = #"^(\d{4})-(\d{1,2})-(\d{1,2})\s+(.+)$"#
         guard let match = input.firstMatch(pattern: pattern) else { return nil }
         guard let year = Int(match[1]), let month = Int(match[2]), let day = Int(match[3]) else { return nil }
-        guard let date = calendar.date(from: DateComponents(year: year, month: month, day: day)) else { return nil }
+        guard let date = strictDate(year: year, month: month, day: day) else { return nil }
         let normalized = calendar.startOfDay(for: date)
         return QuickAddResult(title: match[4], startDate: normalized, endDate: normalized, needsConfirmation: false)
     }
@@ -37,8 +37,12 @@ public struct QuickAddParser {
         let pattern = #"^(\d{1,2})/(\d{1,2})\s+(.+)$"#
         guard let match = input.firstMatch(pattern: pattern) else { return nil }
         guard let month = Int(match[1]), let day = Int(match[2]) else { return nil }
-        let year = calendar.component(.year, from: now)
-        guard let date = calendar.date(from: DateComponents(year: year, month: month, day: day)) else { return nil }
+        let currentYear = calendar.component(.year, from: now)
+        let startOfToday = calendar.startOfDay(for: now)
+        guard let currentYearDate = strictDate(year: currentYear, month: month, day: day) else { return nil }
+        let date = calendar.startOfDay(for: currentYearDate) < startOfToday
+            ? strictDate(year: currentYear + 1, month: month, day: day) ?? currentYearDate
+            : currentYearDate
         let normalized = calendar.startOfDay(for: date)
         return QuickAddResult(title: match[3], startDate: normalized, endDate: normalized, needsConfirmation: false)
     }
@@ -68,6 +72,19 @@ public struct QuickAddParser {
         }
 
         return nil
+    }
+
+    private func strictDate(year: Int, month: Int, day: Int) -> Date? {
+        guard let date = calendar.date(from: DateComponents(year: year, month: month, day: day)) else {
+            return nil
+        }
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        guard components.year == year,
+              components.month == month,
+              components.day == day else {
+            return nil
+        }
+        return date
     }
 }
 

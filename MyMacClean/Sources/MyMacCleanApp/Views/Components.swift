@@ -156,7 +156,7 @@ struct DeleteActionButton: View {
                     .frame(width: 28, height: 28)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Permanently Delete Selected Items")
+                    Text("Move Selected Items to Trash")
                         .font(.headline.weight(.semibold))
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)

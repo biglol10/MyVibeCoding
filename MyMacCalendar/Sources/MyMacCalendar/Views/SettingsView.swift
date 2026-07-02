@@ -280,25 +280,26 @@ struct SettingsView: View {
     private func ensureSettings() {
         if settingsRows.isEmpty {
             modelContext.insert(AppSettings())
-            try? modelContext.save()
+            saveModelContext("설정을 만들 수 없습니다.")
         }
     }
 
     private func setReminderTime(hour: Int, minute: Int) {
         settings.defaultReminderHour = min(max(hour, 0), 23)
         settings.defaultReminderMinute = min(max(minute, 0), 59)
-        try? modelContext.save()
+        saveModelContext("알림 시간을 저장할 수 없습니다.")
     }
 
     private func setLaunchAtLogin(_ isEnabled: Bool) {
         do {
             try LoginItemController.setEnabled(isEnabled)
             settings.launchAtLogin = isEnabled
-            try modelContext.save()
-            notifyAppSettingsChanged()
+            if saveModelContext("자동 실행 설정을 저장할 수 없습니다.") {
+                notifyAppSettingsChanged()
+            }
         } catch {
             settings.launchAtLogin = false
-            try? modelContext.save()
+            saveModelContext("자동 실행 설정을 되돌릴 수 없습니다.")
             settingsErrorMessage = error.localizedDescription
         }
     }
@@ -308,7 +309,7 @@ struct SettingsView: View {
         let year = Calendar.current.component(.year, from: newHolidayDate)
         modelContext.insert(HolidayRecord(date: Calendar.current.startOfDay(for: newHolidayDate), title: normalizedTitle, source: .manual, year: year))
         newHolidayTitle = ""
-        try? modelContext.save()
+        saveModelContext("휴일을 저장할 수 없습니다.")
     }
 
     private func fetchOnlineHolidays() {
@@ -341,12 +342,10 @@ struct SettingsView: View {
             modelContext.insert(holiday)
         }
 
-        do {
-            try modelContext.save()
+        if saveModelContext("휴일을 저장할 수 없습니다.") {
             holidayFetchMessage = newRecords.isEmpty ? "새 휴일 없음" : "\(newRecords.count)개 추가됨"
-        } catch {
+        } else {
             holidayFetchMessage = "저장 실패"
-            settingsErrorMessage = error.localizedDescription
         }
         isFetchingHolidays = false
     }
@@ -357,7 +356,7 @@ struct SettingsView: View {
         } else {
             modelContext.delete(holiday)
         }
-        try? modelContext.save()
+        saveModelContext("휴일 변경사항을 저장할 수 없습니다.")
     }
 
     private func binding<T>(_ keyPath: ReferenceWritableKeyPath<AppSettings, T>) -> Binding<T> {
@@ -365,10 +364,22 @@ struct SettingsView: View {
             get: { settings[keyPath: keyPath] },
             set: {
                 settings[keyPath: keyPath] = $0
-                try? modelContext.save()
-                notifyAppSettingsChanged()
+                if saveModelContext("설정을 저장할 수 없습니다.") {
+                    notifyAppSettingsChanged()
+                }
             }
         )
+    }
+
+    @discardableResult
+    private func saveModelContext(_ fallbackMessage: String) -> Bool {
+        do {
+            try modelContext.save()
+            return true
+        } catch {
+            settingsErrorMessage = error.localizedDescription.isEmpty ? fallbackMessage : error.localizedDescription
+            return false
+        }
     }
 
     private func notifyAppSettingsChanged() {

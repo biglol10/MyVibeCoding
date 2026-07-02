@@ -133,6 +133,26 @@ final class ZipExtractionServiceTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: tempDirectory.appendingPathComponent("evil.txt").path))
     }
 
+    func testUnsafeZipEntryFailureIsNotReportedAsReadFailure() async throws {
+        let zipURL = try makeArchive(
+            named: "unsafe-classification.zip",
+            entries: [
+                ("safe.txt", "safe"),
+                ("../evil.txt", "evil")
+            ]
+        )
+
+        do {
+            _ = try await ZipExtractionService().extract([zipURL], to: tempDirectory)
+            XCTFail("Expected unsafe ZIP extraction to fail")
+        } catch let error as ExplorerError {
+            XCTAssertEqual(
+                error,
+                .archiveFailed("ZIP entry attempted to extract outside destination: ../evil.txt")
+            )
+        }
+    }
+
     func testExtractionFailureRemovesPartialDestinationFolder() async throws {
         let zipURL = try makeArchive(
             named: "partial.zip",
@@ -145,12 +165,19 @@ final class ZipExtractionServiceTests: XCTestCase {
         do {
             _ = try await ZipExtractionService().extract([zipURL], to: tempDirectory)
             XCTFail("Expected extraction to fail")
-        } catch {
+        } catch let error as ExplorerError {
+            if case .archiveFailed = error {
+                // Expected classification.
+            } else {
+                XCTFail("Expected archive failure, got \(error)")
+            }
             XCTAssertFalse(
                 FileManager.default.fileExists(
                     atPath: tempDirectory.appendingPathComponent("partial", isDirectory: true).path
                 )
             )
+        } catch {
+            XCTFail("Expected archive failure, got \(error)")
         }
     }
 

@@ -46,11 +46,11 @@ public struct OrphanFileScanner: Sendable {
         var groupedCandidates: [String: [RelatedFileCandidate]] = [:]
 
         for (root, kind) in scanRoots() where FileManager.default.fileExists(atPath: root.path) {
-            let urls = try FileManager.default.contentsOfDirectory(
+            let urls = (try? FileManager.default.contentsOfDirectory(
                 at: root,
                 includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey],
                 options: [.skipsHiddenFiles]
-            ).map { root.appendingPathComponent($0.lastPathComponent) }
+            ).map { root.appendingPathComponent($0.lastPathComponent) }) ?? []
 
             for url in urls {
                 guard let identifier = bundleIdentifierCandidate(from: url.lastPathComponent) else { continue }
@@ -74,7 +74,7 @@ public struct OrphanFileScanner: Sendable {
                 let candidate = RelatedFileCandidate(
                     url: url,
                     kind: kind,
-                    size: (try? sizeCalculator.sizeOfItem(at: url, recursive: false)) ?? 0,
+                    size: (try? sizeCalculator.sizeOfItem(at: url)) ?? 0,
                     matchReason: "orphan bundle identifier match",
                     confidence: .high,
                     evidence: [evidence],

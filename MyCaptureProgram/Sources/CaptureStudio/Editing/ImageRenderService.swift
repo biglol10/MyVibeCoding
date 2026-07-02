@@ -2,7 +2,7 @@ import AppKit
 import CoreImage
 import Foundation
 
-public protocol ImageRenderServicing {
+public protocol ImageRenderServicing: Sendable {
     func renderPNG(basePNGData: Data, layers: [EditorLayer]) throws -> Data
 }
 
@@ -60,7 +60,7 @@ public struct AppKitImageRenderService: ImageRenderServicing {
         NSGraphicsContext.current?.cgContext.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
 
         for layer in layers {
-            draw(layer)
+            draw(layer, baseImage: cgImage)
         }
 
         NSGraphicsContext.restoreGraphicsState()
@@ -72,7 +72,7 @@ public struct AppKitImageRenderService: ImageRenderServicing {
         return data
     }
 
-    private func draw(_ layer: EditorLayer) {
+    private func draw(_ layer: EditorLayer, baseImage: CGImage) {
         switch layer {
         case .rectangle(let shape):
             drawShape(shape.frame, style: shape.style, oval: false)
@@ -87,7 +87,7 @@ public struct AppKitImageRenderService: ImageRenderServicing {
         case .text(let text):
             drawText(text)
         case .redaction(let redaction):
-            drawRedaction(redaction)
+            drawRedaction(redaction, baseImage: baseImage)
         }
     }
 
@@ -134,9 +134,42 @@ public struct AppKitImageRenderService: ImageRenderServicing {
         text.text.draw(in: text.frame.insetBy(dx: 6, dy: 4), withAttributes: attributes)
     }
 
-    private func drawRedaction(_ redaction: RedactionLayer) {
-        LayerColor.black.nsColor.setFill()
-        redaction.frame.fill()
+    private func drawRedaction(_ redaction: RedactionLayer, baseImage: CGImage) {
+        switch redaction.mode {
+        case .solid:
+            LayerColor.black.nsColor.setFill()
+            redaction.frame.fill()
+        case .blur(let radius):
+            drawBlurredRegion(redaction.frame, radius: radius, baseImage: baseImage)
+        }
+    }
+
+    private func drawBlurredRegion(_ frame: CGRect, radius: CGFloat, baseImage: CGImage) {
+        let imageBounds = CGRect(x: 0, y: 0, width: baseImage.width, height: baseImage.height)
+        let targetFrame = frame.intersection(imageBounds)
+        guard !targetFrame.isNull, targetFrame.width > 0, targetFrame.height > 0 else {
+            return
+        }
+
+        let coreImageFrame = CGRect(
+            x: targetFrame.minX,
+            y: CGFloat(baseImage.height) - targetFrame.maxY,
+            width: targetFrame.width,
+            height: targetFrame.height
+        )
+        let inputImage = CIImage(cgImage: baseImage)
+            .clampedToExtent()
+            .cropped(to: coreImageFrame)
+        let blurredImage = inputImage
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: max(0, radius)])
+            .cropped(to: coreImageFrame)
+        let context = CIContext(options: nil)
+
+        guard let blurredCGImage = context.createCGImage(blurredImage, from: coreImageFrame) else {
+            return
+        }
+
+        NSGraphicsContext.current?.cgContext.draw(blurredCGImage, in: targetFrame)
     }
 }
 

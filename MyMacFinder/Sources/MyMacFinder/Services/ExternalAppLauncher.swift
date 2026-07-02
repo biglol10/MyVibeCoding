@@ -27,20 +27,72 @@ public protocol ExternalAppLaunching: AnyObject {
     func applications(toOpen url: URL) -> [OpenWithApplication]
 }
 
+public struct ExternalCommandInvocation: Equatable, Sendable {
+    public let executableURL: URL
+    public let arguments: [String]
+    public let failureMessage: String
+
+    public init(executableURL: URL, arguments: [String], failureMessage: String) {
+        self.executableURL = executableURL.standardizedFileURL
+        self.arguments = arguments
+        self.failureMessage = failureMessage
+    }
+}
+
+@MainActor
+public protocol ExternalCommandRunning: AnyObject {
+    func run(_ invocation: ExternalCommandInvocation) async throws
+}
+
+public final class ProcessExternalCommandRunner: ExternalCommandRunning {
+    public init() {}
+
+    public func run(_ invocation: ExternalCommandInvocation) async throws {
+        do {
+            let status = try await Task.detached(priority: .userInitiated) {
+                let process = Process()
+                process.executableURL = invocation.executableURL
+                process.arguments = invocation.arguments
+                process.standardOutput = Pipe()
+                process.standardError = Pipe()
+                try process.run()
+                process.waitUntilExit()
+                return process.terminationStatus
+            }.value
+
+            guard status == 0 else {
+                throw ExplorerError.externalCommandFailed(invocation.failureMessage)
+            }
+        } catch let error as ExplorerError {
+            throw error
+        } catch {
+            throw ExplorerError.externalCommandFailed(invocation.failureMessage)
+        }
+    }
+}
+
 @MainActor
 public final class AppKitExternalAppLauncher: ExternalAppLaunching {
+    private static let vscodeFailureMessage = "Visual Studio Code is not installed or the code command was not found."
+
     private let workspace: any WorkspaceApplicationOpening
     private let terminalApplicationURL: URL
+    private let commandRunner: any ExternalCommandRunning
+    private let codeCommandShellURL: URL
 
     public init(
         workspace: any WorkspaceApplicationOpening = NSWorkspace.shared,
         terminalApplicationURL: URL = URL(
             fileURLWithPath: "/System/Applications/Utilities/Terminal.app",
             isDirectory: true
-        )
+        ),
+        commandRunner: any ExternalCommandRunning = ProcessExternalCommandRunner(),
+        codeCommandShellURL: URL? = nil
     ) {
         self.workspace = workspace
         self.terminalApplicationURL = terminalApplicationURL.standardizedFileURL
+        self.commandRunner = commandRunner
+        self.codeCommandShellURL = (codeCommandShellURL ?? Self.defaultShellURL()).standardizedFileURL
     }
 
     public func openDefault(_ url: URL) {
@@ -53,7 +105,7 @@ public final class AppKitExternalAppLauncher: ExternalAppLaunching {
 
     public func openTerminal(at directory: URL) async throws {
         guard FileManager.default.fileExists(atPath: terminalApplicationURL.path) else {
-            throw ExplorerError.readFailed("Terminal.app was not found.")
+            throw ExplorerError.externalCommandFailed("Terminal.app was not found.")
         }
         openWithoutWaitingForCompletion(
             [directory.standardizedFileURL],
@@ -67,12 +119,18 @@ public final class AppKitExternalAppLauncher: ExternalAppLaunching {
             return
         }
 
-        if let commandURL = vscodeCommandURL() {
-            try runProcess(commandURL, arguments: [target.path])
-            return
-        }
-
-        throw ExplorerError.readFailed("Visual Studio Code is not installed or the code command was not found.")
+        try await commandRunner.run(
+            ExternalCommandInvocation(
+                executableURL: codeCommandShellURL,
+                arguments: [
+                    "-lc",
+                    "exec code \"$1\"",
+                    "mymacfinder-code",
+                    target.standardizedFileURL.path
+                ],
+                failureMessage: Self.vscodeFailureMessage
+            )
+        )
     }
 
     public func applications(toOpen url: URL) -> [OpenWithApplication] {
@@ -128,40 +186,12 @@ public final class AppKitExternalAppLauncher: ExternalAppLaunching {
     }
 
     private func vscodeApplicationURL() -> URL? {
-        if let url = workspace.urlForApplication(withBundleIdentifier: "com.microsoft.VSCode") {
-            return url.standardizedFileURL
-        }
-
-        let candidates = [
-            "/Applications/Visual Studio Code.app",
-            FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Applications/Visual Studio Code.app", isDirectory: true)
-                .path,
-            FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Downloads/Visual Studio Code.app", isDirectory: true)
-                .path
-        ]
-
-        return candidates
-            .map { URL(fileURLWithPath: $0, isDirectory: true).standardizedFileURL }
-            .first { FileManager.default.fileExists(atPath: $0.path) }
+        workspace.urlForApplication(withBundleIdentifier: "com.microsoft.VSCode")?.standardizedFileURL
     }
 
-    private func vscodeCommandURL() -> URL? {
-        [
-            "/usr/local/bin/code",
-            "/opt/homebrew/bin/code",
-            "/usr/bin/code"
-        ]
-        .map { URL(fileURLWithPath: $0) }
-        .first { FileManager.default.isExecutableFile(atPath: $0.path) }
-    }
-
-    private func runProcess(_ executableURL: URL, arguments: [String]) throws {
-        let process = Process()
-        process.executableURL = executableURL
-        process.arguments = arguments
-        try process.run()
+    private static func defaultShellURL() -> URL {
+        let shellPath = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        return URL(fileURLWithPath: shellPath)
     }
 
     private func makeApplication(_ url: URL) -> OpenWithApplication {

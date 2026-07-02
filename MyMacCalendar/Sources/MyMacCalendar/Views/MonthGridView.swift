@@ -235,7 +235,11 @@ struct MonthGridView: View {
 
     private var cells: [CalendarDayCell] {
         let components = calendar.dateComponents([.year, .month], from: displayedMonth)
-        return (try? CalendarGridBuilder().makeMonthGrid(year: components.year ?? 2026, month: components.month ?? 1)) ?? []
+        guard let year = components.year,
+              let month = components.month else {
+            return []
+        }
+        return (try? CalendarGridBuilder().makeMonthGrid(year: year, month: month)) ?? []
     }
 
     private var visibleOccurrences: [EventOccurrence] {
@@ -414,18 +418,5 @@ private struct CalendarEntry: Identifiable {
         case .event:
             return Color(hex: colorHex ?? "#4F7DFF").opacity(0.82)
         }
-    }
-}
-
-private extension Color {
-    init(hex: String) {
-        let value = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
-        var int: UInt64 = 0
-        Scanner(string: value).scanHexInt64(&int)
-        self.init(
-            red: Double((int >> 16) & 0xFF) / 255.0,
-            green: Double((int >> 8) & 0xFF) / 255.0,
-            blue: Double(int & 0xFF) / 255.0
-        )
     }
 }

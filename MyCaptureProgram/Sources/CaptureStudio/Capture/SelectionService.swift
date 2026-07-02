@@ -4,11 +4,24 @@ import CoreGraphics
 @MainActor
 public protocol SelectionServicing {
     func selectRectangle() async throws -> CaptureSelection
+    func selectWindow() async throws -> CaptureSelection
+    func selectFullScreen() async throws -> CaptureSelection
+}
+
+public extension SelectionServicing {
+    func selectWindow() async throws -> CaptureSelection {
+        try await selectRectangle()
+    }
+
+    func selectFullScreen() async throws -> CaptureSelection {
+        try await selectRectangle()
+    }
 }
 
 public enum SelectionError: LocalizedError, Equatable {
     case cancelled
     case noScreenAvailable
+    case noWindowAvailable
     case selectionTooSmall
 
     public var errorDescription: String? {
@@ -17,6 +30,8 @@ public enum SelectionError: LocalizedError, Equatable {
             return "Selection was cancelled."
         case .noScreenAvailable:
             return "No screen is available for selection."
+        case .noWindowAvailable:
+            return "No selectable window is available at that point."
         case .selectionTooSmall:
             return "The selected region is too small."
         }
@@ -41,6 +56,32 @@ public final class AppKitSelectionService: SelectionServicing {
     }
 
     public func selectRectangle() async throws -> CaptureSelection {
+        try await selectOverlay(mode: .rectangle)
+    }
+
+    public func selectWindow() async throws -> CaptureSelection {
+        try await selectOverlay(mode: .window)
+    }
+
+    public func selectFullScreen() async throws -> CaptureSelection {
+        let screens = screenProvider()
+        guard !screens.isEmpty else {
+            throw SelectionError.noScreenAvailable
+        }
+
+        let mouseLocation = NSEvent.mouseLocation
+        let screen = screens.first { $0.frame.contains(mouseLocation) }
+            ?? NSScreen.main
+            ?? screens[0]
+        return CaptureSelection(
+            displayID: screen.displayID,
+            screenFrame: screen.frame,
+            rect: screen.frame,
+            scale: screen.backingScaleFactor
+        )
+    }
+
+    private func selectOverlay(mode: SelectionOverlayMode) async throws -> CaptureSelection {
         let screens = screenProvider()
         guard !screens.isEmpty else {
             throw SelectionError.noScreenAvailable
@@ -48,22 +89,30 @@ public final class AppKitSelectionService: SelectionServicing {
 
         return try await SelectionOverlaySession(
             screens: screens,
-            windowVisibilityController: windowVisibilityController
+            windowVisibilityController: windowVisibilityController,
+            mode: mode
         ).select()
     }
+}
+
+enum SelectionOverlayMode {
+    case rectangle
+    case window
 }
 
 @MainActor
 private final class SelectionOverlaySession {
     private let screens: [NSScreen]
     private let windowVisibilityController: CaptureWindowVisibilityControlling
+    private let mode: SelectionOverlayMode
     private var windows: [NSWindow] = []
     private var keyEventMonitor: Any?
     private var continuation: CheckedContinuation<CaptureSelection, Error>?
 
-    init(screens: [NSScreen], windowVisibilityController: CaptureWindowVisibilityControlling) {
+    init(screens: [NSScreen], windowVisibilityController: CaptureWindowVisibilityControlling, mode: SelectionOverlayMode) {
         self.screens = screens
         self.windowVisibilityController = windowVisibilityController
+        self.mode = mode
     }
 
     func select() async throws -> CaptureSelection {
@@ -80,7 +129,7 @@ private final class SelectionOverlaySession {
 
             let windowFrames = SelectionOverlayGeometry.overlayWindowFrames(forScreenFrames: screens.map(\.frame))
             let windows = zip(screens, windowFrames).map { screen, windowFrame in
-                let view = SelectionOverlayView(screen: screen) { [weak self] result in
+                let view = SelectionOverlayView(screen: screen, mode: mode) { [weak self] result in
                     self?.finish(result)
                 }
                 let window = SelectionOverlayWindow(
@@ -153,6 +202,10 @@ enum SelectionOverlayGeometry {
 
     static func globalSelectionRect(localRect: CGRect, screenFrame: CGRect) -> CGRect {
         localRect.offsetBy(dx: screenFrame.minX, dy: screenFrame.minY)
+    }
+
+    static func globalPoint(localPoint: CGPoint, screenFrame: CGRect) -> CGPoint {
+        CGPoint(x: localPoint.x + screenFrame.minX, y: localPoint.y + screenFrame.minY)
     }
 }
 
@@ -307,6 +360,7 @@ enum SelectionOverlayReticle {
 
 private final class SelectionOverlayView: NSView {
     private let screen: NSScreen
+    private let mode: SelectionOverlayMode
     private let completion: (Result<CaptureSelection, Error>) -> Void
     private var acceptsSelectionEvents = false
     private var startPoint: CGPoint?
@@ -314,8 +368,9 @@ private final class SelectionOverlayView: NSView {
     private var cursorPoint: CGPoint?
     private var cursorReassertionTimer: Timer?
 
-    init(screen: NSScreen, completion: @escaping (Result<CaptureSelection, Error>) -> Void) {
+    init(screen: NSScreen, mode: SelectionOverlayMode, completion: @escaping (Result<CaptureSelection, Error>) -> Void) {
         self.screen = screen
+        self.mode = mode
         self.completion = completion
         super.init(frame: SelectionOverlayGeometry.viewFrame(forScreenFrame: screen.frame))
         wantsLayer = true
@@ -367,6 +422,11 @@ private final class SelectionOverlayView: NSView {
             return
         }
 
+        if mode == .window {
+            completeWindowSelection(at: convert(event.locationInWindow, from: nil))
+            return
+        }
+
         startPoint = convert(event.locationInWindow, from: nil)
         currentPoint = startPoint
         needsDisplay = true
@@ -378,6 +438,9 @@ private final class SelectionOverlayView: NSView {
         guard acceptsSelectionEvents else {
             return
         }
+        guard mode == .rectangle else {
+            return
+        }
 
         currentPoint = convert(event.locationInWindow, from: nil)
         needsDisplay = true
@@ -387,6 +450,9 @@ private final class SelectionOverlayView: NSView {
         SelectionOverlayCursor.reassertSelectionCursor()
         updateCursorPoint(with: event)
         guard acceptsSelectionEvents else {
+            return
+        }
+        guard mode == .rectangle else {
             return
         }
 
@@ -438,6 +504,27 @@ private final class SelectionOverlayView: NSView {
         needsDisplay = true
     }
 
+    private func completeWindowSelection(at localPoint: CGPoint) {
+        let globalPoint = SelectionOverlayGeometry.globalPoint(localPoint: localPoint, screenFrame: screen.frame)
+        guard let windowRect = ScreenWindowSelectionResolver.selectionRect(
+            at: globalPoint,
+            on: screen.frame,
+            candidates: ScreenWindowCandidate.currentOnScreenCandidates(),
+            currentProcessID: pid_t(ProcessInfo.processInfo.processIdentifier)
+        ) else {
+            complete(.failure(SelectionError.noWindowAvailable))
+            return
+        }
+
+        let selection = CaptureSelection(
+            displayID: screen.displayID,
+            screenFrame: screen.frame,
+            rect: windowRect,
+            scale: screen.backingScaleFactor
+        )
+        complete(.success(selection))
+    }
+
     private var currentLocalSelectionRect: CGRect? {
         guard let startPoint, let currentPoint else {
             return nil
@@ -457,9 +544,8 @@ private final class SelectionOverlayView: NSView {
         }
 
         let globalRect = SelectionOverlayGeometry.globalSelectionRect(localRect: localRect, screenFrame: screen.frame)
-        let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID ?? CGMainDisplayID()
         return CaptureSelection(
-            displayID: displayID,
+            displayID: screen.displayID,
             screenFrame: screen.frame,
             rect: globalRect,
             scale: screen.backingScaleFactor
@@ -490,5 +576,66 @@ private final class SelectionOverlayView: NSView {
         stopCursorReassertionTimer()
         SelectionOverlayCursor.restoreDefaultCursor()
         completion(result)
+    }
+}
+
+struct ScreenWindowCandidate: Equatable {
+    let bounds: CGRect
+    let ownerProcessID: pid_t
+    let layer: Int
+    let alpha: CGFloat
+
+    static func currentOnScreenCandidates() -> [ScreenWindowCandidate] {
+        guard let windowInfos = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]] else {
+            return []
+        }
+
+        return windowInfos.compactMap { info in
+            guard let boundsDictionary = info[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsDictionary),
+                  let ownerProcessID = info[kCGWindowOwnerPID as String] as? pid_t,
+                  let layer = info[kCGWindowLayer as String] as? Int
+            else {
+                return nil
+            }
+
+            let alpha = (info[kCGWindowAlpha as String] as? CGFloat)
+                ?? CGFloat(info[kCGWindowAlpha as String] as? Double ?? 1)
+            return ScreenWindowCandidate(
+                bounds: bounds,
+                ownerProcessID: ownerProcessID,
+                layer: layer,
+                alpha: alpha
+            )
+        }
+    }
+}
+
+enum ScreenWindowSelectionResolver {
+    static func selectionRect(
+        at point: CGPoint,
+        on screenFrame: CGRect,
+        candidates: [ScreenWindowCandidate],
+        currentProcessID: pid_t
+    ) -> CGRect? {
+        candidates.first { candidate in
+            candidate.ownerProcessID != currentProcessID
+                && candidate.layer == 0
+                && candidate.alpha > 0.05
+                && candidate.bounds.width >= 8
+                && candidate.bounds.height >= 8
+                && candidate.bounds.contains(point)
+                && candidate.bounds.intersects(screenFrame)
+        }
+        .map { $0.bounds.intersection(screenFrame).standardized }
+    }
+}
+
+private extension NSScreen {
+    var displayID: CGDirectDisplayID {
+        deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID ?? CGMainDisplayID()
     }
 }

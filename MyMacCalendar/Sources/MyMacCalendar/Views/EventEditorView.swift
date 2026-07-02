@@ -521,7 +521,11 @@ private struct EventDateGridView: View {
 
     private var cells: [CalendarDayCell] {
         let components = calendar.dateComponents([.year, .month], from: displayedMonth)
-        return (try? CalendarGridBuilder().makeMonthGrid(year: components.year ?? 2026, month: components.month ?? 1)) ?? []
+        guard let year = components.year,
+              let month = components.month else {
+            return []
+        }
+        return (try? CalendarGridBuilder().makeMonthGrid(year: year, month: month)) ?? []
     }
 
     private var monthTitle: String {

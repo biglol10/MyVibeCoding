@@ -241,6 +241,11 @@ struct MyMacFinderApp: App {
                                 Text(ordering.title).tag(ordering)
                             }
                         }
+                        Picker("Text Preview Limit", selection: previewByteLimitBinding) {
+                            ForEach(FilePreviewByteLimit.allCases) { limit in
+                                Text(limit.title).tag(limit)
+                            }
+                        }
                     }
                 }
                 .padding(.top, 8)
@@ -364,6 +369,17 @@ struct MyMacFinderApp: App {
                 var descriptor = explorerStore.defaultSort
                 descriptor.folderFileOrdering = ordering
                 explorerStore.setDefaultSort(descriptor)
+            }
+        )
+    }
+
+    private var previewByteLimitBinding: Binding<FilePreviewByteLimit> {
+        Binding(
+            get: {
+                explorerStore.previewByteLimit
+            },
+            set: { limit in
+                explorerStore.setPreviewByteLimit(limit)
             }
         )
     }

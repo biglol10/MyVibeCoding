@@ -142,7 +142,7 @@ final class CaptureCoordinatorTests: XCTestCase {
         )
 
         await coordinator.startNewCapture()
-        coordinator.copyCurrentDocument()
+        await coordinator.copyCurrentDocument()
 
         XCTAssertEqual(clipboardService.copiedPNGData, service.pngData)
         XCTAssertEqual(appState.statusMessage, "Screenshot copied.")
@@ -169,7 +169,7 @@ final class CaptureCoordinatorTests: XCTestCase {
         )
 
         await coordinator.startNewCapture()
-        coordinator.saveCurrentDocument()
+        await coordinator.saveCurrentDocument()
 
         let fileURL = try XCTUnwrap(appState.currentDocument?.fileURL)
         XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
@@ -413,7 +413,7 @@ final class CaptureCoordinatorTests: XCTestCase {
         )
 
         await coordinator.startNewCapture()
-        coordinator.saveCurrentDocument()
+        await coordinator.saveCurrentDocument()
 
         let fileURL = try XCTUnwrap(appState.currentDocument?.fileURL)
         XCTAssertEqual(fileURL.deletingLastPathComponent().standardizedFileURL, temporaryDirectory.standardizedFileURL)
@@ -524,6 +524,56 @@ final class CaptureCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testScreenshotUsesWindowSelectionWhenAreaTypeIsWindow() async {
+        let appState = AppState(areaType: .window)
+        let settingsStore = makeSettingsStore("windowScreenshot")
+        settingsStore.update { settings in
+            settings.automaticallySaveScreenshots = false
+            settings.copyCapturedImageToClipboard = false
+        }
+        let screenshotService = MockScreenshotService()
+        let selectionService = MockSelectionService()
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: settingsStore,
+            screenshotService: screenshotService,
+            selectionService: selectionService
+        )
+
+        await coordinator.startScreenshotCapture()
+
+        XCTAssertEqual(selectionService.rectangleSelectionCallCount, 0)
+        XCTAssertEqual(selectionService.windowSelectionCallCount, 1)
+        XCTAssertEqual(selectionService.fullScreenSelectionCallCount, 0)
+        XCTAssertEqual(screenshotService.lastSelection, selectionService.windowSelection)
+    }
+
+    @MainActor
+    func testScreenshotUsesFullScreenSelectionWhenAreaTypeIsFullScreen() async {
+        let appState = AppState(areaType: .fullScreen)
+        let settingsStore = makeSettingsStore("fullScreenScreenshot")
+        settingsStore.update { settings in
+            settings.automaticallySaveScreenshots = false
+            settings.copyCapturedImageToClipboard = false
+        }
+        let screenshotService = MockScreenshotService()
+        let selectionService = MockSelectionService()
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: settingsStore,
+            screenshotService: screenshotService,
+            selectionService: selectionService
+        )
+
+        await coordinator.startScreenshotCapture()
+
+        XCTAssertEqual(selectionService.rectangleSelectionCallCount, 0)
+        XCTAssertEqual(selectionService.windowSelectionCallCount, 0)
+        XCTAssertEqual(selectionService.fullScreenSelectionCallCount, 1)
+        XCTAssertEqual(screenshotService.lastSelection, selectionService.fullScreenSelection)
+    }
+
+    @MainActor
     func testStartScreenRecordingDoesNotDependOnSelectedMode() async {
         let appState = AppState(captureMode: .screenshot)
         let settingsStore = makeSettingsStore("directRecording")
@@ -549,6 +599,33 @@ final class CaptureCoordinatorTests: XCTestCase {
         XCTAssertEqual(selectionService.selectionCallCount, 1)
         XCTAssertEqual(recordingService.recordCallCount, 1)
         XCTAssertEqual(appState.statusMessage, "Recording saved.")
+    }
+
+    @MainActor
+    func testRecordingUsesFullScreenSelectionWhenAreaTypeIsFullScreen() async {
+        let appState = AppState(captureMode: .record, areaType: .fullScreen)
+        let settingsStore = makeSettingsStore("fullScreenRecording")
+        settingsStore.update { settings in
+            settings.automaticallySaveRecordings = true
+            settings.countdownSeconds = 0
+        }
+        let recordingService = MockRecordingService()
+        let selectionService = MockSelectionService()
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: settingsStore,
+            screenshotService: MockScreenshotService(),
+            recordingService: recordingService,
+            selectionService: selectionService,
+            delaySleeper: MockDelaySleeper()
+        )
+
+        await coordinator.startScreenRecording()
+
+        XCTAssertEqual(selectionService.rectangleSelectionCallCount, 0)
+        XCTAssertEqual(selectionService.windowSelectionCallCount, 0)
+        XCTAssertEqual(selectionService.fullScreenSelectionCallCount, 1)
+        XCTAssertEqual(recordingService.lastSelection, selectionService.fullScreenSelection)
     }
 
     @MainActor
@@ -916,11 +993,39 @@ private final class MockSelectionService: SelectionServicing {
         rect: CGRect(x: 20, y: 30, width: 400, height: 240),
         scale: 1
     )
+    let windowSelection = CaptureSelection(
+        displayID: 1,
+        screenFrame: CGRect(x: 0, y: 0, width: 1000, height: 800),
+        rect: CGRect(x: 120, y: 140, width: 520, height: 320),
+        scale: 1
+    )
+    let fullScreenSelection = CaptureSelection(
+        displayID: 1,
+        screenFrame: CGRect(x: 0, y: 0, width: 1000, height: 800),
+        rect: CGRect(x: 0, y: 0, width: 1000, height: 800),
+        scale: 1
+    )
     var selectionCallCount = 0
+    var rectangleSelectionCallCount = 0
+    var windowSelectionCallCount = 0
+    var fullScreenSelectionCallCount = 0
 
     func selectRectangle() async throws -> CaptureSelection {
         selectionCallCount += 1
+        rectangleSelectionCallCount += 1
         return selection
+    }
+
+    func selectWindow() async throws -> CaptureSelection {
+        selectionCallCount += 1
+        windowSelectionCallCount += 1
+        return windowSelection
+    }
+
+    func selectFullScreen() async throws -> CaptureSelection {
+        selectionCallCount += 1
+        fullScreenSelectionCallCount += 1
+        return fullScreenSelection
     }
 }
 

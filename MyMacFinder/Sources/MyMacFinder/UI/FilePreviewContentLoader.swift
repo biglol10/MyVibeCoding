@@ -9,8 +9,6 @@ struct FilePreviewReadResult: Sendable {
 enum FilePreviewContentLoader {
     typealias FileReader = @Sendable (_ url: URL, _ readLimit: Int) throws -> FilePreviewReadResult
 
-    static let defaultByteLimit = 16 * 1024
-
     private static let textExtensions: Set<String> = [
         "bash", "c", "conf", "cpp", "cs", "css", "csv", "env", "fish", "go", "h", "hpp",
         "html", "ini", "java", "js", "json", "jsx", "kt", "log", "m", "markdown", "md",
@@ -24,7 +22,7 @@ enum FilePreviewContentLoader {
 
     static func loadContent(
         for entry: FileEntry,
-        byteLimit: Int = defaultByteLimit,
+        byteLimit: Int = FilePreviewByteLimit.balanced.rawValue,
         fileReader: @escaping FileReader = readPreviewData
     ) async -> FilePreviewContent {
         let readTask = Task.detached(priority: .utility) {

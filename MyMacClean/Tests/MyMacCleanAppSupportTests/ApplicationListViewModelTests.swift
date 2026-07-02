@@ -32,7 +32,7 @@ final class ApplicationListViewModelTests: XCTestCase {
 
         await viewModel.loadApps()
         await viewModel.scanSelectedApp()
-        await viewModel.deleteConfirmedItems(confirmation: "DELETE")
+        await viewModel.deleteConfirmedItems(confirmation: "DELETE", mode: .permanent)
 
         XCTAssertEqual(viewModel.apps, [])
         XCTAssertNil(viewModel.selectedApp)
@@ -426,16 +426,24 @@ final class ApplicationListViewModelTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("MyMacCleanPartialDeletionTests-\(UUID().uuidString)", isDirectory: true)
         let appURL = root.appendingPathComponent("Partial.app", isDirectory: true)
         let cacheURL = root.appendingPathComponent("Library/Caches/com.example.partial", isDirectory: true)
-        let lockedCacheFileURL = cacheURL.appendingPathComponent("locked-cache")
-        defer {
-            try? FileManager.default.setAttributes([.immutable: false], ofItemAtPath: lockedCacheFileURL.path)
-            try? FileManager.default.setAttributes([.immutable: false], ofItemAtPath: cacheURL.path)
-            try? FileManager.default.removeItem(at: root)
-        }
+        defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: appURL, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: cacheURL, withIntermediateDirectories: true)
-        try Data(repeating: 1, count: 8).write(to: lockedCacheFileURL)
-        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: lockedCacheFileURL.path)
+        let failingCacheURL = cacheURL.resolvingSymlinksInPath().standardizedFileURL
+        let remover = DeletionFileRemover(
+            trash: { url in
+                if url.resolvingSymlinksInPath().standardizedFileURL == failingCacheURL {
+                    throw CocoaError(.fileWriteNoPermission)
+                }
+                try FileManager.default.removeItem(at: url)
+            },
+            remove: { url in
+                if url.resolvingSymlinksInPath().standardizedFileURL == failingCacheURL {
+                    throw CocoaError(.fileWriteNoPermission)
+                }
+                try FileManager.default.removeItem(at: url)
+            }
+        )
 
         let deletedApp = InstalledApp(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000011")!,
@@ -479,14 +487,17 @@ final class ApplicationListViewModelTests: XCTestCase {
             requiresManualReview: false,
             isProtected: false
         )
-        let viewModel = ApplicationListViewModel(receiptStore: DeletionReceiptStore(fileURL: root.appendingPathComponent("receipts.jsonl")))
+        let viewModel = ApplicationListViewModel(
+            executor: DeletionExecutor(fileRemover: remover),
+            receiptStore: DeletionReceiptStore(fileURL: root.appendingPathComponent("receipts.jsonl"))
+        )
 
         viewModel.apps = [deletedApp, remainingApp]
         viewModel.selectApp(deletedApp)
         viewModel.candidates = [appCandidate, cacheCandidate]
         viewModel.selectedCandidateIDs = [appCandidate.id, cacheCandidate.id]
 
-        await viewModel.deleteConfirmedItems(confirmation: "DELETE")
+        await viewModel.deleteConfirmedItems(confirmation: "DELETE", mode: .permanent)
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: appURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: cacheURL.path))
@@ -904,7 +915,7 @@ final class ApplicationListViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.candidates.isEmpty)
     }
 
-    func testFailedSelectedAppScanClearsPreviousCandidates() async throws {
+    func testSelectedAppScanSkipsUnreadableRootsAndClearsPreviousCandidates() async throws {
         let home = try temporaryDirectory(named: "failed-scan-clears-candidates")
         defer { try? FileManager.default.removeItem(at: home) }
         let appURL = try makeAppBundle(root: home, name: "Broken Scan", bundleIdentifier: "com.example.broken-scan")
@@ -940,9 +951,9 @@ final class ApplicationListViewModelTests: XCTestCase {
 
         await viewModel.scanSelectedApp()
 
-        XCTAssertTrue(viewModel.candidates.isEmpty)
-        XCTAssertTrue(viewModel.selectedCandidateIDs.isEmpty)
-        XCTAssertNotNil(viewModel.errorMessage)
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertTrue(viewModel.candidates.contains { $0.url == appURL })
+        XCTAssertFalse(viewModel.selectedCandidateIDs.contains(staleCandidate.id))
     }
 
     private func temporaryDirectory(named name: String) throws -> URL {

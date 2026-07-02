@@ -69,7 +69,7 @@ public final class CaptureCoordinator: ObservableObject {
             let didHideCaptureWindows = hideCaptureWindowsIfNeeded(settings: settings)
             defer { restoreCaptureWindowsIfNeeded(didHideCaptureWindows) }
             try await waitIfNeeded(seconds: settings.defaultDelaySeconds)
-            let selection = try await selectionService.selectRectangle()
+            let selection = try await selectCaptureArea()
             let result = try await screenshotService.captureImage(selection: selection)
             copyToClipboardIfNeeded(result.pngData, settings: settings)
             if settings.automaticallySaveScreenshots {
@@ -111,7 +111,7 @@ public final class CaptureCoordinator: ObservableObject {
             let settings = settingsStore.settings
             let didHideCaptureWindows = hideCaptureWindowsIfNeeded(settings: settings)
             defer { restoreCaptureWindowsIfNeeded(didHideCaptureWindows) }
-            let selection = try await selectionService.selectRectangle()
+            let selection = try await selectCaptureArea()
             try await waitIfNeeded(seconds: settings.countdownSeconds)
             let outputURL = settings.automaticallySaveRecordings
                 ? fileOutputService.availableRecordingURL(settings: settings)
@@ -153,7 +153,7 @@ public final class CaptureCoordinator: ObservableObject {
         await recordingService.stopRecording()
     }
 
-    public func saveCurrentDocument() {
+    public func saveCurrentDocument() async {
         guard var document = appState.currentDocument else {
             appState.statusMessage = "Nothing to save."
             return
@@ -162,7 +162,7 @@ public final class CaptureCoordinator: ObservableObject {
         switch document.kind {
         case .screenshot:
             do {
-                let outputData = try screenshotDataForOutput(document)
+                let outputData = try await screenshotDataForOutput(document)
                 let fileURL = try fileOutputService.writeScreenshotData(
                     outputData,
                     settings: settingsStore.settings,
@@ -210,7 +210,7 @@ public final class CaptureCoordinator: ObservableObject {
         }
     }
 
-    public func copyCurrentDocument() {
+    public func copyCurrentDocument() async {
         guard let document = appState.currentDocument else {
             appState.statusMessage = "Nothing to copy."
             return
@@ -219,7 +219,7 @@ public final class CaptureCoordinator: ObservableObject {
         switch document.kind {
         case .screenshot:
             do {
-                let outputData = try screenshotDataForOutput(document)
+                let outputData = try await screenshotDataForOutput(document)
                 clipboardService.copyPNGData(outputData)
                 appState.statusMessage = "Screenshot copied."
             } catch {
@@ -271,7 +271,7 @@ public final class CaptureCoordinator: ObservableObject {
         }
 
         do {
-            let data = try screenshotDataForOutput(document)
+            let data = try await screenshotDataForOutput(document)
             let result = try await ocrService.recognizeText(in: data)
             document.ocrResult = result
             appState.currentDocument = document
@@ -311,7 +311,7 @@ public final class CaptureCoordinator: ObservableObject {
             if let existing = document.ocrResult {
                 result = existing
             } else {
-                let data = try screenshotDataForOutput(document)
+                let data = try await screenshotDataForOutput(document)
                 result = try await ocrService.recognizeText(in: data)
                 document.ocrResult = result
             }
@@ -345,7 +345,7 @@ public final class CaptureCoordinator: ObservableObject {
         }
     }
 
-    private func screenshotDataForOutput(_ document: EditorDocument) throws -> Data {
+    private func screenshotDataForOutput(_ document: EditorDocument) async throws -> Data {
         guard let baseData = document.baseImageData ?? document.data else {
             throw ImageRenderError.imageDecodeFailed
         }
@@ -354,7 +354,11 @@ public final class CaptureCoordinator: ObservableObject {
             return document.renderedImageData ?? document.data ?? baseData
         }
 
-        return try imageRenderService.renderPNG(basePNGData: baseData, layers: document.layers)
+        let imageRenderService = imageRenderService
+        let layers = document.layers
+        return try await Task.detached(priority: .userInitiated) {
+            try imageRenderService.renderPNG(basePNGData: baseData, layers: layers)
+        }.value
     }
 
     private func uniqueRedactionCandidates(from candidates: [RedactionCandidate]) -> [RedactionCandidate] {
@@ -398,6 +402,17 @@ public final class CaptureCoordinator: ObservableObject {
     private func ensureScreenCaptureAccess() throws {
         guard screenCapturePermissionChecker.hasScreenCaptureAccess() else {
             throw ScreenCapturePermissionError.accessDenied
+        }
+    }
+
+    private func selectCaptureArea() async throws -> CaptureSelection {
+        switch appState.areaType {
+        case .rectangle:
+            return try await selectionService.selectRectangle()
+        case .window:
+            return try await selectionService.selectWindow()
+        case .fullScreen:
+            return try await selectionService.selectFullScreen()
         }
     }
 

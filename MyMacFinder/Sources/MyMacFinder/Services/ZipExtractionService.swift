@@ -49,7 +49,7 @@ public struct ZipExtractionService: ZipExtracting, @unchecked Sendable {
             do {
                 archive = try Archive(url: zipURL, accessMode: .read)
             } catch {
-                throw ExplorerError.readFailed("ZIP archive could not be read: \(zipURL.path)")
+                throw ExplorerError.archiveFailed("ZIP archive could not be read: \(zipURL.path)")
             }
             let entries = Array(archive)
             try validateEntryPaths(entries)
@@ -80,7 +80,7 @@ public struct ZipExtractionService: ZipExtracting, @unchecked Sendable {
                     try await progress?.checkCancellation()
                     let destination = extractionFolder.appendingPathComponent(entry.path)
                     guard isContained(destination, in: extractionFolder) else {
-                        throw ExplorerError.readFailed("ZIP entry attempted to extract outside destination: \(entry.path)")
+                        throw ExplorerError.archiveFailed("ZIP entry attempted to extract outside destination: \(entry.path)")
                     }
 
                     if entry.type == .directory {
@@ -105,7 +105,7 @@ public struct ZipExtractionService: ZipExtracting, @unchecked Sendable {
                 }
             } catch {
                 rollbackFailedExtraction(resolution.replacedItem, partialDestination: extractionFolder)
-                throw error
+                throw archiveOperationError(error)
             }
 
             createdURLs.append(extractionFolder.standardizedFileURL)
@@ -166,7 +166,7 @@ public struct ZipExtractionService: ZipExtracting, @unchecked Sendable {
         var result: NSURL?
         try fileManager.trashItem(at: url, resultingItemURL: &result)
         guard let result else {
-            throw ExplorerError.readFailed("Item could not be moved to Trash: \(url.path)")
+            throw ExplorerError.archiveFailed("Item could not be moved to Trash: \(url.path)")
         }
         return FileTrashRecord(original: url, trashed: result as URL)
     }
@@ -212,5 +212,15 @@ public struct ZipExtractionService: ZipExtracting, @unchecked Sendable {
         let folderPath = folder.standardizedFileURL.path
         let targetPath = url.standardizedFileURL.path
         return targetPath == folderPath || targetPath.hasPrefix(folderPath + "/")
+    }
+
+    private func archiveOperationError(_ error: Error) -> Error {
+        if error is CancellationError || error is FileOperationCancellation {
+            return error
+        }
+        if let error = error as? ExplorerError {
+            return error
+        }
+        return ExplorerError.archiveFailed(error.localizedDescription)
     }
 }

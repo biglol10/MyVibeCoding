@@ -110,6 +110,14 @@ final class ExplorerKeyboardShortcutTests: XCTestCase {
             .clearSearch
         )
         XCTAssertEqual(
+            ExplorerKeyboardShortcut.command(for: ExplorerShortcut(key: "f5", modifiers: [])),
+            .copyToOppositePane
+        )
+        XCTAssertEqual(
+            ExplorerKeyboardShortcut.command(for: ExplorerShortcut(key: "f6", modifiers: [])),
+            .moveToOppositePane
+        )
+        XCTAssertEqual(
             ExplorerKeyboardShortcut.command(for: ExplorerShortcut(key: "tab", modifiers: [.control])),
             .nextTab
         )
@@ -117,6 +125,12 @@ final class ExplorerKeyboardShortcutTests: XCTestCase {
             ExplorerKeyboardShortcut.command(for: ExplorerShortcut(key: "tab", modifiers: [.control, .shift])),
             .previousTab
         )
+    }
+
+    func testFunctionKeyCodesMapToShortcutKeys() {
+        XCTAssertEqual(ExplorerKeyCodeMapper.key(for: 120, charactersIgnoringModifiers: nil), "f2")
+        XCTAssertEqual(ExplorerKeyCodeMapper.key(for: 96, charactersIgnoringModifiers: nil), "f5")
+        XCTAssertEqual(ExplorerKeyCodeMapper.key(for: 97, charactersIgnoringModifiers: nil), "f6")
     }
 
     func testUnknownShortcutReturnsNil() {

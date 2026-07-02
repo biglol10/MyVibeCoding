@@ -1,4 +1,5 @@
 import AppKit
+import MyMacCalendarCore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -57,7 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func openMainWindowIfNeeded() {
         let hasVisibleMainWindow = NSApp.windows.contains { window in
-            window.title == "MyMacCalendar" && window.isVisible
+            window.title == AppVersion.name && window.isVisible
         }
         if NSApp.windows.isEmpty || hasVisibleMainWindow == false {
             openMainWindow()
@@ -67,7 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @discardableResult
     private func bringExistingMainWindowToFront() -> Bool {
         if let mainWindow = NSApp.windows.first(where: { window in
-            window.title == "MyMacCalendar"
+            window.title == AppVersion.name
         }) {
             mainWindow.makeKeyAndOrderFront(nil)
             return true

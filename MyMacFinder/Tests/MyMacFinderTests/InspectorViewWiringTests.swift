@@ -9,6 +9,7 @@ final class InspectorViewWiringTests: XCTestCase {
         let view = InspectorView(
             selection: [],
             calculatedFolderSizes: [:],
+            previewByteLimit: FilePreviewByteLimit.balanced.rawValue,
             onCommand: { command in
                 receivedCommand = command
             }

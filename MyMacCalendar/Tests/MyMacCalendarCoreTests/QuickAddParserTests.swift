@@ -14,6 +14,37 @@ final class QuickAddParserTests: XCTestCase {
         XCTAssertFalse(result.needsConfirmation)
     }
 
+    func testSlashDateUsesNextYearWhenDateAlreadyPassedThisYear() throws {
+        let parser = QuickAddParser(calendar: calendar)
+        let result = parser.parse("1/2 신년 계획", now: try date(2026, 12, 30))
+
+        XCTAssertEqual(result.title, "신년 계획")
+        XCTAssertEqual(calendar.component(.year, from: result.startDate), 2027)
+        XCTAssertEqual(calendar.component(.month, from: result.startDate), 1)
+        XCTAssertEqual(calendar.component(.day, from: result.startDate), 2)
+        XCTAssertFalse(result.needsConfirmation)
+    }
+
+    func testInvalidSlashDateNeedsConfirmationInsteadOfRollingOver() throws {
+        let parser = QuickAddParser(calendar: calendar)
+        let result = parser.parse("2/30 회의", now: try date(2026, 2, 1))
+
+        XCTAssertEqual(result.title, "2/30 회의")
+        XCTAssertEqual(calendar.component(.month, from: result.startDate), 2)
+        XCTAssertEqual(calendar.component(.day, from: result.startDate), 1)
+        XCTAssertTrue(result.needsConfirmation)
+    }
+
+    func testInvalidIsoDateNeedsConfirmationInsteadOfRollingOver() throws {
+        let parser = QuickAddParser(calendar: calendar)
+        let result = parser.parse("2026-02-30 여행", now: try date(2026, 2, 1))
+
+        XCTAssertEqual(result.title, "2026-02-30 여행")
+        XCTAssertEqual(calendar.component(.month, from: result.startDate), 2)
+        XCTAssertEqual(calendar.component(.day, from: result.startDate), 1)
+        XCTAssertTrue(result.needsConfirmation)
+    }
+
     func testIsoDate() throws {
         let parser = QuickAddParser(calendar: calendar)
         let result = parser.parse("2026-12-25 여행", now: try date(2026, 6, 25))

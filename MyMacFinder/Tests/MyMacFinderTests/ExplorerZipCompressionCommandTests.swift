@@ -4,11 +4,17 @@ import XCTest
 
 private final class CapturingZipCompressor: ZipCompressing, @unchecked Sendable {
     var result: FileOperationResult
+    var error: (any Error)?
     private(set) var capturedURLs: [URL] = []
     private(set) var capturedDestination: URL?
 
     init(result: FileOperationResult) {
         self.result = result
+    }
+
+    init(error: any Error) {
+        self.result = FileOperationResult()
+        self.error = error
     }
 
     func compress(
@@ -18,6 +24,9 @@ private final class CapturingZipCompressor: ZipCompressing, @unchecked Sendable 
     ) async throws -> FileOperationResult {
         capturedURLs = urls
         capturedDestination = destinationFolder
+        if let error {
+            throw error
+        }
         return result
     }
 }
@@ -78,5 +87,24 @@ final class ExplorerZipCompressionCommandTests: XCTestCase {
         XCTAssertEqual(compressor.capturedURLs, [fileURL.standardizedFileURL])
         XCTAssertEqual(compressor.capturedDestination, tempDirectory.standardizedFileURL)
         XCTAssertTrue(store.canUndo)
+    }
+
+    func testGenericCompressionFailureIsReportedAsArchiveFailure() async throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MyMacFinderCompressStore-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+        let fileURL = tempDirectory.appendingPathComponent("a.txt")
+        try "a".write(to: fileURL, atomically: true, encoding: .utf8)
+        let compressor = CapturingZipCompressor(
+            error: NSError(domain: "ZipCompressionTest", code: 9, userInfo: [NSLocalizedDescriptionKey: "compress failed"])
+        )
+        let store = ExplorerStore(initialURL: tempDirectory, directoryWatcher: nil, zipCompressor: compressor)
+        await store.refresh()
+        store.updateSelection([fileURL.standardizedFileURL])
+
+        await store.perform(.compressToZip)
+
+        XCTAssertEqual(store.visibleError, .archiveFailed("compress failed"))
     }
 }

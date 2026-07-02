@@ -108,6 +108,18 @@ public enum ExplorerFocusTarget: Equatable, Sendable {
     case clear
 }
 
+public struct InlineRenameRequest: Equatable, Sendable {
+    public let id: UUID
+    public let paneID: PaneID
+    public let url: URL
+
+    public init(id: UUID = UUID(), paneID: PaneID, url: URL) {
+        self.id = id
+        self.paneID = paneID
+        self.url = url.standardizedFileURL
+    }
+}
+
 public enum SearchScope: String, Codable, CaseIterable, Identifiable, Sendable {
     case currentFolder
     case recursive
@@ -332,6 +344,9 @@ public enum ExplorerError: LocalizedError, Equatable, Sendable {
     case notDirectory(String)
     case permissionDenied(String)
     case readFailed(String)
+    case operationFailed(String)
+    case archiveFailed(String)
+    case externalCommandFailed(String)
 
     public var errorDescription: String? {
         switch self {
@@ -343,7 +358,10 @@ public enum ExplorerError: LocalizedError, Equatable, Sendable {
             return "Path is not a folder: \(path)"
         case .permissionDenied(let path):
             return "Permission denied: \(path)"
-        case .readFailed(let message):
+        case .readFailed(let message),
+             .operationFailed(let message),
+             .archiveFailed(let message),
+             .externalCommandFailed(let message):
             return message
         }
     }

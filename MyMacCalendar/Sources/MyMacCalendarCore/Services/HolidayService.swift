@@ -12,6 +12,12 @@ public struct HolidayImport: Equatable, Sendable {
     }
 }
 
+public enum HolidayServiceError: Error, Equatable {
+    case invalidURL
+    case badStatus(Int)
+    case invalidResponse
+}
+
 private struct NagerHolidayDTO: Decodable {
     let date: String
     let localName: String
@@ -73,8 +79,21 @@ public struct HolidayService {
     }
 
     public func fetchKoreanHolidays(year: Int) async throws -> [HolidayImport] {
-        let url = URL(string: "https://date.nager.at/api/v3/PublicHolidays/\(year)/KR")!
-        let (data, _) = try await session.data(from: url)
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "date.nager.at"
+        components.path = "/api/v3/PublicHolidays/\(year)/KR"
+        guard let url = components.url else {
+            throw HolidayServiceError.invalidURL
+        }
+
+        let (data, response) = try await session.data(from: url)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw HolidayServiceError.invalidResponse
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw HolidayServiceError.badStatus(httpResponse.statusCode)
+        }
         return try decoder.decode(data: data, calendar: Calendar(identifier: .gregorian))
     }
 }

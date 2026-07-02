@@ -77,10 +77,7 @@ public final class ApplicationListViewModel {
         executor: DeletionExecutor = DeletionExecutor(),
         verifier: DeletionVerifier = DeletionVerifier(),
         runningApplicationMonitor: RunningApplicationMonitor = RunningApplicationMonitor(),
-        receiptStore: DeletionReceiptStore = DeletionReceiptStore(
-            fileURL: FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Library/Application Support/MyMacClean/deletion-receipts.jsonl")
-        )
+        receiptStore: DeletionReceiptStore = .default()
     ) {
         self.discoveryService = discoveryService
         self.excludedBundleIdentifiers = Set(excludedBundleIdentifiers.map { $0.lowercased() })
@@ -168,7 +165,11 @@ public final class ApplicationListViewModel {
         return try planner.makePlan(app: selectedApp, candidates: candidates, selectedIDs: selectedCandidateIDs)
     }
 
-    public func deleteConfirmedItems(confirmation: String, force: Bool = false) async {
+    public func deleteConfirmedItems(
+        confirmation: String,
+        force: Bool = false,
+        mode: DeletionMode = .moveToTrash
+    ) async {
         guard !isDeleting else { return }
         if let selectedApp, runningApplicationMonitor.isRunning(selectedApp) {
             clearDeletionOutcome()
@@ -181,7 +182,7 @@ public final class ApplicationListViewModel {
 
         do {
             let plan = try makePlan()
-            let results = await executor.execute(plan: plan, confirmation: confirmation, force: force)
+            let results = await executor.execute(plan: plan, confirmation: confirmation, force: force, mode: mode)
             let verificationResults = await verifier.verify(plan: plan, executionResults: results)
             let receipt = DeletionReceipt(
                 appName: plan.app.displayName,
@@ -193,7 +194,7 @@ public final class ApplicationListViewModel {
                 },
                 executionResults: results,
                 verificationResults: verificationResults,
-                confirmationMatched: results.allSatisfy { $0.errorMessage != "confirmation phrase mismatch" }
+                confirmationMatched: results.allSatisfy { $0.errorMessage != DeletionExecutionErrorMessage.confirmationMismatch }
             )
             do {
                 try receiptStore.append(receipt)

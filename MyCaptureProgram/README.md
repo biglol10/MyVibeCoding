@@ -95,7 +95,7 @@ CAPTURE_STUDIO_RUN_INTEGRATION=1 swift test
 
 ## Screenshot Editing
 
-After a screenshot is captured, the editor toolbar can annotate, OCR, and redact the screenshot before saving or copying. Save and Copy flatten annotation layers into a PNG. OCR and Quick Redact run on demand.
+After a screenshot is captured, the editor toolbar can annotate, OCR, and redact the screenshot before saving or copying. Save and Copy flatten annotation layers into a PNG, including blur redactions. OCR and Quick Redact run on demand.
 
 ## Current Milestone
 
@@ -107,8 +107,8 @@ This milestone includes:
 - Customizable shortcut model with reset defaults
 - Output filename and folder fallback model
 - Capture coordinator interfaces
-- Real screen region selection
-- Screenshot capture and screen recording
+- Rectangle, window, and full-screen selection modes
+- Screenshot capture and screen recording with off-main-thread sample handling
 - Screenshot editing, OCR, and quick redaction
 
 Color picker and recording trim are separate implementation milestones.

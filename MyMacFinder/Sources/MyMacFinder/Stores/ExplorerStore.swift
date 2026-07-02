@@ -28,6 +28,7 @@ public final class ExplorerStore: ObservableObject {
     @Published public private(set) var showHiddenFiles: Bool
     @Published public private(set) var paneMode: ExplorerPaneMode
     @Published public private(set) var defaultSort: EntrySortDescriptor
+    @Published public private(set) var previewByteLimit: FilePreviewByteLimit
     @Published public private(set) var calculatedFolderSizes: [URL: Int64]
     @Published public private(set) var searchQuery: String {
         didSet {
@@ -42,6 +43,7 @@ public final class ExplorerStore: ObservableObject {
     @Published public private(set) var recursiveSearchResults: [FileEntry]?
     @Published public private(set) var isSearching: Bool
     @Published public private(set) var requestedFocus: ExplorerFocusTarget?
+    @Published public private(set) var inlineRenameRequest: InlineRenameRequest?
     @Published public private(set) var undoStack: [FileUndoAction]
     @Published public var isInspectorVisible: Bool {
         didSet {
@@ -75,6 +77,7 @@ public final class ExplorerStore: ObservableObject {
     private let zipCompressor: any ZipCompressing
     private let fileSearchService: any FileSearchServicing
     private let volumeService: any VolumeListing
+    private let pathStatusChecker: any PathStatusChecking
     private let folderSizeService: any FolderSizeCalculating
     private let quickLookService: (any QuickLooking)?
     private let settingsStore: ExplorerSettingsStoring
@@ -94,10 +97,13 @@ public final class ExplorerStore: ObservableObject {
     private var watchedDirectoryURLs: Set<URL>
     private var isApplyingTabState: Bool
     private var searchTask: Task<Void, Never>?
+    private var finderTagPopulationTask: Task<Void, Never>?
+    private var finderTagPopulationToken: UUID
     private var activeOperationReporter: FileOperationProgressReporter?
     private var activeFolderAccesses: [FolderAccessGrantID: ResolvedFolderAccess]
     private var unavailableFolderGrantIDs: Set<FolderAccessGrantID>
     private var sidebarState: SidebarState
+    private var missingFavoriteURLs: Set<URL>
     private static let maxRecentFolders = 5
 
     public init(
@@ -117,6 +123,7 @@ public final class ExplorerStore: ObservableObject {
         zipCompressor: any ZipCompressing = ZipCompressionService(),
         fileSearchService: any FileSearchServicing = FileSearchService(),
         volumeService: any VolumeListing = VolumeService(),
+        pathStatusChecker: any PathStatusChecking = FileManagerPathStatusChecker(),
         folderSizeService: any FolderSizeCalculating = FolderSizeService(),
         quickLookService: (any QuickLooking)? = QuickLookPreviewService(),
         filePasteboardReader: @escaping FilePasteboardReader = {
@@ -155,12 +162,14 @@ public final class ExplorerStore: ObservableObject {
         self.showHiddenFiles = settings.showHiddenFiles
         self.paneMode = settings.paneMode
         self.defaultSort = settings.defaultSort
+        self.previewByteLimit = settings.previewByteLimit
         self.calculatedFolderSizes = [:]
         self.searchQuery = ""
         self.searchOptions = ExplorerSearchOptions()
         self.recursiveSearchResults = nil
         self.isSearching = false
         self.requestedFocus = nil
+        self.inlineRenameRequest = nil
         self.undoStack = []
         self.isInspectorVisible = settings.isInspectorVisible
         self.activePaneIndex = initialActivePaneIndex
@@ -174,7 +183,7 @@ public final class ExplorerStore: ObservableObject {
         self.activeTabIndex = 0
         self.mountedVolumes = []
         self.volumeError = nil
-        self.favoriteSidebarItems = Self.favoriteItems(from: sidebarState.favorites)
+        self.favoriteSidebarItems = Self.favoriteItems(from: sidebarState.favorites, missingURLs: [])
         self.recentFolders = sidebarState.recentFolders
         self.activeOperationProgress = nil
         self.isToolbarTextInputFocused = false
@@ -190,6 +199,7 @@ public final class ExplorerStore: ObservableObject {
         self.zipCompressor = zipCompressor
         self.fileSearchService = fileSearchService
         self.volumeService = volumeService
+        self.pathStatusChecker = pathStatusChecker
         self.folderSizeService = folderSizeService
         self.quickLookService = quickLookService
         self.filePasteboardReader = filePasteboardReader
@@ -210,10 +220,13 @@ public final class ExplorerStore: ObservableObject {
         self.watchedDirectoryURLs = []
         self.isApplyingTabState = false
         self.searchTask = nil
+        self.finderTagPopulationTask = nil
+        self.finderTagPopulationToken = UUID()
         self.activeOperationReporter = nil
         self.activeFolderAccesses = [:]
         self.unavailableFolderGrantIDs = []
         self.sidebarState = sidebarState
+        self.missingFavoriteURLs = []
 
         loadPersistedFolderGrants()
         if sidebarState != loadedSidebarState {
@@ -241,26 +254,47 @@ public final class ExplorerStore: ObservableObject {
         isToolbarTextInputFocused = isFocused
     }
 
+    public func setPreviewByteLimit(_ limit: FilePreviewByteLimit) {
+        guard previewByteLimit != limit else {
+            return
+        }
+        previewByteLimit = limit
+        persistSettings()
+    }
+
     public func requestToolbarFocusClear() {
         isToolbarTextInputFocused = false
         requestedFocus = .clear
     }
 
     public func isCommandEnabled(_ command: ExplorerCommand) -> Bool {
+        isCommandEnabled(command, forPaneAt: activePaneIndex)
+    }
+
+    public func isCommandEnabled(_ command: ExplorerCommand, forPaneAt paneIndex: Int) -> Bool {
+        guard panes.indices.contains(paneIndex) else {
+            return false
+        }
         if isToolbarTextInputFocused && command.yieldsToTextEditing {
             return false
         }
+        if (command == .copyToOppositePane || command == .moveToOppositePane)
+            && oppositePaneDestination(for: paneIndex) == nil {
+            return false
+        }
+        let pane = panes[paneIndex]
+        let selectedEntries = visibleEntries(forPaneAt: paneIndex).filter { pane.selectedURLs.contains($0.url) }
 
         return command.isEnabled(
-            selectionCount: activePane.selectedURLs.count,
+            selectionCount: pane.selectedURLs.count,
             canPaste: canPaste,
             canUndo: canUndo,
             canCloseTab: canCloseTab,
-            canGoBack: canGoBack,
-            canGoForward: canGoForward,
-            canGoUp: canGoUp,
-            selectedEntries: activeSelectedEntries,
-            isArchiveLocation: activePane.location.isArchive
+            canGoBack: !pane.backStack.isEmpty,
+            canGoForward: !pane.forwardStack.isEmpty,
+            canGoUp: canGoUp(forPaneAt: paneIndex),
+            selectedEntries: selectedEntries,
+            isArchiveLocation: pane.location.isArchive
         )
     }
 
@@ -360,6 +394,7 @@ public final class ExplorerStore: ObservableObject {
 
     public func loadInitialDirectory() async {
         await refreshMountedVolumes()
+        await refreshFavoriteSidebarItemStatuses()
         await reloadAllPanes()
     }
 
@@ -524,7 +559,7 @@ public final class ExplorerStore: ObservableObject {
     public func resolveAndNavigate(_ rawPath: String) async {
         do {
             let targetURL = try pathResolver.resolve(rawPath, relativeTo: activePane.currentURL)
-            if FileManager.default.fileExists(atPath: targetURL.path) {
+            if await pathStatusChecker.status(for: targetURL).exists {
                 await navigate(to: targetURL)
                 return
             }
@@ -554,13 +589,13 @@ public final class ExplorerStore: ObservableObject {
     public func navigateToMountedVolume(_ volume: MountedVolume) async {
         requestToolbarFocusClear()
         let url = volume.url.standardizedFileURL
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+        let status = await pathStatusChecker.status(for: url)
+        guard status.exists, status.isDirectory else {
             mountedVolumes.removeAll { $0.url.standardizedFileURL == url }
             volumeError = .pathDoesNotExist(url.path)
             return
         }
-        guard volume.isReadable, FileManager.default.isReadableFile(atPath: url.path) else {
+        guard volume.isReadable, status.isReadable else {
             volumeError = .permissionDenied(url.path)
             return
         }
@@ -574,8 +609,8 @@ public final class ExplorerStore: ObservableObject {
     public func navigateToRecentFolder(_ folder: SidebarRecentFolder) async {
         requestToolbarFocusClear()
         let url = folder.url.standardizedFileURL
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+        let status = await pathStatusChecker.status(for: url)
+        guard status.exists, status.isDirectory else {
             visibleError = nil
             removeRecentFolder(url)
             return
@@ -664,22 +699,42 @@ public final class ExplorerStore: ObservableObject {
         guard let target = activePane.backStack.last else {
             return
         }
-        var pane = activePane
-        pane.backStack.removeLast()
-        pane.forwardStack.append(pane.location)
-        panes[activePaneIndex] = pane
-        try? await loadLocation(target, pushHistory: false)
+        let previousLocation = activePane.location
+        let previousBackStack = activePane.backStack
+        let previousForwardStack = activePane.forwardStack
+
+        do {
+            try await loadLocation(target, pushHistory: false)
+            var pane = activePane
+            pane.backStack = Array(previousBackStack.dropLast())
+            pane.forwardStack = previousForwardStack + [previousLocation]
+            panes[activePaneIndex] = pane
+        } catch let error as ExplorerError {
+            present(error)
+        } catch {
+            visibleError = .readFailed(error.localizedDescription)
+        }
     }
 
     public func goForward() async {
         guard let target = activePane.forwardStack.last else {
             return
         }
-        var pane = activePane
-        pane.forwardStack.removeLast()
-        pane.backStack.append(pane.location)
-        panes[activePaneIndex] = pane
-        try? await loadLocation(target, pushHistory: false)
+        let previousLocation = activePane.location
+        let previousBackStack = activePane.backStack
+        let previousForwardStack = activePane.forwardStack
+
+        do {
+            try await loadLocation(target, pushHistory: false)
+            var pane = activePane
+            pane.forwardStack = Array(previousForwardStack.dropLast())
+            pane.backStack = previousBackStack + [previousLocation]
+            panes[activePaneIndex] = pane
+        } catch let error as ExplorerError {
+            present(error)
+        } catch {
+            visibleError = .readFailed(error.localizedDescription)
+        }
     }
 
     public func goUp() async {
@@ -713,6 +768,7 @@ public final class ExplorerStore: ObservableObject {
         activePaneIndex = index
         pathInput = activePane.location.displayPath
         trimSelectionToVisibleEntries()
+        scheduleFinderTagPopulationIfNeeded()
         startWatchingVisibleDirectories()
     }
 
@@ -734,6 +790,7 @@ public final class ExplorerStore: ObservableObject {
         options.scope = scope
         searchOptions = options
         recursiveSearchResults = nil
+        scheduleFinderTagPopulationIfNeeded()
         scheduleSearchIfNeeded()
         trimSelectionToVisibleEntries()
     }
@@ -772,7 +829,7 @@ public final class ExplorerStore: ObservableObject {
         options.finderTagQuery = finderTagQuery
         searchOptions = options
         recursiveSearchResults = nil
-        populateFinderTagsForActivePaneEntriesIfNeeded()
+        scheduleFinderTagPopulationIfNeeded()
         scheduleSearchIfNeeded()
         trimSelectionToVisibleEntries()
     }
@@ -884,6 +941,20 @@ public final class ExplorerStore: ObservableObject {
         }
     }
 
+    public func requestInlineRenameForSelection() {
+        guard activePane.selectedURLs.count == 1,
+              let entry = activeSelectedEntries.first,
+              !entry.isArchiveBacked else {
+            return
+        }
+
+        requestToolbarFocusClear()
+        inlineRenameRequest = InlineRenameRequest(
+            paneID: activePane.id,
+            url: entry.url
+        )
+    }
+
     public func perform(_ command: ExplorerCommand) async {
         do {
             switch command {
@@ -913,7 +984,7 @@ public final class ExplorerStore: ObservableObject {
                 copySelectedPaths()
             case .newFolder:
                 guard let currentURL = activePane.location.fileSystemURL else {
-                    throw ExplorerError.readFailed("Cannot create folders inside ZIP archives.")
+                    throw ExplorerError.operationFailed("Cannot create folders inside ZIP archives.")
                 }
                 let result = try await fileOperationService.createFolder(in: currentURL)
                 if !result.createdURLs.isEmpty {
@@ -921,8 +992,7 @@ public final class ExplorerStore: ObservableObject {
                 }
                 await refresh()
             case .rename:
-                guard let newName = promptForRenameName() else { return }
-                await renameSelected(to: newName)
+                requestInlineRenameForSelection()
             case .duplicate:
                 let urls = selectedURLs
                 let reporter = makeOperationReporter(
@@ -989,6 +1059,10 @@ public final class ExplorerStore: ObservableObject {
                 }
                 await refresh()
                 await reporter.complete()
+            case .copyToOppositePane:
+                try await transferSelectedItemsToOppositePane(mode: .copy)
+            case .moveToOppositePane:
+                try await transferSelectedItemsToOppositePane(mode: .move)
             case .moveToTrash:
                 let urls = selectedURLs
                 let reporter = makeOperationReporter(
@@ -1043,8 +1117,9 @@ public final class ExplorerStore: ObservableObject {
             await failActiveOperation(error)
             present(error)
         } catch {
-            await failActiveOperation(error)
-            visibleError = .readFailed(error.localizedDescription)
+            let fallbackError = fallbackError(for: command, underlying: error)
+            await failActiveOperation(fallbackError)
+            present(fallbackError)
         }
     }
 
@@ -1088,8 +1163,9 @@ public final class ExplorerStore: ObservableObject {
             await failActiveOperation(error)
             present(error)
         } catch {
-            await failActiveOperation(error)
-            visibleError = .readFailed(error.localizedDescription)
+            let fallbackError = ExplorerError.operationFailed(error.localizedDescription)
+            await failActiveOperation(fallbackError)
+            present(fallbackError)
         }
     }
 
@@ -1180,6 +1256,36 @@ public final class ExplorerStore: ObservableObject {
 
     private var selectedURLs: [URL] {
         activePane.selectedURLs.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+    }
+
+    private func oppositePaneIndex(for paneIndex: Int) -> Int? {
+        guard paneMode == .dual,
+              panes.count >= 2,
+              panes.indices.contains(paneIndex) else {
+            return nil
+        }
+        return paneIndex == 0 ? 1 : 0
+    }
+
+    private func oppositePaneDestination(for paneIndex: Int) -> (index: Int, url: URL)? {
+        guard let index = oppositePaneIndex(for: paneIndex),
+              panes.indices.contains(index),
+              let url = panes[index].location.fileSystemURL?.standardizedFileURL else {
+            return nil
+        }
+        return (index, url)
+    }
+
+    private func oppositePaneDestination() -> (index: Int, url: URL)? {
+        oppositePaneDestination(for: activePaneIndex)
+    }
+
+    private var singleSelectedEntry: FileEntry? {
+        guard activePane.selectedURLs.count == 1, let url = selectedURLs.first?.standardizedFileURL else {
+            return nil
+        }
+
+        return activePane.entries.first { $0.url.standardizedFileURL == url }
     }
 
     private func selectAllVisibleEntries() {
@@ -1328,7 +1434,7 @@ public final class ExplorerStore: ObservableObject {
     }
 
     private func persistSidebarState() {
-        favoriteSidebarItems = Self.favoriteItems(from: sidebarState.favorites)
+        favoriteSidebarItems = Self.favoriteItems(from: sidebarState.favorites, missingURLs: missingFavoriteURLs)
         recentFolders = sidebarState.recentFolders
         sidebarFavoritesStore.save(sidebarState)
     }
@@ -1366,11 +1472,33 @@ public final class ExplorerStore: ObservableObject {
         return lastPathComponent.isEmpty ? url.path : lastPathComponent
     }
 
-    private static func favoriteItems(from favorites: [SidebarFavorite]) -> [SidebarFavoriteItem] {
+    private func refreshFavoriteSidebarItemStatuses() async {
+        let favorites = sidebarState.favorites
+        guard !favorites.isEmpty else {
+            missingFavoriteURLs = []
+            favoriteSidebarItems = []
+            return
+        }
+
+        let checker = pathStatusChecker
+        var missingURLs: Set<URL> = []
+        for favorite in favorites {
+            let status = await checker.status(for: favorite.url)
+            if !status.exists || !status.isDirectory {
+                missingURLs.insert(favorite.url.standardizedFileURL)
+            }
+        }
+
+        guard sidebarState.favorites.map(\.id) == favorites.map(\.id) else {
+            return
+        }
+        missingFavoriteURLs = missingURLs
+        favoriteSidebarItems = Self.favoriteItems(from: favorites, missingURLs: missingURLs)
+    }
+
+    private static func favoriteItems(from favorites: [SidebarFavorite], missingURLs: Set<URL>) -> [SidebarFavoriteItem] {
         favorites.map { favorite in
-            var isDirectory: ObjCBool = false
-            let exists = FileManager.default.fileExists(atPath: favorite.url.path, isDirectory: &isDirectory)
-            return SidebarFavoriteItem(favorite: favorite, isMissing: !exists || !isDirectory.boolValue)
+            SidebarFavoriteItem(favorite: favorite, isMissing: missingURLs.contains(favorite.url.standardizedFileURL))
         }
     }
 
@@ -1410,7 +1538,8 @@ public final class ExplorerStore: ObservableObject {
                 paneMode: paneMode,
                 isInspectorVisible: isInspectorVisible,
                 showHiddenFiles: showHiddenFiles,
-                defaultSort: defaultSort
+                defaultSort: defaultSort,
+                previewByteLimit: previewByteLimit
             )
         )
     }
@@ -1472,6 +1601,7 @@ public final class ExplorerStore: ObservableObject {
 
     private func applyTabState(_ tab: ExplorerTab) {
         let tab = normalizedTabForCurrentPaneMode(tab)
+        cancelFinderTagPopulation()
         isApplyingTabState = true
         panes = tab.panes
         activePaneIndex = tab.activePaneIndex
@@ -1598,7 +1728,7 @@ public final class ExplorerStore: ObservableObject {
     ) async throws -> (mode: FileClipboardMode, result: FileOperationResult)? {
         guard !clipboard.isEmpty else { return nil }
         guard let currentURL = activePane.location.fileSystemURL else {
-            throw ExplorerError.readFailed("Cannot paste into ZIP archives.")
+            throw ExplorerError.operationFailed("Cannot paste into ZIP archives.")
         }
         switch clipboard.mode {
         case .copy:
@@ -1610,6 +1740,46 @@ public final class ExplorerStore: ObservableObject {
             let result = try await fileOperationService.moveItems(clipboard.urls, to: currentURL, progress: progress)
             self.fileClipboard = nil
             return (clipboard.mode, result)
+        }
+    }
+
+    private func transferSelectedItemsToOppositePane(mode: FileClipboardMode) async throws {
+        let sourcePaneIndex = activePaneIndex
+        let urls = selectedURLs
+        guard !urls.isEmpty else {
+            return
+        }
+        guard !activePane.location.isArchive else {
+            throw ExplorerError.operationFailed("Cannot copy or move items out of ZIP archive panes.")
+        }
+        guard let destination = oppositePaneDestination() else {
+            throw ExplorerError.operationFailed("Other pane is not a folder destination.")
+        }
+
+        let kind: FileOperationKind = mode == .copy ? .copy : .move
+        let verb = mode == .copy ? "Copying to Other Pane" : "Moving to Other Pane"
+        let reporter = makeOperationReporter(kind: kind, title: operationTitle(verb, count: urls.count))
+
+        switch mode {
+        case .copy:
+            let result = try await fileOperationService.copyItems(urls, to: destination.url, progress: reporter)
+            if !result.createdURLs.isEmpty {
+                recordUndo(undoAction(.copied(result.createdURLs), from: result))
+            }
+        case .move:
+            let result = try await fileOperationService.moveItems(urls, to: destination.url, progress: reporter)
+            if !result.movedItems.isEmpty {
+                recordUndo(undoAction(.moved(result.movedItems), from: result))
+            }
+        }
+
+        try await reloadPanes(at: Set([sourcePaneIndex, destination.index]))
+        await reporter.complete()
+    }
+
+    private func reloadPanes(at indexes: Set<Int>) async throws {
+        for index in indexes.sorted() where panes.indices.contains(index) {
+            try await loadLocation(panes[index].location, pushHistory: false, paneIndex: index)
         }
     }
 
@@ -1673,10 +1843,10 @@ public final class ExplorerStore: ObservableObject {
 
     private func restoreItem(from source: URL, to destination: URL) throws {
         guard FileManager.default.fileExists(atPath: source.path) else {
-            throw ExplorerError.readFailed("Cannot undo because the item is missing: \(source.path)")
+            throw ExplorerError.operationFailed("Cannot undo because the item is missing: \(source.path)")
         }
         guard !FileManager.default.fileExists(atPath: destination.path) else {
-            throw ExplorerError.readFailed("Cannot undo because the destination already exists: \(destination.path)")
+            throw ExplorerError.operationFailed("Cannot undo because the destination already exists: \(destination.path)")
         }
         try FileManager.default.createDirectory(
             at: destination.deletingLastPathComponent(),
@@ -1703,7 +1873,7 @@ public final class ExplorerStore: ObservableObject {
 
     private func extractSelectedZips() async throws {
         guard let currentURL = activePane.location.fileSystemURL?.standardizedFileURL else {
-            throw ExplorerError.readFailed("Cannot extract ZIP files inside ZIP archives.")
+            throw ExplorerError.archiveFailed("Cannot extract ZIP files inside ZIP archives.")
         }
 
         let zipURLs = activeSelectedEntries
@@ -1727,7 +1897,7 @@ public final class ExplorerStore: ObservableObject {
 
     private func compressSelectedItems() async throws {
         guard let currentURL = activePane.location.fileSystemURL?.standardizedFileURL else {
-            throw ExplorerError.readFailed("Cannot create ZIP files inside ZIP archives.")
+            throw ExplorerError.archiveFailed("Cannot create ZIP files inside ZIP archives.")
         }
 
         let sourceURLs = activeSelectedEntries
@@ -1803,6 +1973,23 @@ public final class ExplorerStore: ObservableObject {
         "\(verb) \(count) \(count == 1 ? "item" : "items")"
     }
 
+    private func fallbackError(for command: ExplorerCommand, underlying error: Error) -> ExplorerError {
+        switch command {
+        case .extractZip, .compressToZip:
+            return .archiveFailed(error.localizedDescription)
+        case .openInTerminal, .openInVSCode:
+            return .externalCommandFailed(error.localizedDescription)
+        case .newFolder, .duplicate, .editTags, .paste, .copyToOppositePane, .moveToOppositePane,
+             .moveToTrash, .calculateFolderSize, .undo:
+            return .operationFailed(error.localizedDescription)
+        case .open, .chooseOpenWithApplication, .quickLook, .revealInFinder, .copyPath, .rename,
+             .selectAll, .addToFavorites, .copy, .cut, .refresh, .focusSearch, .focusPath, .clearSearch,
+             .toggleHiddenFiles, .toggleInspector, .goBack, .goForward, .goUp, .newTab, .closeTab,
+             .nextTab, .previousTab:
+            return .readFailed(error.localizedDescription)
+        }
+    }
+
     private func failActiveOperation(_ error: Error) async {
         guard let phase = activeOperationProgress?.phase,
               phase == .preparing
@@ -1828,17 +2015,68 @@ public final class ExplorerStore: ObservableObject {
         NSPasteboard.general.setString(paths, forType: .string)
     }
 
-    private func populateFinderTagsForActivePaneEntriesIfNeeded() {
-        guard !searchOptions.finderTagQuery.isEmpty, panes.indices.contains(activePaneIndex) else {
+    private func cancelFinderTagPopulation() {
+        finderTagPopulationTask?.cancel()
+        finderTagPopulationTask = nil
+        finderTagPopulationToken = UUID()
+    }
+
+    private func scheduleFinderTagPopulationIfNeeded() {
+        cancelFinderTagPopulation()
+
+        guard searchOptions.scope == .currentFolder,
+              !searchOptions.finderTagQuery.isEmpty,
+              panes.indices.contains(activePaneIndex),
+              !panes[activePaneIndex].location.isArchive else {
             return
         }
 
-        panes[activePaneIndex].entries = panes[activePaneIndex].entries.map { entry in
-            guard !entry.isArchiveBacked else {
-                return entry
+        let paneIndex = activePaneIndex
+        let location = panes[paneIndex].location
+        let activeTabID = activeTab.id
+        let tagQuery = searchOptions.finderTagQuery
+        let entries = panes[paneIndex].entries
+        let finderTagService = finderTagService
+        let token = UUID()
+        finderTagPopulationToken = token
+
+        finderTagPopulationTask = Task.detached(priority: .userInitiated) { [weak self] in
+            var tagsByURL: [URL: [FinderTag]] = [:]
+            tagsByURL.reserveCapacity(entries.count)
+
+            for entry in entries where !entry.isArchiveBacked {
+                guard !Task.isCancelled else {
+                    return
+                }
+                tagsByURL[entry.url.standardizedFileURL] = (try? finderTagService.tags(for: entry.url)) ?? entry.finderTags
             }
-            let tags = (try? finderTagService.tags(for: entry.url)) ?? entry.finderTags
-            return entry.replacingFinderTags(tags)
+
+            guard !Task.isCancelled else {
+                return
+            }
+
+            await MainActor.run { [weak self] in
+                guard let self,
+                      self.finderTagPopulationToken == token,
+                      self.tabs.indices.contains(self.activeTabIndex),
+                      self.tabs[self.activeTabIndex].id == activeTabID,
+                      self.activePaneIndex == paneIndex,
+                      self.panes.indices.contains(paneIndex),
+                      self.panes[paneIndex].location == location,
+                      self.searchOptions.scope == .currentFolder,
+                      self.searchOptions.finderTagQuery == tagQuery else {
+                    return
+                }
+
+                self.panes[paneIndex].entries = self.panes[paneIndex].entries.map { entry in
+                    guard let tags = tagsByURL[entry.url.standardizedFileURL] else {
+                        return entry
+                    }
+                    return entry.replacingFinderTags(tags)
+                }
+                self.trimSelectionToVisibleEntries()
+                self.finderTagPopulationTask = nil
+            }
         }
     }
 
@@ -1854,8 +2092,7 @@ public final class ExplorerStore: ObservableObject {
 
     private func editTagsForSelectedEntry() async throws {
         guard
-            activeSelectedEntries.count == 1,
-            let entry = activeSelectedEntries.first,
+            let entry = singleSelectedEntry,
             !entry.isArchiveBacked
         else {
             return
@@ -1866,6 +2103,7 @@ public final class ExplorerStore: ObservableObject {
             return
         }
 
+        cancelFinderTagPopulation()
         try finderTagService.setTags(tags, for: entry.url)
         await refresh()
         updateFinderTags(tags, for: entry.url)
@@ -1880,28 +2118,6 @@ public final class ExplorerStore: ObservableObject {
                 entry.url.standardizedFileURL == standardizedURL ? entry.replacingFinderTags(tags) : entry
             }
         }
-    }
-
-    private func promptForRenameName() -> String? {
-        guard activePane.selectedURLs.count == 1, let url = selectedURLs.first else {
-            return nil
-        }
-
-        let alert = NSAlert()
-        alert.messageText = "Rename"
-        alert.informativeText = "Enter a new name for \(url.lastPathComponent)."
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
-
-        let textField = NSTextField(string: url.lastPathComponent)
-        textField.frame = NSRect(x: 0, y: 0, width: 320, height: 24)
-        alert.accessoryView = textField
-
-        let response = alert.runModal()
-        guard response == .alertFirstButtonReturn else {
-            return nil
-        }
-        return textField.stringValue
     }
 
     private func chooseApplicationForSelectedItems() async {
@@ -2068,7 +2284,7 @@ public final class ExplorerStore: ObservableObject {
                 at: url,
                 options: DirectoryReadOptions(
                     showHiddenFiles: showHiddenFiles,
-                    includeFinderTags: targetPaneIndex == activePaneIndex && !searchOptions.finderTagQuery.isEmpty
+                    includeFinderTags: false
                 )
             )
         case .archive(let archiveLocation):
@@ -2097,6 +2313,7 @@ public final class ExplorerStore: ObservableObject {
                 recursiveSearchResults = nil
                 scheduleSearchIfNeeded()
             }
+            scheduleFinderTagPopulationIfNeeded()
             startWatchingVisibleDirectories()
             if case .fileSystem(let url) = location {
                 recordRecentFolder(url)
@@ -2164,6 +2381,10 @@ public final class ExplorerStore: ObservableObject {
 #if DEBUG
     public func waitForSearchForTesting() async {
         await searchTask?.value
+    }
+
+    public func waitForFinderTagPopulationForTesting() async {
+        await finderTagPopulationTask?.value
     }
 
     public func replaceActivePaneForTesting(

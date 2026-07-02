@@ -15,10 +15,7 @@ public final class DeleteHistoryViewModel {
     public var errorMessage: String?
     public var isClearHistoryConfirmationPresented = false
 
-    public init(receiptStore: DeletionReceiptStore = DeletionReceiptStore(
-        fileURL: FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/MyMacClean/deletion-receipts.jsonl")
-    )) {
+    public init(receiptStore: DeletionReceiptStore = .default()) {
         self.receiptStore = receiptStore
     }
 

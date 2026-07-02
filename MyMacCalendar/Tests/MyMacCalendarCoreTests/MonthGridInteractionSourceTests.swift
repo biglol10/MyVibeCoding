@@ -37,6 +37,16 @@ final class MonthGridInteractionSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("static let bottomPadding: CGFloat = 4"))
     }
 
+    func testMonthGridsDoNotFallBackToHardCodedYear() throws {
+        let monthGridSource = try String(contentsOfFile: sourcePath("Sources/MyMacCalendar/Views/MonthGridView.swift"), encoding: .utf8)
+        let eventEditorSource = try String(contentsOfFile: sourcePath("Sources/MyMacCalendar/Views/EventEditorView.swift"), encoding: .utf8)
+
+        XCTAssertFalse(monthGridSource.contains("?? 2026"))
+        XCTAssertFalse(eventEditorSource.contains("?? 2026"))
+        XCTAssertTrue(monthGridSource.contains("guard let year = components.year"))
+        XCTAssertTrue(eventEditorSource.contains("guard let year = components.year"))
+    }
+
     private func sourcePath(_ relativePath: String) -> String {
         let testFile = URL(fileURLWithPath: #filePath)
         return testFile

@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 public struct FileOperationService: @unchecked Sendable {
@@ -21,7 +22,7 @@ public struct FileOperationService: @unchecked Sendable {
             var result: NSURL?
             try fileManager.trashItem(at: url, resultingItemURL: &result)
             guard let result else {
-                throw ExplorerError.readFailed("Item could not be moved to Trash: \(url.path)")
+                throw ExplorerError.operationFailed("Item could not be moved to Trash: \(url.path)")
             }
             return result as URL
         }
@@ -31,7 +32,11 @@ public struct FileOperationService: @unchecked Sendable {
     @discardableResult
     public func createFolder(in parent: URL) async throws -> FileOperationResult {
         let folderURL = uniqueURL(in: parent, baseName: "Untitled Folder", extension: nil)
-        try fileManager.createDirectory(at: folderURL, withIntermediateDirectories: false)
+        do {
+            try fileManager.createDirectory(at: folderURL, withIntermediateDirectories: false)
+        } catch {
+            throw operationError(error)
+        }
         return FileOperationResult(createdURLs: [folderURL])
     }
 
@@ -61,8 +66,12 @@ public struct FileOperationService: @unchecked Sendable {
         do {
             try fileManager.moveItem(at: url, to: resolvedDestination)
         } catch {
-            rollbackFailedDestination(resolution.replacedItem, partialDestination: resolvedDestination)
-            throw error
+            try rollbackFailedDestination(
+                resolution.replacedItem,
+                partialDestination: resolvedDestination,
+                originalError: error
+            )
+            throw operationError(error)
         }
         return FileOperationResult(
             renamedItem: FileMoveRecord(source: url, destination: resolvedDestination),
@@ -80,7 +89,11 @@ public struct FileOperationService: @unchecked Sendable {
             totalUnitCount: 1
         )
         let destination = copyName(for: url)
-        try fileManager.copyItem(at: url, to: destination)
+        do {
+            try fileManager.copyItem(at: url, to: destination)
+        } catch {
+            throw operationError(error)
+        }
         await progress?.update(
             phase: .running,
             currentItemName: url.lastPathComponent,
@@ -119,7 +132,7 @@ public struct FileOperationService: @unchecked Sendable {
             let proposed = destinationFolder.appendingPathComponent(source.lastPathComponent)
             let normalizedSource = source.standardizedFileURL.resolvingSymlinksInPath()
             if isDescendant(proposed.standardizedFileURL, of: normalizedSource) {
-                throw ExplorerError.readFailed("Cannot copy a folder into itself.")
+                throw ExplorerError.operationFailed("Cannot copy a folder into itself.")
             }
 
             let resolution = try await resolvedDestination(
@@ -157,8 +170,12 @@ public struct FileOperationService: @unchecked Sendable {
                     )
                 )
             } catch {
-                rollbackFailedDestination(resolution.replacedItem, partialDestination: destination)
-                throw error
+                try rollbackFailedDestination(
+                    resolution.replacedItem,
+                    partialDestination: destination,
+                    originalError: error
+                )
+                throw operationError(error)
             }
             createdURLs.append(destination)
             if let replacedItem = resolution.replacedItem {
@@ -230,7 +247,7 @@ public struct FileOperationService: @unchecked Sendable {
             let proposed = destinationFolder.appendingPathComponent(source.lastPathComponent)
             let normalizedSource = source.standardizedFileURL.resolvingSymlinksInPath()
             if isDescendant(proposed.standardizedFileURL, of: normalizedSource) {
-                throw ExplorerError.readFailed("Cannot move a folder into itself.")
+                throw ExplorerError.operationFailed("Cannot move a folder into itself.")
             }
 
             let resolution = try await resolvedDestination(
@@ -257,8 +274,12 @@ public struct FileOperationService: @unchecked Sendable {
             do {
                 try await moveItem(at: source, to: destination)
             } catch {
-                rollbackFailedDestination(resolution.replacedItem, partialDestination: destination)
-                throw error
+                try rollbackFailedDestination(
+                    resolution.replacedItem,
+                    partialDestination: destination,
+                    originalError: error
+                )
+                throw operationError(error)
             }
             movedItems.append(FileMoveRecord(source: source, destination: destination))
             if let replacedItem = resolution.replacedItem {
@@ -307,8 +328,8 @@ public struct FileOperationService: @unchecked Sendable {
             do {
                 trashedItems.append(try trashExistingItem(at: url))
             } catch {
-                restoreTrashedItems(trashedItems)
-                throw error
+                try restoreTrashedItems(trashedItems, originalError: error)
+                throw operationError(error)
             }
             completedByteCount += byteCount(for: url, in: byteCounts)
             await progress?.update(
@@ -369,35 +390,75 @@ public struct FileOperationService: @unchecked Sendable {
         FileTrashRecord(original: url, trashed: try trashItem(url))
     }
 
-    private func rollbackFailedDestination(_ record: FileTrashRecord?, partialDestination: URL) {
+    private func rollbackFailedDestination(
+        _ record: FileTrashRecord?,
+        partialDestination: URL,
+        originalError: Error
+    ) throws {
+        var restorationFailures: [String] = []
+
         if fileManager.fileExists(atPath: partialDestination.path) {
-            try? fileManager.removeItem(at: partialDestination)
+            do {
+                try fileManager.removeItem(at: partialDestination)
+            } catch {
+                restorationFailures.append(
+                    "partial destination could not be removed: \(partialDestination.path): \(error.localizedDescription)"
+                )
+            }
         }
-        guard let record else {
-            return
+        if let record {
+            if fileManager.fileExists(atPath: record.original.path) {
+                restorationFailures.append("\(record.original.path) already exists")
+            } else if !fileManager.fileExists(atPath: record.trashed.path) {
+                restorationFailures.append("\(record.trashed.path) is missing")
+            } else {
+                do {
+                    try fileManager.createDirectory(
+                        at: record.original.deletingLastPathComponent(),
+                        withIntermediateDirectories: true
+                    )
+                    try fileManager.moveItem(at: record.trashed, to: record.original)
+                } catch {
+                    restorationFailures.append("\(record.original.path): \(error.localizedDescription)")
+                }
+            }
         }
-        guard !fileManager.fileExists(atPath: record.original.path),
-              fileManager.fileExists(atPath: record.trashed.path) else {
-            return
+
+        guard restorationFailures.isEmpty else {
+            throw ExplorerError.operationFailed(
+                "Operation failed (\(originalError.localizedDescription)) and rollback was incomplete: "
+                    + restorationFailures.joined(separator: "; ")
+            )
         }
-        try? fileManager.createDirectory(
-            at: record.original.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try? fileManager.moveItem(at: record.trashed, to: record.original)
     }
 
-    private func restoreTrashedItems(_ records: [FileTrashRecord]) {
+    private func restoreTrashedItems(_ records: [FileTrashRecord], originalError: Error) throws {
+        var restorationFailures: [String] = []
         for record in records.reversed() {
-            guard !fileManager.fileExists(atPath: record.original.path),
-                  fileManager.fileExists(atPath: record.trashed.path) else {
+            guard !fileManager.fileExists(atPath: record.original.path) else {
+                restorationFailures.append("\(record.original.path) already exists")
                 continue
             }
-            try? fileManager.createDirectory(
-                at: record.original.deletingLastPathComponent(),
-                withIntermediateDirectories: true
+            guard fileManager.fileExists(atPath: record.trashed.path) else {
+                restorationFailures.append("\(record.trashed.path) is missing")
+                continue
+            }
+            do {
+                try fileManager.createDirectory(
+                    at: record.original.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try fileManager.moveItem(at: record.trashed, to: record.original)
+            } catch {
+                restorationFailures.append("\(record.original.path): \(error.localizedDescription)")
+            }
+        }
+
+        guard restorationFailures.isEmpty else {
+            throw ExplorerError.operationFailed(
+                "Trash failed (\(originalError.localizedDescription)) and rollback was incomplete: "
+                    + restorationFailures.joined(separator: "; ")
             )
-            try? fileManager.moveItem(at: record.trashed, to: record.original)
         }
     }
 
@@ -461,9 +522,8 @@ public struct FileOperationService: @unchecked Sendable {
         let fileManager = fileManager
         let chunkSize = copyChunkSize
         try await Task.detached(priority: .utility) {
-            let attributes = try fileManager.attributesOfItem(atPath: source.path)
             guard fileManager.createFile(atPath: destination.path, contents: nil) else {
-                throw ExplorerError.readFailed("Unable to create destination file: \(destination.path)")
+                throw ExplorerError.operationFailed("Unable to create destination file: \(destination.path)")
             }
 
             let reader = try FileHandle(forReadingFrom: source)
@@ -484,18 +544,44 @@ public struct FileOperationService: @unchecked Sendable {
 
                 try reader.close()
                 try writer.close()
-
-                var copiedAttributes = attributes
-                copiedAttributes.removeValue(forKey: .size)
-                copiedAttributes.removeValue(forKey: .type)
-                try? fileManager.setAttributes(copiedAttributes, ofItemAtPath: destination.path)
+                try Self.copyMetadata(from: source, to: destination)
             } catch {
                 try? reader.close()
                 try? writer.close()
                 try? fileManager.removeItem(at: destination)
-                throw error
+                throw Self.operationError(error)
             }
         }.value
+    }
+
+    private static func copyMetadata(from source: URL, to destination: URL) throws {
+        let result = source.withUnsafeFileSystemRepresentation { sourcePath in
+            destination.withUnsafeFileSystemRepresentation { destinationPath in
+                copyfile(
+                    sourcePath,
+                    destinationPath,
+                    nil,
+                    copyfile_flags_t(COPYFILE_METADATA | COPYFILE_NOFOLLOW)
+                )
+            }
+        }
+        guard result == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+    }
+
+    private func operationError(_ error: Error) -> Error {
+        Self.operationError(error)
+    }
+
+    private static func operationError(_ error: Error) -> Error {
+        if error is CancellationError || error is FileOperationCancellation {
+            return error
+        }
+        if let error = error as? ExplorerError {
+            return error
+        }
+        return ExplorerError.operationFailed(error.localizedDescription)
     }
 
     private func copyName(for url: URL) -> URL {

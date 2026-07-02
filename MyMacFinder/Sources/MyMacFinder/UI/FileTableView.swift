@@ -9,6 +9,64 @@ struct FileTableColumnDefinition {
     let minWidth: CGFloat
 }
 
+struct FileTableIconResolver {
+    typealias ResolveIcon = @MainActor (FileEntry) -> NSImage
+
+    private let resolveIcon: ResolveIcon
+
+    init(_ resolveIcon: @escaping ResolveIcon) {
+        self.resolveIcon = resolveIcon
+    }
+
+    @MainActor
+    func icon(for entry: FileEntry) -> NSImage {
+        Self.sizedIcon(resolveIcon(entry))
+    }
+
+    static let live = FileTableIconResolver { entry in
+        defaultIcon(for: entry)
+    }
+
+    @MainActor
+    private static func defaultIcon(for entry: FileEntry) -> NSImage {
+        switch entry.kind {
+        case .folder, .volume, .zipVirtualFolder:
+            return NSImage(named: NSImage.folderName)
+                ?? NSImage(systemSymbolName: "folder.fill", accessibilityDescription: "Folder")
+                ?? typeIcon(for: nil)
+        case .package:
+            return NSImage(named: NSImage.applicationIconName)
+                ?? NSImage(systemSymbolName: "app", accessibilityDescription: "Package")
+                ?? NSWorkspace.shared.icon(for: .applicationBundle)
+        case .symlink:
+            return NSImage(systemSymbolName: "arrowshape.turn.up.right", accessibilityDescription: "Alias")
+                ?? typeIcon(for: entry.fileExtension)
+        case .file, .zipVirtualFile, .other:
+            if !entry.fileExtension.isEmpty {
+                return typeIcon(for: entry.fileExtension)
+            }
+            return NSImage(named: NSImage.multipleDocumentsName)
+                ?? NSImage(systemSymbolName: "doc", accessibilityDescription: "File")
+                ?? typeIcon(for: nil)
+        }
+    }
+
+    @MainActor
+    private static func typeIcon(for fileExtension: String?) -> NSImage {
+        let contentType = fileExtension
+            .flatMap { UTType(filenameExtension: $0) }
+            ?? .data
+        return NSWorkspace.shared.icon(for: contentType)
+    }
+
+    @MainActor
+    private static func sizedIcon(_ image: NSImage) -> NSImage {
+        let icon = image.copy() as? NSImage ?? image
+        icon.size = NSSize(width: 16, height: 16)
+        return icon
+    }
+}
+
 struct FileTableView: NSViewRepresentable {
     private static let sortableColumnKeys: Set<String> = [
         "name",
@@ -30,13 +88,17 @@ struct FileTableView: NSViewRepresentable {
     var currentLocation: PaneLocation
     var currentSort: EntrySortDescriptor
     var showsPathColumn: Bool
+    var inlineRenameRequest: InlineRenameRequest?
     var requestsInitialFocus: Bool = false
     var onFocus: () -> Void = {}
     var onSelectionChange: (Set<URL>) -> Void
     var onOpen: (URL) -> Void
+    var onRename: (String) -> Void = { _ in }
     var onCommand: (ExplorerCommand) -> Void
+    var isCommandEnabled: (ExplorerCommand) -> Bool = { _ in true }
     var openWithApplications: [OpenWithApplication] = []
     var onOpenWithApplication: (OpenWithApplication) -> Void = { _ in }
+    var iconResolver: FileTableIconResolver = .live
     var onDropItems: ([URL], URL, DropOperation) -> Void
     var onSortChange: (SortKey) -> Void
 
@@ -82,6 +144,7 @@ struct FileTableView: NSViewRepresentable {
         context.coordinator.reloadDataIfNeeded()
         context.coordinator.applySelection(selectedURLs)
         context.coordinator.syncSortDescriptor()
+        context.coordinator.syncInlineRenameRequest()
         context.coordinator.requestInitialFocusIfNeeded()
     }
 
@@ -116,13 +179,32 @@ struct FileTableView: NSViewRepresentable {
     }
 
     @MainActor
-    final class Coordinator: NSObject, @preconcurrency NSTableViewDataSource, NSTableViewDelegate {
+    final class Coordinator: NSObject, @preconcurrency NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
         var parent: FileTableView
         weak var tableView: NSTableView?
         private var renderedEntries: [FileEntry] = []
         private var renderedLocation: PaneLocation?
         private var isSyncingSortDescriptor = false
         private var didRequestInitialFocus = false
+        private var iconCache: [IconCacheKey: NSImage] = [:]
+        private var handledInlineRenameRequestID: UUID?
+        private weak var activeInlineRenameField: InlineRenameTextField?
+        private weak var activeInlineRenameSourceTextField: NSTextField?
+        private var activeInlineRenameOriginalName: String?
+        private var isPreparingInlineRenameEditor = false
+        private static let inlineRenameFieldAccessibilityIdentifier = "FileTableInlineRenameField"
+
+        private struct IconCacheKey: Hashable {
+            var kind: FileEntryKind
+            var fileExtension: String
+            var isArchiveBacked: Bool
+
+            init(entry: FileEntry) {
+                self.kind = entry.kind
+                self.fileExtension = entry.fileExtension
+                self.isArchiveBacked = entry.isArchiveBacked
+            }
+        }
 
         init(parent: FileTableView) {
             self.parent = parent
@@ -222,6 +304,39 @@ struct FileTableView: NSViewRepresentable {
             acceptDrop(info, row: row, dropOperation: dropOperation)
         }
 
+        func controlTextDidBeginEditing(_ notification: Notification) {
+            guard let field = notification.object as? InlineRenameTextField,
+                  field === activeInlineRenameField,
+                  let originalName = activeInlineRenameOriginalName else {
+                return
+            }
+
+            let fieldEditor = notification.userInfo?["NSFieldEditor"] as? NSText
+            syncInlineRenameText(field, name: originalName, fieldEditor: fieldEditor)
+        }
+
+        func controlTextDidEndEditing(_ notification: Notification) {
+            guard let field = notification.object as? InlineRenameTextField,
+                  field === activeInlineRenameField else {
+                return
+            }
+            guard !isPreparingInlineRenameEditor else {
+                return
+            }
+
+            let didCancel = field.didCancelRename
+            let originalName = activeInlineRenameOriginalName
+            let newName = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            removeInlineRenameEditor()
+
+            guard !didCancel,
+                  !newName.isEmpty,
+                  newName != originalName else {
+                return
+            }
+            parent.onRename(newName)
+        }
+
         func publishSelection() {
             guard let tableView else {
                 return
@@ -265,7 +380,10 @@ struct FileTableView: NSViewRepresentable {
         }
 
         func canPerformCommand(_ command: ExplorerCommand) -> Bool {
-            command.isEnabled(
+            guard parent.isCommandEnabled(command) else {
+                return false
+            }
+            return command.isEnabled(
                 selectionCount: currentSelectionCount,
                 canPaste: parent.canPaste,
                 canUndo: parent.canUndo,
@@ -281,6 +399,9 @@ struct FileTableView: NSViewRepresentable {
         func performCommand(_ command: ExplorerCommand) -> Bool {
             guard canPerformCommand(command) else {
                 return false
+            }
+            if command == .rename {
+                return beginInlineRenameForCurrentSelection()
             }
             parent.onCommand(command)
             return true
@@ -346,8 +467,34 @@ struct FileTableView: NSViewRepresentable {
                 return
             }
 
+            let previousEntries = renderedEntries
             renderedEntries = parent.entries
+            iconCache.removeAll()
+            if reloadChangedRowsIfPossible(previousEntries: previousEntries, updatedEntries: parent.entries) {
+                return
+            }
             tableView?.reloadData()
+        }
+
+        private func reloadChangedRowsIfPossible(previousEntries: [FileEntry], updatedEntries: [FileEntry]) -> Bool {
+            guard let tableView, !previousEntries.isEmpty, previousEntries.count == updatedEntries.count else {
+                return false
+            }
+
+            let previousURLs = previousEntries.map(\.url)
+            let updatedURLs = updatedEntries.map(\.url)
+            guard previousURLs == updatedURLs else {
+                return false
+            }
+
+            let changedRows = IndexSet(updatedEntries.indices.filter { previousEntries[$0] != updatedEntries[$0] })
+            guard !changedRows.isEmpty else {
+                return true
+            }
+
+            let columns = IndexSet(integersIn: 0..<tableView.numberOfColumns)
+            tableView.reloadData(forRowIndexes: changedRows, columnIndexes: columns)
+            return true
         }
 
         func resetScrollIfLocationChanged(in scrollView: NSScrollView) {
@@ -356,6 +503,7 @@ struct FileTableView: NSViewRepresentable {
             }
 
             renderedLocation = parent.currentLocation
+            iconCache.removeAll()
             scrollView.contentView.scroll(to: .zero)
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
@@ -409,6 +557,163 @@ struct FileTableView: NSViewRepresentable {
 
             window.makeFirstResponder(tableView)
             didRequestInitialFocus = true
+        }
+
+        func syncInlineRenameRequest() {
+            guard let request = parent.inlineRenameRequest else {
+                return
+            }
+            guard handledInlineRenameRequestID != request.id else {
+                return
+            }
+            handledInlineRenameRequestID = request.id
+            beginInlineRename(for: request.url)
+        }
+
+        @discardableResult
+        private func beginInlineRenameForCurrentSelection() -> Bool {
+            guard let entry = currentSelectedEntries.first else {
+                return false
+            }
+            return beginInlineRename(for: entry.url)
+        }
+
+        @discardableResult
+        private func beginInlineRename(for url: URL) -> Bool {
+            guard let tableView else {
+                return false
+            }
+            guard let row = parent.entries.firstIndex(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) else {
+                return false
+            }
+            let nameColumn = tableView.column(withIdentifier: NSUserInterfaceItemIdentifier("name"))
+            guard nameColumn >= 0 else {
+                return false
+            }
+
+            let entryName = parent.entries[row].name
+            tableView.window?.makeFirstResponder(tableView)
+            tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            publishSelection()
+
+            tableView.scrollRowToVisible(row)
+            tableView.scrollColumnToVisible(nameColumn)
+            tableView.layoutSubtreeIfNeeded()
+
+            guard let cell = tableView.view(atColumn: nameColumn, row: row, makeIfNecessary: true) as? NSTableCellView,
+                  let sourceTextField = cell.textField else {
+                return false
+            }
+            sourceTextField.stringValue = entryName
+            sourceTextField.objectValue = entryName
+            cell.objectValue = entryName
+            showInlineRenameEditor(
+                name: entryName,
+                cell: cell,
+                sourceTextField: sourceTextField,
+                tableView: tableView
+            )
+            return true
+        }
+
+        private func showInlineRenameEditor(
+            name: String,
+            cell: NSTableCellView,
+            sourceTextField: NSTextField,
+            tableView: NSTableView
+        ) {
+            removeInlineRenameEditor()
+
+            let field = InlineRenameTextField(string: name)
+            field.setAccessibilityIdentifier(Self.inlineRenameFieldAccessibilityIdentifier)
+            field.delegate = self
+            field.font = sourceTextField.font
+            field.textColor = sourceTextField.textColor
+            field.lineBreakMode = .byClipping
+            field.maximumNumberOfLines = 1
+            field.isEditable = true
+            field.isSelectable = true
+            field.isBordered = true
+            field.isBezeled = true
+            field.drawsBackground = true
+            field.backgroundColor = .textBackgroundColor
+            field.focusRingType = .default
+            field.translatesAutoresizingMaskIntoConstraints = false
+
+            sourceTextField.isHidden = true
+            cell.addSubview(field)
+            NSLayoutConstraint.activate([
+                field.leadingAnchor.constraint(equalTo: sourceTextField.leadingAnchor, constant: -3),
+                field.trailingAnchor.constraint(equalTo: sourceTextField.trailingAnchor, constant: 3),
+                field.centerYAnchor.constraint(equalTo: sourceTextField.centerYAnchor),
+                field.heightAnchor.constraint(greaterThanOrEqualTo: sourceTextField.heightAnchor, constant: 6)
+            ])
+
+            activeInlineRenameField = field
+            activeInlineRenameSourceTextField = sourceTextField
+            activeInlineRenameOriginalName = name
+
+            isPreparingInlineRenameEditor = true
+            focusInlineRenameField(field, in: tableView, name: name)
+            scheduleInlineRenameSettledSync(field, in: tableView, name: name)
+        }
+
+        private func removeInlineRenameEditor() {
+            activeInlineRenameSourceTextField?.isHidden = false
+            activeInlineRenameField?.removeFromSuperview()
+            activeInlineRenameField = nil
+            activeInlineRenameSourceTextField = nil
+            activeInlineRenameOriginalName = nil
+            isPreparingInlineRenameEditor = false
+        }
+
+        private func focusInlineRenameField(_ field: InlineRenameTextField, in tableView: NSTableView, name: String) {
+            guard let window = tableView.window else {
+                syncInlineRenameText(field, name: name)
+                return
+            }
+            window.makeFirstResponder(field)
+            syncInlineRenameText(field, name: name)
+        }
+
+        private func scheduleInlineRenameSettledSync(
+            _ field: InlineRenameTextField,
+            in tableView: NSTableView,
+            name: String
+        ) {
+            let delays: [TimeInterval] = [0, 0.05, 0.15]
+            for (index, delay) in delays.enumerated() {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak field, weak tableView] in
+                    guard let self,
+                          let field,
+                          let tableView,
+                          field === self.activeInlineRenameField else {
+                        return
+                    }
+
+                    let currentText = field.currentEditor()?.string ?? field.stringValue
+                    if currentText == name
+                        || currentText == self.parent.currentURL.path
+                        || currentText == self.parent.currentLocation.displayPath {
+                        self.focusInlineRenameField(field, in: tableView, name: name)
+                    }
+
+                    if index == 0 {
+                        self.isPreparingInlineRenameEditor = false
+                    }
+                }
+            }
+        }
+
+        private func syncInlineRenameText(
+            _ field: InlineRenameTextField,
+            name: String,
+            fieldEditor: NSText? = nil
+        ) {
+            field.stringValue = name
+            let editor = fieldEditor ?? field.currentEditor()
+            editor?.string = name
+            editor?.selectedRange = NSRange(location: 0, length: (name as NSString).length)
         }
 
         private func addMenuItem(
@@ -497,7 +802,8 @@ struct FileTableView: NSViewRepresentable {
             cell.imageView = imageView
             cell.addSubview(imageView)
 
-            let textField = makeTextField()
+            let textField = makeTextField(isEditable: false)
+            textField.delegate = self
             cell.textField = textField
             cell.addSubview(textField)
 
@@ -517,7 +823,7 @@ struct FileTableView: NSViewRepresentable {
 
         private func makeReusableTextCell(identifier: NSUserInterfaceItemIdentifier) -> NSTableCellView {
             let cell = baseCell(identifier: identifier)
-            let textField = makeTextField()
+            let textField = makeTextField(isEditable: false)
             cell.textField = textField
             cell.addSubview(textField)
             NSLayoutConstraint.activate([
@@ -537,58 +843,27 @@ struct FileTableView: NSViewRepresentable {
             return cell
         }
 
-        private func makeTextField() -> NSTextField {
-            let textField = NSTextField(labelWithString: "")
+        private func makeTextField(isEditable: Bool) -> NSTextField {
+            let textField = NSTextField(string: "")
             textField.lineBreakMode = .byTruncatingMiddle
             textField.maximumNumberOfLines = 1
+            textField.isBordered = false
+            textField.drawsBackground = false
+            textField.isEditable = isEditable
+            textField.isSelectable = isEditable
             textField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             textField.translatesAutoresizingMaskIntoConstraints = false
             return textField
         }
 
         private func icon(for entry: FileEntry) -> NSImage {
-            let resolvedIcon: NSImage
-            if !entry.isArchiveBacked && FileManager.default.fileExists(atPath: entry.url.path) {
-                resolvedIcon = NSWorkspace.shared.icon(forFile: entry.url.path)
-            } else {
-                resolvedIcon = fallbackIcon(for: entry)
+            let cacheKey = IconCacheKey(entry: entry)
+            if let cached = iconCache[cacheKey] {
+                return cached
             }
-            return sizedIcon(resolvedIcon)
-        }
 
-        private func fallbackIcon(for entry: FileEntry) -> NSImage {
-            switch entry.kind {
-            case .folder, .volume, .zipVirtualFolder:
-                return NSImage(named: NSImage.folderName)
-                    ?? NSImage(systemSymbolName: "folder.fill", accessibilityDescription: "Folder")
-                    ?? typeIcon(for: nil)
-            case .package:
-                return NSImage(named: NSImage.applicationIconName)
-                    ?? NSImage(systemSymbolName: "app", accessibilityDescription: "Package")
-                    ?? NSWorkspace.shared.icon(for: .applicationBundle)
-            case .symlink:
-                return NSImage(systemSymbolName: "arrowshape.turn.up.right", accessibilityDescription: "Alias")
-                    ?? typeIcon(for: entry.fileExtension)
-            case .file, .zipVirtualFile, .other:
-                if !entry.fileExtension.isEmpty {
-                    return typeIcon(for: entry.fileExtension)
-                }
-                return NSImage(named: NSImage.multipleDocumentsName)
-                    ?? NSImage(systemSymbolName: "doc", accessibilityDescription: "File")
-                    ?? typeIcon(for: nil)
-            }
-        }
-
-        private func typeIcon(for fileExtension: String?) -> NSImage {
-            let contentType = fileExtension
-                .flatMap { UTType(filenameExtension: $0) }
-                ?? .data
-            return NSWorkspace.shared.icon(for: contentType)
-        }
-
-        private func sizedIcon(_ image: NSImage) -> NSImage {
-            let icon = image.copy() as? NSImage ?? image
-            icon.size = NSSize(width: 16, height: 16)
+            let icon = parent.iconResolver.icon(for: entry)
+            iconCache[cacheKey] = icon
             return icon
         }
 
@@ -615,31 +890,10 @@ struct FileTableView: NSViewRepresentable {
             if flags.contains(.option) { modifiers.insert(.option) }
             if flags.contains(.shift) { modifiers.insert(.shift) }
 
-            let key: String
-            switch event.keyCode {
-            case 36, 76:
-                key = "return"
-            case 49:
-                key = "space"
-            case 51, 117:
-                key = "delete"
-            case 53:
-                key = "escape"
-            case 48:
-                key = "tab"
-            case 120:
-                key = "f2"
-            case 123:
-                key = "left"
-            case 124:
-                key = "right"
-            case 126:
-                key = "up"
-            case 125:
-                key = "down"
-            default:
-                key = event.charactersIgnoringModifiers?.lowercased() ?? ""
-            }
+            let key = ExplorerKeyCodeMapper.key(
+                for: event.keyCode,
+                charactersIgnoringModifiers: event.charactersIgnoringModifiers
+            )
 
             guard !key.isEmpty else {
                 return nil
@@ -947,6 +1201,35 @@ struct FileTableView: NSViewRepresentable {
                 return .undo
             default:
                 return nil
+            }
+        }
+    }
+
+    @MainActor
+    final class InlineRenameTextField: NSTextField {
+        private(set) var didCancelRename = false
+
+        override var acceptsFirstResponder: Bool {
+            true
+        }
+
+        override func becomeFirstResponder() -> Bool {
+            let didBecomeFirstResponder = super.becomeFirstResponder()
+            if didBecomeFirstResponder {
+                selectText(nil)
+            }
+            return didBecomeFirstResponder
+        }
+
+        override func keyDown(with event: NSEvent) {
+            switch event.keyCode {
+            case 36, 76:
+                window?.makeFirstResponder(superview)
+            case 53:
+                didCancelRename = true
+                window?.makeFirstResponder(superview)
+            default:
+                super.keyDown(with: event)
             }
         }
     }

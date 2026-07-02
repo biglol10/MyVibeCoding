@@ -9,8 +9,15 @@ final class WidgetCoordinator {
     private var manualVisibilityOverride: Bool?
     private var currentEvents: [CalendarEvent] = []
     private var currentSettings = WidgetSettingsSnapshot()
+    private var refreshTimer: Timer?
 
-    private init() {}
+    private init() {
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.render()
+            }
+        }
+    }
 
     func update(events: [CalendarEvent], settings: AppSettings?) {
         currentEvents = events

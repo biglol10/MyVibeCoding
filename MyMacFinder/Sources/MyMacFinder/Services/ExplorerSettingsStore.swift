@@ -5,17 +5,20 @@ public struct ExplorerSettings: Codable, Equatable, Sendable {
     public var isInspectorVisible: Bool
     public var showHiddenFiles: Bool
     public var defaultSort: EntrySortDescriptor
+    public var previewByteLimit: FilePreviewByteLimit
 
     public init(
         paneMode: ExplorerPaneMode = .single,
         isInspectorVisible: Bool = true,
         showHiddenFiles: Bool = false,
-        defaultSort: EntrySortDescriptor = EntrySortDescriptor()
+        defaultSort: EntrySortDescriptor = EntrySortDescriptor(),
+        previewByteLimit: FilePreviewByteLimit = .balanced
     ) {
         self.paneMode = paneMode
         self.isInspectorVisible = isInspectorVisible
         self.showHiddenFiles = showHiddenFiles
         self.defaultSort = defaultSort
+        self.previewByteLimit = previewByteLimit
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -23,6 +26,7 @@ public struct ExplorerSettings: Codable, Equatable, Sendable {
         case isInspectorVisible
         case showHiddenFiles
         case defaultSort
+        case previewByteLimit
     }
 
     public init(from decoder: Decoder) throws {
@@ -31,6 +35,7 @@ public struct ExplorerSettings: Codable, Equatable, Sendable {
         self.isInspectorVisible = try container.decodeIfPresent(Bool.self, forKey: .isInspectorVisible) ?? true
         self.showHiddenFiles = try container.decodeIfPresent(Bool.self, forKey: .showHiddenFiles) ?? false
         self.defaultSort = try container.decodeIfPresent(EntrySortDescriptor.self, forKey: .defaultSort) ?? EntrySortDescriptor()
+        self.previewByteLimit = try container.decodeIfPresent(FilePreviewByteLimit.self, forKey: .previewByteLimit) ?? .balanced
     }
 }
 

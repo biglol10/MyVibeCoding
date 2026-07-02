@@ -103,6 +103,73 @@ final class SelectionOverlayCursorTests: XCTestCase {
         )
     }
 
+    func testSelectionOverlayConvertsLocalPointToGlobalScreenCoordinates() {
+        let screenFrame = CGRect(x: -1440, y: 120, width: 1440, height: 900)
+
+        XCTAssertEqual(
+            SelectionOverlayGeometry.globalPoint(localPoint: CGPoint(x: 20, y: 30), screenFrame: screenFrame),
+            CGPoint(x: -1420, y: 150)
+        )
+    }
+
+    func testWindowSelectionResolverPicksFrontmostExternalWindowAtPoint() {
+        let candidates = [
+            ScreenWindowCandidate(
+                bounds: CGRect(x: 10, y: 10, width: 300, height: 220),
+                ownerProcessID: 100,
+                layer: 0,
+                alpha: 1
+            ),
+            ScreenWindowCandidate(
+                bounds: CGRect(x: 20, y: 20, width: 500, height: 400),
+                ownerProcessID: 200,
+                layer: 0,
+                alpha: 1
+            )
+        ]
+
+        let selection = ScreenWindowSelectionResolver.selectionRect(
+            at: CGPoint(x: 60, y: 60),
+            on: CGRect(x: 0, y: 0, width: 1000, height: 800),
+            candidates: candidates,
+            currentProcessID: 999
+        )
+
+        XCTAssertEqual(selection, candidates[0].bounds)
+    }
+
+    func testWindowSelectionResolverIgnoresCurrentProcessAndUtilityLayers() {
+        let candidates = [
+            ScreenWindowCandidate(
+                bounds: CGRect(x: 10, y: 10, width: 300, height: 220),
+                ownerProcessID: 999,
+                layer: 0,
+                alpha: 1
+            ),
+            ScreenWindowCandidate(
+                bounds: CGRect(x: 15, y: 15, width: 300, height: 220),
+                ownerProcessID: 100,
+                layer: 25,
+                alpha: 1
+            ),
+            ScreenWindowCandidate(
+                bounds: CGRect(x: 20, y: 20, width: 300, height: 220),
+                ownerProcessID: 100,
+                layer: 0,
+                alpha: 1
+            )
+        ]
+
+        let selection = ScreenWindowSelectionResolver.selectionRect(
+            at: CGPoint(x: 60, y: 60),
+            on: CGRect(x: 0, y: 0, width: 1000, height: 800),
+            candidates: candidates,
+            currentProcessID: 999
+        )
+
+        XCTAssertEqual(selection, candidates[2].bounds)
+    }
+
     func testSelectionOverlayCreatesWindowForEveryScreen() {
         let screenFrames = [
             CGRect(x: 0, y: 0, width: 1512, height: 982),

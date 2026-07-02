@@ -83,7 +83,8 @@ final class ExplorerLayoutSettingsTests: XCTestCase {
         settingsStore.settings = ExplorerSettings(
             paneMode: .dual,
             isInspectorVisible: false,
-            showHiddenFiles: true
+            showHiddenFiles: true,
+            previewByteLimit: .expanded
         )
 
         let store = ExplorerStore(initialURL: tempDirectory, settingsStore: settingsStore)
@@ -93,6 +94,7 @@ final class ExplorerLayoutSettingsTests: XCTestCase {
         XCTAssertEqual(store.panes.count, 2)
         XCTAssertFalse(store.isInspectorVisible)
         XCTAssertTrue(store.showHiddenFiles)
+        XCTAssertEqual(store.previewByteLimit, .expanded)
         XCTAssertTrue(store.panes[0].entries.contains { $0.name == ".secret" })
         XCTAssertTrue(store.panes[1].entries.contains { $0.name == ".secret" })
     }
@@ -104,10 +106,16 @@ final class ExplorerLayoutSettingsTests: XCTestCase {
         await store.setPaneMode(.dual)
         store.isInspectorVisible = false
         await store.setShowHiddenFiles(true)
+        store.setPreviewByteLimit(.expanded)
 
         XCTAssertEqual(
             settingsStore.settings,
-            ExplorerSettings(paneMode: .dual, isInspectorVisible: false, showHiddenFiles: true)
+            ExplorerSettings(
+                paneMode: .dual,
+                isInspectorVisible: false,
+                showHiddenFiles: true,
+                previewByteLimit: .expanded
+            )
         )
     }
 

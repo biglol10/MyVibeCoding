@@ -40,6 +40,7 @@ struct RootView: View {
                         InspectorView(
                             selection: explorerStore.activeSelectedEntries,
                             calculatedFolderSizes: explorerStore.calculatedFolderSizes,
+                            previewByteLimit: explorerStore.previewByteLimit.rawValue,
                             onCommand: { command in
                                 Task { await explorerStore.perform(command) }
                             }
@@ -109,6 +110,7 @@ struct RootView: View {
                 currentLocation: pane.location,
                 currentSort: pane.sort,
                 showsPathColumn: explorerStore.isShowingRecursiveSearchResults,
+                inlineRenameRequest: inlineRenameRequest(for: pane),
                 requestsInitialFocus: index == explorerStore.activePaneIndex,
                 onFocus: {
                     focusedToolbarField = nil
@@ -123,9 +125,16 @@ struct RootView: View {
                     explorerStore.activatePane(at: index)
                     Task { await explorerStore.open(url) }
                 },
+                onRename: { newName in
+                    explorerStore.activatePane(at: index)
+                    Task { await explorerStore.renameSelected(to: newName) }
+                },
                 onCommand: { command in
                     explorerStore.activatePane(at: index)
                     Task { await explorerStore.perform(command) }
+                },
+                isCommandEnabled: { command in
+                    explorerStore.isCommandEnabled(command, forPaneAt: index)
                 },
                 openWithApplications: explorerStore.openWithApplications(forPaneAt: index),
                 onOpenWithApplication: { application in
@@ -154,6 +163,13 @@ struct RootView: View {
                     .frame(height: explorerStore.activePaneIndex == index ? 2 : 0)
             }
         }
+    }
+
+    private func inlineRenameRequest(for pane: PaneState) -> InlineRenameRequest? {
+        guard explorerStore.inlineRenameRequest?.paneID == pane.id else {
+            return nil
+        }
+        return explorerStore.inlineRenameRequest
     }
 
     private func performRecoveryAction(_ guidance: PermissionGuidance) {
@@ -355,21 +371,10 @@ private struct ExplorerShortcutMonitor: NSViewRepresentable {
             if flags.contains(.control) { modifiers.insert(.control) }
             if flags.contains(.shift) { modifiers.insert(.shift) }
 
-            let key: String
-            switch event.keyCode {
-            case 36, 76:
-                key = "return"
-            case 49:
-                key = "space"
-            case 53:
-                key = "escape"
-            case 48:
-                key = "tab"
-            case 120:
-                key = "f2"
-            default:
-                key = event.charactersIgnoringModifiers?.lowercased() ?? ""
-            }
+            let key = ExplorerKeyCodeMapper.key(
+                for: event.keyCode,
+                charactersIgnoringModifiers: event.charactersIgnoringModifiers
+            )
 
             guard !key.isEmpty else {
                 return nil

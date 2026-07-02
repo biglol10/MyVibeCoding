@@ -28,10 +28,7 @@ public final class OrphanFilesViewModel {
         planner: DeletionPlanner = DeletionPlanner(),
         executor: DeletionExecutor = DeletionExecutor(),
         verifier: DeletionVerifier = DeletionVerifier(),
-        receiptStore: DeletionReceiptStore = DeletionReceiptStore(
-            fileURL: FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Library/Application Support/MyMacClean/deletion-receipts.jsonl")
-        )
+        receiptStore: DeletionReceiptStore = .default()
     ) {
         self.homeDirectory = homeDirectory
         self.installedApps = installedApps
@@ -76,7 +73,11 @@ public final class OrphanFilesViewModel {
         selectedCandidates.reduce(Int64(0)) { $0 + $1.size }
     }
 
-    public func deleteSelectedLeftovers(confirmation: String, force: Bool = false) async {
+    public func deleteSelectedLeftovers(
+        confirmation: String,
+        force: Bool = false,
+        mode: DeletionMode = .moveToTrash
+    ) async {
         guard !isDeleting else { return }
         let app = InstalledApp(
             displayName: "Orphan Files",
@@ -105,7 +106,7 @@ public final class OrphanFilesViewModel {
         defer { isDeleting = false }
 
         let candidates = plan.candidates
-        let results = await executor.execute(plan: plan, confirmation: confirmation, force: force)
+        let results = await executor.execute(plan: plan, confirmation: confirmation, force: force, mode: mode)
         let verificationResults = await verifier.verify(plan: plan, executionResults: results)
         let receipt = DeletionReceipt(
             appName: "Orphan Files",
@@ -117,7 +118,7 @@ public final class OrphanFilesViewModel {
             },
             executionResults: results,
             verificationResults: verificationResults,
-            confirmationMatched: results.allSatisfy { $0.errorMessage != "confirmation phrase mismatch" }
+            confirmationMatched: results.allSatisfy { $0.errorMessage != DeletionExecutionErrorMessage.confirmationMismatch }
         )
 
         do {

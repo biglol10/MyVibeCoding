@@ -81,6 +81,49 @@ final class ExplorerStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testGoBackKeepsHistoryStacksWhenTargetLoadFails() async throws {
+        let child = tempDirectory.appendingPathComponent("Child", isDirectory: true)
+        try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
+        let fileSystem = SwitchableFileSystemService()
+        let store = ExplorerStore(
+            initialURL: tempDirectory,
+            fileSystemService: fileSystem,
+            directoryWatcher: nil
+        )
+
+        await store.navigate(to: child)
+        await fileSystem.fail(tempDirectory)
+        await store.goBack()
+
+        XCTAssertEqual(store.activePane.currentURL.path, child.path)
+        XCTAssertEqual(store.activePane.backStack, [.fileSystem(tempDirectory.standardizedFileURL)])
+        XCTAssertEqual(store.activePane.forwardStack, [])
+        XCTAssertTrue(store.visibleErrorMessage.contains("failed to load"))
+    }
+
+    @MainActor
+    func testGoForwardKeepsHistoryStacksWhenTargetLoadFails() async throws {
+        let child = tempDirectory.appendingPathComponent("Child", isDirectory: true)
+        try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
+        let fileSystem = SwitchableFileSystemService()
+        let store = ExplorerStore(
+            initialURL: tempDirectory,
+            fileSystemService: fileSystem,
+            directoryWatcher: nil
+        )
+
+        await store.navigate(to: child)
+        await store.goBack()
+        await fileSystem.fail(child)
+        await store.goForward()
+
+        XCTAssertEqual(store.activePane.currentURL.path, tempDirectory.path)
+        XCTAssertEqual(store.activePane.backStack, [])
+        XCTAssertEqual(store.activePane.forwardStack, [.fileSystem(child.standardizedFileURL)])
+        XCTAssertTrue(store.visibleErrorMessage.contains("failed to load"))
+    }
+
+    @MainActor
     func testGoUpCommandIsDisabledAtFilesystemRoot() async {
         let root = URL(fileURLWithPath: "/", isDirectory: true)
         let rootStore = ExplorerStore(initialURL: root, directoryWatcher: nil)
@@ -219,6 +262,20 @@ final class ExplorerStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testRenameCommandRequestsInlineRenameForSelectedItem() async throws {
+        let file = tempDirectory.appendingPathComponent("rename-me.txt")
+        try "text".write(to: file, atomically: true, encoding: .utf8)
+        let store = ExplorerStore(initialURL: tempDirectory)
+        await store.refresh()
+        store.updateSelection([file.standardizedFileURL])
+
+        await store.perform(.rename)
+
+        XCTAssertEqual(store.inlineRenameRequest?.paneID, store.panes[store.activePaneIndex].id)
+        XCTAssertEqual(store.inlineRenameRequest?.url, file.standardizedFileURL)
+    }
+
+    @MainActor
     func testCopyAndPasteCommandsCopySelectedFileIntoCurrentFolder() async throws {
         let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
         let destFolder = tempDirectory.appendingPathComponent("dest", isDirectory: true)
@@ -235,6 +292,87 @@ final class ExplorerStoreTests: XCTestCase {
         await store.perform(.paste)
 
         XCTAssertTrue(store.activePane.entries.contains { $0.name == "copy.txt" })
+    }
+
+    @MainActor
+    func testCopyToOppositePaneCopiesSelectedFileIntoInactivePaneFolder() async throws {
+        let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
+        let destFolder = tempDirectory.appendingPathComponent("dest", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceFolder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destFolder, withIntermediateDirectories: true)
+        let sourceFile = sourceFolder.appendingPathComponent("copy.txt")
+        try "copy".write(to: sourceFile, atomically: true, encoding: .utf8)
+        let store = ExplorerStore(
+            initialURL: sourceFolder,
+            settingsStore: InMemoryExplorerStoreSettingsStore(),
+            directoryWatcher: nil
+        )
+        await store.loadInitialDirectory()
+        await store.setPaneMode(.dual)
+        store.activatePane(at: 1)
+        await store.navigate(to: destFolder)
+        store.activatePane(at: 0)
+        store.updateSelection([sourceFile.standardizedFileURL])
+
+        await store.perform(.copyToOppositePane)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sourceFile.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destFolder.appendingPathComponent("copy.txt").path))
+        XCTAssertTrue(store.panes[1].entries.contains { $0.name == "copy.txt" })
+    }
+
+    @MainActor
+    func testMoveToOppositePaneMovesSelectedFileIntoInactivePaneFolder() async throws {
+        let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
+        let destFolder = tempDirectory.appendingPathComponent("dest", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceFolder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destFolder, withIntermediateDirectories: true)
+        let sourceFile = sourceFolder.appendingPathComponent("move.txt")
+        try "move".write(to: sourceFile, atomically: true, encoding: .utf8)
+        let store = ExplorerStore(
+            initialURL: sourceFolder,
+            settingsStore: InMemoryExplorerStoreSettingsStore(),
+            directoryWatcher: nil
+        )
+        await store.loadInitialDirectory()
+        await store.setPaneMode(.dual)
+        store.activatePane(at: 1)
+        await store.navigate(to: destFolder)
+        store.activatePane(at: 0)
+        store.updateSelection([sourceFile.standardizedFileURL])
+
+        await store.perform(.moveToOppositePane)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sourceFile.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destFolder.appendingPathComponent("move.txt").path))
+        XCTAssertFalse(store.panes[0].entries.contains { $0.name == "move.txt" })
+        XCTAssertTrue(store.panes[1].entries.contains { $0.name == "move.txt" })
+    }
+
+    @MainActor
+    func testPaneSpecificOppositePaneCommandsUseThatPaneSelectionAndDestination() async throws {
+        let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
+        let destFolder = tempDirectory.appendingPathComponent("dest", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceFolder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destFolder, withIntermediateDirectories: true)
+        let sourceFile = sourceFolder.appendingPathComponent("copy.txt")
+        try "copy".write(to: sourceFile, atomically: true, encoding: .utf8)
+        let store = ExplorerStore(
+            initialURL: sourceFolder,
+            settingsStore: InMemoryExplorerStoreSettingsStore(),
+            directoryWatcher: nil
+        )
+        await store.loadInitialDirectory()
+        store.updateSelection([sourceFile.standardizedFileURL])
+
+        XCTAssertFalse(store.isCommandEnabled(.copyToOppositePane, forPaneAt: 0))
+
+        await store.setPaneMode(.dual)
+        store.activatePane(at: 1)
+        await store.navigate(to: destFolder)
+
+        XCTAssertTrue(store.isCommandEnabled(.copyToOppositePane, forPaneAt: 0))
+        XCTAssertFalse(store.isCommandEnabled(.copyToOppositePane, forPaneAt: 1))
     }
 
     @MainActor
@@ -526,5 +664,33 @@ final class ExplorerStoreTests: XCTestCase {
         try await Task.sleep(nanoseconds: 120_000_000)
 
         XCTAssertEqual(store.activeOperationProgress?.phase, .failed)
+    }
+}
+
+private actor SwitchableFileSystemService: FileSystemServicing {
+    private var failingURLs: Set<URL> = []
+
+    func fail(_ url: URL) {
+        failingURLs.insert(url.standardizedFileURL)
+    }
+
+    func contentsOfDirectory(at url: URL, options: DirectoryReadOptions) async throws -> [FileEntry] {
+        let shouldFail = failingURLs.contains(url.standardizedFileURL)
+        if shouldFail {
+            throw ExplorerError.readFailed("failed to load \(url.path)")
+        }
+        return []
+    }
+}
+
+private final class InMemoryExplorerStoreSettingsStore: ExplorerSettingsStoring {
+    var settings = ExplorerSettings()
+
+    func load() -> ExplorerSettings {
+        settings
+    }
+
+    func save(_ settings: ExplorerSettings) {
+        self.settings = settings
     }
 }

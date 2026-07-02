@@ -3,6 +3,7 @@ import SwiftUI
 struct InspectorView: View {
     let selection: [FileEntry]
     let calculatedFolderSizes: [URL: Int64]
+    let previewByteLimit: Int
     let onCommand: (ExplorerCommand) -> Void
 
     var body: some View {
@@ -40,7 +41,7 @@ struct InspectorView: View {
         )
 
         return VStack(alignment: .leading, spacing: 14) {
-            FilePreviewView(entry: entry)
+            FilePreviewView(entry: entry, byteLimit: previewByteLimit)
 
             Text(details.name)
                 .font(.headline)

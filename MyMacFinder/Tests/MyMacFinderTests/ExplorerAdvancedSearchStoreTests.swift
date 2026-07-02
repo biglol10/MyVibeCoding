@@ -80,7 +80,35 @@ final class ExplorerAdvancedSearchStoreTests: XCTestCase {
         let store = ExplorerStore(initialURL: tempDirectory, settingsStore: settingsStore, directoryWatcher: nil)
         await store.loadInitialDirectory()
         store.setSearchFinderTagQuery("work")
+        await store.waitForFinderTagPopulationForTesting()
 
+        XCTAssertEqual(store.activePaneVisibleEntries.map(\.name), ["WorkReport.txt"])
+    }
+
+    @MainActor
+    func testCurrentFolderTagFilterReadsFinderTagsOffMainThread() async throws {
+        let workFile = tempDirectory.appendingPathComponent("WorkReport.txt")
+        let personalFile = tempDirectory.appendingPathComponent("PersonalNotes.txt")
+        try "work".write(to: workFile, atomically: true, encoding: .utf8)
+        try "personal".write(to: personalFile, atomically: true, encoding: .utf8)
+        let tagService = ThreadRecordingFinderTagService(
+            tagsByURL: [
+                workFile.standardizedFileURL: [FinderTag("Work")],
+                personalFile.standardizedFileURL: [FinderTag("Personal")]
+            ]
+        )
+        let store = ExplorerStore(
+            initialURL: tempDirectory,
+            settingsStore: settingsStore,
+            directoryWatcher: nil,
+            finderTagService: tagService
+        )
+        await store.loadInitialDirectory()
+
+        store.setSearchFinderTagQuery("work")
+        await store.waitForFinderTagPopulationForTesting()
+
+        XCTAssertEqual(tagService.recordedWasMainThread, false)
         XCTAssertEqual(store.activePaneVisibleEntries.map(\.name), ["WorkReport.txt"])
     }
 
@@ -113,4 +141,29 @@ private final class InMemoryExplorerAdvancedSearchSettingsStore: ExplorerSetting
     func save(_ settings: ExplorerSettings) {
         self.settings = settings
     }
+}
+
+private final class ThreadRecordingFinderTagService: FinderTagServicing, @unchecked Sendable {
+    private let lock = NSLock()
+    private let tagsByURL: [URL: [FinderTag]]
+    private var wasMainThread: Bool?
+
+    init(tagsByURL: [URL: [FinderTag]]) {
+        self.tagsByURL = tagsByURL
+    }
+
+    var recordedWasMainThread: Bool? {
+        lock.lock()
+        defer { lock.unlock() }
+        return wasMainThread
+    }
+
+    func tags(for url: URL) throws -> [FinderTag] {
+        lock.lock()
+        wasMainThread = Thread.isMainThread
+        lock.unlock()
+        return tagsByURL[url.standardizedFileURL] ?? []
+    }
+
+    func setTags(_ tags: [FinderTag], for url: URL) throws {}
 }

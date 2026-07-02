@@ -166,6 +166,19 @@ struct MainWindowView: View {
         let control = MainWindowPresentation.quickOptionsControl
 
         return Menu {
+            Section("Capture Area") {
+                ForEach(CaptureAreaType.allCases) { areaType in
+                    Button {
+                        appState.areaType = areaType
+                    } label: {
+                        quickOptionLabel(
+                            title: areaType.title,
+                            isSelected: appState.areaType == areaType
+                        )
+                    }
+                }
+            }
+
             Section("Screenshot Delay") {
                 ForEach([0, 3, 5, 10], id: \.self) { seconds in
                     Button {
@@ -251,7 +264,7 @@ struct MainWindowView: View {
 
             if result.canCopy && document.kind != .screenshot {
                 Button {
-                    captureCoordinator.copyCurrentDocument()
+                    Task { await captureCoordinator.copyCurrentDocument() }
                 } label: {
                     Image(systemName: "doc.on.doc")
                 }
@@ -270,7 +283,7 @@ struct MainWindowView: View {
             if result.canSave && document.kind != .screenshot {
                 if result.requiresSave {
                     Button {
-                        captureCoordinator.saveCurrentDocument()
+                        Task { await captureCoordinator.saveCurrentDocument() }
                     } label: {
                         Label("Save", systemImage: "square.and.arrow.down")
                     }
@@ -278,7 +291,7 @@ struct MainWindowView: View {
                     .help("Save")
                 } else {
                     Button {
-                        captureCoordinator.saveCurrentDocument()
+                        Task { await captureCoordinator.saveCurrentDocument() }
                     } label: {
                         Image(systemName: "square.and.arrow.down")
                     }
@@ -312,8 +325,8 @@ struct MainWindowView: View {
                 onToolSelected: { editorViewModel.activeTool = $0 },
                 onUndo: editorViewModel.undo,
                 onRedo: editorViewModel.redo,
-                onCopy: captureCoordinator.copyCurrentDocument,
-                onSave: captureCoordinator.saveCurrentDocument,
+                onCopy: { Task { await captureCoordinator.copyCurrentDocument() } },
+                onSave: { Task { await captureCoordinator.saveCurrentDocument() } },
                 onOCR: { Task { await captureCoordinator.runOCR() } },
                 onQuickRedact: { Task { await captureCoordinator.quickRedact() } }
             )

@@ -56,6 +56,10 @@ public enum ExplorerKeyboardShortcut {
             }
         case []:
             switch shortcut.key {
+            case "f5":
+                return .copyToOppositePane
+            case "f6":
+                return .moveToOppositePane
             case "f2":
                 return .rename
             case "return":
@@ -130,8 +134,8 @@ extension ExplorerCommand {
         case .open, .openInTerminal, .openInVSCode, .chooseOpenWithApplication, .quickLook, .revealInFinder,
              .copyPath, .newFolder, .rename, .duplicate, .extractZip, .compressToZip, .editTags, .undo,
              .selectAll, .addToFavorites, .copy, .cut, .paste,
-             .moveToTrash, .calculateFolderSize, .refresh, .clearSearch, .toggleHiddenFiles, .toggleInspector,
-             .goBack, .goForward, .goUp:
+             .copyToOppositePane, .moveToOppositePane, .moveToTrash, .calculateFolderSize, .refresh, .clearSearch,
+             .toggleHiddenFiles, .toggleInspector, .goBack, .goForward, .goUp:
             return false
         }
     }

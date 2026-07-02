@@ -7,6 +7,7 @@ struct QuickAddView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var input = ""
     @State private var parsed: QuickAddResult?
+    @State private var errorMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -75,6 +76,22 @@ struct QuickAddView: View {
             .padding(18)
         }
         .frame(width: 460)
+        .alert("저장할 수 없습니다", isPresented: errorBinding) {
+            Button("확인", role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "다시 시도해 주세요.")
+        }
+    }
+
+    private var errorBinding: Binding<Bool> {
+        Binding(
+            get: { errorMessage != nil },
+            set: { isPresented in
+                if isPresented == false {
+                    errorMessage = nil
+                }
+            }
+        )
     }
 
     private func parse() {
@@ -86,7 +103,12 @@ struct QuickAddView: View {
         guard trimmed.isEmpty == false else { return }
         let result = parsed ?? QuickAddParser().parse(trimmed)
         modelContext.insert(CalendarEvent(title: result.title, startDate: result.startDate, endDate: result.endDate))
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            errorMessage = error.localizedDescription
+            return
+        }
         dismiss()
     }
 }

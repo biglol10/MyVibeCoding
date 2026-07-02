@@ -60,7 +60,7 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
         XCTAssertTrue(appState.currentDocument?.isDirty ?? false)
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: temporaryDirectory.path).isEmpty)
 
-        coordinator.saveCurrentDocument()
+        await coordinator.saveCurrentDocument()
 
         let fileURL = try XCTUnwrap(appState.currentDocument?.fileURL)
         XCTAssertEqual(fileURL.deletingLastPathComponent().standardizedFileURL, temporaryDirectory.standardizedFileURL)
@@ -99,7 +99,7 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
             )
         ]
         appState.currentDocument = document
-        coordinator.saveCurrentDocument()
+        await coordinator.saveCurrentDocument()
 
         let fileURL = try XCTUnwrap(appState.currentDocument?.fileURL)
         XCTAssertEqual(fileURL.deletingLastPathComponent().standardizedFileURL, temporaryDirectory.standardizedFileURL)
@@ -171,7 +171,7 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: temporaryRecordingURL.path))
         XCTAssertTrue(appState.currentDocument?.isDirty ?? false)
 
-        coordinator.saveCurrentDocument()
+        await coordinator.saveCurrentDocument()
 
         let savedURL = try XCTUnwrap(appState.currentDocument?.fileURL)
         XCTAssertEqual(savedURL.deletingLastPathComponent().standardizedFileURL, temporaryDirectory.standardizedFileURL)

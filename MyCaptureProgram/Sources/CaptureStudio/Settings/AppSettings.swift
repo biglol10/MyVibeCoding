@@ -5,19 +5,14 @@ public struct AppSettings: Codable, Equatable {
     public var automaticallySaveRecordings: Bool
     public var screenshotFolderPath: String
     public var recordingFolderPath: String
-    public var askToSaveEditedScreenshots: Bool
     public var showInFinderAfterSave: Bool
 
     public var hideAppDuringCapture: Bool
     public var copyCapturedImageToClipboard: Bool
-    public var copyEditsToClipboard: Bool
-    public var multipleEditorWindows: Bool
-    public var captureBorderEnabled: Bool
     public var defaultDelaySeconds: Int
 
     public var includeSystemAudio: Bool
     public var includeMicrophone: Bool
-    public var microphoneDeviceName: String
     public var showCursorInRecordings: Bool
     public var countdownSeconds: Int
     public var recordingDurationSeconds: Int
@@ -52,17 +47,12 @@ public struct AppSettings: Codable, Equatable {
             automaticallySaveRecordings: true,
             screenshotFolderPath: desktopPath,
             recordingFolderPath: desktopPath,
-            askToSaveEditedScreenshots: false,
             showInFinderAfterSave: false,
             hideAppDuringCapture: true,
             copyCapturedImageToClipboard: true,
-            copyEditsToClipboard: true,
-            multipleEditorWindows: true,
-            captureBorderEnabled: false,
             defaultDelaySeconds: 0,
             includeSystemAudio: true,
             includeMicrophone: false,
-            microphoneDeviceName: "System Default",
             showCursorInRecordings: true,
             countdownSeconds: 3,
             recordingDurationSeconds: 5,

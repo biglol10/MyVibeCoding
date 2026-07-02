@@ -24,7 +24,8 @@ final class ExplorerSettingsStoreTests: XCTestCase {
             paneMode: .dual,
             isInspectorVisible: false,
             showHiddenFiles: true,
-            defaultSort: EntrySortDescriptor(key: .size, direction: .descending, folderFileOrdering: .filesFirst)
+            defaultSort: EntrySortDescriptor(key: .size, direction: .descending, folderFileOrdering: .filesFirst),
+            previewByteLimit: .expanded
         )
 
         UserDefaultsExplorerSettingsStore(defaults: defaults, key: key).save(savedSettings)
@@ -40,5 +41,26 @@ final class ExplorerSettingsStoreTests: XCTestCase {
         let loadedSettings = UserDefaultsExplorerSettingsStore(defaults: defaults, key: key).load()
 
         XCTAssertEqual(loadedSettings, ExplorerSettings())
+    }
+
+    func testDefaultsPreviewByteLimitWhenLoadingOlderSettings() throws {
+        let key = "settings"
+        let oldSettingsJSON = """
+        {
+          "paneMode": "dual",
+          "isInspectorVisible": false,
+          "showHiddenFiles": true,
+          "defaultSort": {
+            "key": "size",
+            "direction": "descending",
+            "folderFileOrdering": "filesFirst"
+          }
+        }
+        """
+        defaults.set(Data(oldSettingsJSON.utf8), forKey: key)
+
+        let loadedSettings = UserDefaultsExplorerSettingsStore(defaults: defaults, key: key).load()
+
+        XCTAssertEqual(loadedSettings.previewByteLimit, .balanced)
     }
 }

@@ -16,7 +16,6 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertTrue(settings.automaticallySaveRecordings)
         XCTAssertTrue(settings.hideAppDuringCapture)
         XCTAssertTrue(settings.copyCapturedImageToClipboard)
-        XCTAssertFalse(settings.askToSaveEditedScreenshots)
         XCTAssertEqual(settings.recordingDurationSeconds, 5)
     }
 

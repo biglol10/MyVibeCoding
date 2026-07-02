@@ -53,7 +53,7 @@ public struct ZipCompressionService: ZipCompressing, @unchecked Sendable {
             try await createArchive(from: sourceURLs, to: archiveURL, progress: progress)
         } catch {
             rollbackReplacement(resolution.replacedItem, partialDestination: archiveURL)
-            throw error
+            throw archiveOperationError(error)
         }
         return FileOperationResult(
             createdURLs: [archiveURL],
@@ -207,7 +207,7 @@ public struct ZipCompressionService: ZipCompressing, @unchecked Sendable {
         var result: NSURL?
         try fileManager.trashItem(at: url, resultingItemURL: &result)
         guard let result else {
-            throw ExplorerError.readFailed("Item could not be moved to Trash: \(url.path)")
+            throw ExplorerError.archiveFailed("Item could not be moved to Trash: \(url.path)")
         }
         return FileTrashRecord(original: url, trashed: result as URL)
     }
@@ -259,5 +259,15 @@ public struct ZipCompressionService: ZipCompressing, @unchecked Sendable {
             index += 1
         } while fileManager.fileExists(atPath: current.path)
         return current
+    }
+
+    private func archiveOperationError(_ error: Error) -> Error {
+        if error is CancellationError || error is FileOperationCancellation {
+            return error
+        }
+        if let error = error as? ExplorerError {
+            return error
+        }
+        return ExplorerError.archiveFailed(error.localizedDescription)
     }
 }

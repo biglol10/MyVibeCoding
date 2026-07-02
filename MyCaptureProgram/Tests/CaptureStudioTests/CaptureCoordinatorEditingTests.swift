@@ -3,7 +3,7 @@ import XCTest
 
 @MainActor
 final class CaptureCoordinatorEditingTests: XCTestCase {
-    func testSaveCurrentScreenshotUsesRenderedDataWhenLayersExist() throws {
+    func testSaveCurrentScreenshotUsesRenderedDataWhenLayersExist() async throws {
         let appState = AppState()
         let settingsStore = SettingsStore(defaults: isolatedDefaults("saveRendered"))
         let outputDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -29,14 +29,15 @@ final class CaptureCoordinatorEditingTests: XCTestCase {
             imageRenderService: renderer
         )
 
-        coordinator.saveCurrentDocument()
+        await coordinator.saveCurrentDocument()
 
         let fileURL = try XCTUnwrap(appState.currentDocument?.fileURL)
         XCTAssertEqual(try Data(contentsOf: fileURL), rendered)
         XCTAssertEqual(renderer.renderCallCount, 1)
+        XCTAssertEqual(renderer.renderWasOnMainThread, false)
     }
 
-    func testCopyCurrentScreenshotUsesRenderedDataWhenLayersExist() {
+    func testCopyCurrentScreenshotUsesRenderedDataWhenLayersExist() async {
         let appState = AppState()
         let settingsStore = SettingsStore(defaults: isolatedDefaults("copyRendered"))
         let original = Data([0x89, 0x50, 0x4E, 0x47, 0x00])
@@ -58,10 +59,11 @@ final class CaptureCoordinatorEditingTests: XCTestCase {
             clipboardService: clipboard
         )
 
-        coordinator.copyCurrentDocument()
+        await coordinator.copyCurrentDocument()
 
         XCTAssertEqual(clipboard.copiedPNGData, rendered)
         XCTAssertEqual(renderer.renderCallCount, 1)
+        XCTAssertEqual(renderer.renderWasOnMainThread, false)
     }
 
     private func isolatedDefaults(_ name: String) -> UserDefaults {
@@ -72,9 +74,10 @@ final class CaptureCoordinatorEditingTests: XCTestCase {
     }
 }
 
-private final class MockImageRenderService: ImageRenderServicing {
+private final class MockImageRenderService: ImageRenderServicing, @unchecked Sendable {
     let renderedData: Data
     var renderCallCount = 0
+    var renderWasOnMainThread: Bool?
 
     init(renderedData: Data) {
         self.renderedData = renderedData
@@ -82,6 +85,7 @@ private final class MockImageRenderService: ImageRenderServicing {
 
     func renderPNG(basePNGData: Data, layers: [EditorLayer]) throws -> Data {
         renderCallCount += 1
+        renderWasOnMainThread = Thread.isMainThread
         return renderedData
     }
 }

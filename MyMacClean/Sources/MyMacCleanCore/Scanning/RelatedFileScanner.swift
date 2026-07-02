@@ -109,11 +109,11 @@ public struct RelatedFileScanner: Sendable {
     }
 
     private func childURLs(in root: URL) throws -> [URL] {
-        let contents = try FileManager.default.contentsOfDirectory(
+        let contents = try? FileManager.default.contentsOfDirectory(
             at: root,
             includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey],
             options: [.skipsHiddenFiles]
         )
-        return contents.map { root.appendingPathComponent($0.lastPathComponent) }
+        return contents?.map { root.appendingPathComponent($0.lastPathComponent) } ?? []
     }
 }

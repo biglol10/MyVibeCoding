@@ -55,8 +55,8 @@ final class DeletionReceiptStoreTests: XCTestCase {
         let root = try TestFixtures.temporaryDirectory(named: "receipt-store-malformed")
         let receiptURL = root.appendingPathComponent("receipts.jsonl")
         let store = DeletionReceiptStore(fileURL: receiptURL)
-        let first = receipt(appName: "First", completedAt: Date(timeIntervalSince1970: 1))
-        let second = receipt(appName: "Second", completedAt: Date(timeIntervalSince1970: 2))
+        let first = Self.receipt(appName: "First", completedAt: Date(timeIntervalSince1970: 1))
+        let second = Self.receipt(appName: "Second", completedAt: Date(timeIntervalSince1970: 2))
 
         try store.append(first)
         let invalidLine = Data("{this is not valid json}\n".utf8)
@@ -69,7 +69,34 @@ final class DeletionReceiptStoreTests: XCTestCase {
         XCTAssertEqual(try store.readReceipts(), [first, second])
     }
 
-    private func receipt(appName: String, completedAt: Date) -> DeletionReceipt {
+    func testDefaultFileURLUsesApplicationSupportReceiptPath() throws {
+        let home = try TestFixtures.temporaryDirectory(named: "receipt-store-default-path")
+
+        XCTAssertEqual(
+            DeletionReceiptStore.defaultFileURL(homeDirectory: home),
+            home.appendingPathComponent("Library/Application Support/MyMacClean/deletion-receipts.jsonl")
+        )
+    }
+
+    func testConcurrentAppendsKeepEveryReceipt() async throws {
+        let root = try TestFixtures.temporaryDirectory(named: "receipt-store-concurrent")
+        let receiptURL = root.appendingPathComponent("receipts.jsonl")
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for index in 0..<40 {
+                group.addTask {
+                    let store = DeletionReceiptStore(fileURL: receiptURL)
+                    try store.append(Self.receipt(appName: "App \(index)", completedAt: Date(timeIntervalSince1970: TimeInterval(index))))
+                }
+            }
+
+            try await group.waitForAll()
+        }
+
+        XCTAssertEqual(try DeletionReceiptStore(fileURL: receiptURL).readReceipts().count, 40)
+    }
+
+    private static func receipt(appName: String, completedAt: Date) -> DeletionReceipt {
         DeletionReceipt(
             appName: appName,
             bundleIdentifier: nil,

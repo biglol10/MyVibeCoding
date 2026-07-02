@@ -5,6 +5,7 @@ struct FilePreviewView: View {
     private static let previewDebounceNanoseconds: UInt64 = 120_000_000
 
     let entry: FileEntry
+    let byteLimit: Int
     @State private var previewImage: NSImage?
     @State private var previewContent: FilePreviewContent = .visual
 
@@ -19,7 +20,7 @@ struct FilePreviewView: View {
                 visualPreview(message: message)
             }
         }
-        .task(id: entry.url) {
+        .task(id: PreviewLoadRequest(entryURL: entry.url.standardizedFileURL, byteLimit: byteLimit)) {
             await loadPreview()
         }
     }
@@ -106,7 +107,7 @@ struct FilePreviewView: View {
             return
         }
 
-        let content = await FilePreviewContentLoader.loadContent(for: entry)
+        let content = await FilePreviewContentLoader.loadContent(for: entry, byteLimit: byteLimit)
         guard !Task.isCancelled else {
             return
         }
@@ -126,4 +127,9 @@ struct FilePreviewView: View {
             previewImage = preview.image
         }
     }
+}
+
+private struct PreviewLoadRequest: Hashable {
+    let entryURL: URL
+    let byteLimit: Int
 }

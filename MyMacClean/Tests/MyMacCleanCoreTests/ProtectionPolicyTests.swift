@@ -39,4 +39,33 @@ final class ProtectionPolicyTests: XCTestCase {
 
         XCTAssertTrue(policy.isProtected(symlink))
     }
+
+    func testBlocksAdditionalProtectedRoots() throws {
+        let home = try TestFixtures.temporaryDirectory(named: "protection-additional-root")
+        let appBundle = home.appendingPathComponent("Applications/MyMacClean.app", isDirectory: true)
+        let policy = ProtectionPolicy(homeDirectory: home, additionalProtectedRoots: [appBundle])
+
+        XCTAssertTrue(policy.isProtected(appBundle))
+        XCTAssertTrue(policy.isProtected(appBundle.appendingPathComponent("Contents/MacOS/MyMacClean")))
+    }
+
+    func testAllowsUserTemporaryDirectoryButBlocksSymlinkToProtectedRoot() throws {
+        let home = try TestFixtures.temporaryDirectory(named: "protection-temp-home")
+        let temporaryRoot = FileManager.default.temporaryDirectory
+        let temporaryCandidate = temporaryRoot.appendingPathComponent("MyMacCleanTempCandidate-\(UUID().uuidString)")
+        let documents = home.appendingPathComponent("Documents", isDirectory: true)
+        let linkedDocument = temporaryRoot.appendingPathComponent("MyMacCleanDocumentLink-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: temporaryCandidate, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: documents, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: linkedDocument, withDestinationURL: documents)
+        defer {
+            try? FileManager.default.removeItem(at: temporaryCandidate)
+            try? FileManager.default.removeItem(at: linkedDocument)
+        }
+
+        let policy = ProtectionPolicy(homeDirectory: home)
+
+        XCTAssertFalse(policy.isProtected(temporaryCandidate))
+        XCTAssertTrue(policy.isProtected(linkedDocument))
+    }
 }

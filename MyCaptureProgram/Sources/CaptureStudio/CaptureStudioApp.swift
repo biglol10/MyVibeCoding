@@ -2,14 +2,32 @@ import SwiftUI
 
 @main
 struct CaptureStudioApp: App {
-    @StateObject private var appState = AppState()
-    @StateObject private var settingsStore = SettingsStore()
+    @StateObject private var appState: AppState
+    @StateObject private var settingsStore: SettingsStore
     @StateObject private var shortcutManager = ShortcutManager()
     @StateObject private var globalShortcutController = GlobalShortcutController()
+    @StateObject private var captureCoordinator: CaptureCoordinator
+
+    init() {
+        let appState = AppState()
+        let settingsStore = SettingsStore()
+        _appState = StateObject(wrappedValue: appState)
+        _settingsStore = StateObject(wrappedValue: settingsStore)
+        _captureCoordinator = StateObject(
+            wrappedValue: CaptureCoordinator(
+                appState: appState,
+                settingsStore: settingsStore
+            )
+        )
+    }
 
     var body: some Scene {
         WindowGroup {
-            MainWindowContainer()
+            MainWindowContainer(
+                appState: appState,
+                settingsStore: settingsStore,
+                captureCoordinator: captureCoordinator
+            )
                 .environmentObject(appState)
                 .environmentObject(settingsStore)
                 .environmentObject(shortcutManager)
@@ -23,18 +41,10 @@ struct CaptureStudioApp: App {
                 Button("Capture") {
                     startScreenshotCapture()
                 }
-                .keyboardShortcut(
-                    shortcutBinding(for: .newScreenshot).keyEquivalent,
-                    modifiers: shortcutBinding(for: .newScreenshot).eventModifiers
-                )
 
                 Button("Record") {
                     startScreenRecording()
                 }
-                .keyboardShortcut(
-                    shortcutBinding(for: .newRecording).keyEquivalent,
-                    modifiers: shortcutBinding(for: .newRecording).eventModifiers
-                )
 
                 Button("Stop Recording") {
                     stopActiveRecording()
@@ -71,28 +81,19 @@ struct CaptureStudioApp: App {
 
     private func startScreenshotCapture() {
         Task { @MainActor in
-            await CaptureCoordinator(
-                appState: appState,
-                settingsStore: settingsStore
-            ).startScreenshotCapture()
+            await captureCoordinator.startScreenshotCapture()
         }
     }
 
     private func startScreenRecording() {
         Task { @MainActor in
-            await CaptureCoordinator(
-                appState: appState,
-                settingsStore: settingsStore
-            ).startScreenRecording()
+            await captureCoordinator.startScreenRecording()
         }
     }
 
     private func stopActiveRecording() {
         Task { @MainActor in
-            await CaptureCoordinator(
-                appState: appState,
-                settingsStore: settingsStore
-            ).stopActiveRecording()
+            await captureCoordinator.stopActiveRecording()
         }
     }
 
@@ -127,15 +128,23 @@ private struct OpenSettingsCommand: View {
 }
 
 private struct MainWindowContainer: View {
-    @EnvironmentObject private var appState: AppState
-    @EnvironmentObject private var settingsStore: SettingsStore
+    @ObservedObject private var appState: AppState
+    @ObservedObject private var settingsStore: SettingsStore
+    @StateObject private var captureCoordinator: CaptureCoordinator
+
+    init(
+        appState: AppState,
+        settingsStore: SettingsStore,
+        captureCoordinator: CaptureCoordinator
+    ) {
+        self.appState = appState
+        self.settingsStore = settingsStore
+        _captureCoordinator = StateObject(wrappedValue: captureCoordinator)
+    }
 
     var body: some View {
         MainWindowView(
-            captureCoordinator: CaptureCoordinator(
-                appState: appState,
-                settingsStore: settingsStore
-            ),
+            captureCoordinator: captureCoordinator,
             appState: appState
         )
     }

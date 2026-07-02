@@ -52,6 +52,17 @@ final class ShortcutManagerTests: XCTestCase {
         XCTAssertEqual(manager.bindings, ShortcutDefinition.defaultBindings)
     }
 
+    @MainActor
+    func testPersistenceEncodingFailureIsExposed() throws {
+        let manager = ShortcutManager(defaults: isolatedDefaults("encodingFailure"), encodeBindings: { _ in
+            throw ShortcutTestEncodingError.expected
+        })
+
+        try manager.setBinding(ShortcutBinding(key: "5", modifiers: [.command]), for: .newScreenshot)
+
+        XCTAssertEqual(manager.persistenceErrorMessage, ShortcutTestEncodingError.expected.localizedDescription)
+    }
+
     func testShortcutBindingMapsToSwiftUIKeyboardShortcutValues() {
         let binding = ShortcutBinding(key: "s", modifiers: [.command, .shift])
 
@@ -73,5 +84,13 @@ final class ShortcutManagerTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
         return defaults
+    }
+}
+
+private enum ShortcutTestEncodingError: LocalizedError {
+    case expected
+
+    var errorDescription: String? {
+        "expected shortcut encoding failure"
     }
 }

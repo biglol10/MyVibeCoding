@@ -189,7 +189,7 @@ final class ExplorerSidebarStoreTests: XCTestCase {
         XCTAssertEqual(sidebarStore.savedStates.last?.favorites.map(\.id), [third.id, second.id, first.id])
     }
 
-    func testMissingFavoritePublishesMissingItemWithoutCrashing() {
+    func testMissingFavoritePublishesMissingItemWithoutCrashing() async {
         let missing = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let favorite = SidebarFavorite(title: "Missing", url: missing)
@@ -200,7 +200,38 @@ final class ExplorerSidebarStoreTests: XCTestCase {
             directoryWatcher: nil,
             volumeService: StubSidebarVolumeService()
         )
+        await store.loadInitialDirectory()
 
+        XCTAssertEqual(store.favoriteSidebarItems, [SidebarFavoriteItem(favorite: favorite, isMissing: true)])
+    }
+
+    func testFavoriteMissingStatusRefreshChecksPathStatusOffMainThread() async throws {
+        let root = try makeFixture()
+        let missing = root.appendingPathComponent("MissingFavorite", isDirectory: true)
+        let favorite = SidebarFavorite(title: "Missing", url: missing)
+        let checker = SidebarThreadRecordingPathStatusChecker(
+            statuses: [
+                missing.standardizedFileURL: FilePathStatus(
+                    exists: false,
+                    isDirectory: false,
+                    isReadable: false
+                )
+            ]
+        )
+        let store = ExplorerStore(
+            initialURL: root,
+            settingsStore: InMemoryExplorerSettingsStore(),
+            sidebarFavoritesStore: InMemorySidebarFavoritesStore(
+                state: SidebarState(favorites: [favorite], recentFolders: [])
+            ),
+            directoryWatcher: nil,
+            volumeService: StubSidebarVolumeService(),
+            pathStatusChecker: checker
+        )
+
+        await store.loadInitialDirectory()
+
+        XCTAssertEqual(checker.recordedWasMainThread, false)
         XCTAssertEqual(store.favoriteSidebarItems, [SidebarFavoriteItem(favorite: favorite, isMissing: true)])
     }
 
@@ -447,5 +478,36 @@ private final class InMemoryExplorerSettingsStore: ExplorerSettingsStoring {
 private struct StubSidebarVolumeService: VolumeListing {
     func mountedVolumes() async throws -> [MountedVolume] {
         []
+    }
+}
+
+private final class SidebarThreadRecordingPathStatusChecker: PathStatusChecking, @unchecked Sendable {
+    private let lock = NSLock()
+    private let statuses: [URL: FilePathStatus]
+    private var wasMainThread: Bool?
+
+    init(statuses: [URL: FilePathStatus]) {
+        self.statuses = statuses
+    }
+
+    var recordedWasMainThread: Bool? {
+        lock.lock()
+        defer { lock.unlock() }
+        return wasMainThread
+    }
+
+    func status(for url: URL) async -> FilePathStatus {
+        recordThread()
+        return statuses[url.standardizedFileURL] ?? FilePathStatus(
+            exists: true,
+            isDirectory: true,
+            isReadable: true
+        )
+    }
+
+    private func recordThread() {
+        lock.lock()
+        wasMainThread = Thread.isMainThread
+        lock.unlock()
     }
 }

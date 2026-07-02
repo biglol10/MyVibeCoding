@@ -16,7 +16,7 @@ final class FloatingOnlyModeSourceTests: XCTestCase {
 
         XCTAssertTrue(source.contains("func applicationShouldHandleReopen"))
         XCTAssertTrue(source.contains("openMainWindow()"))
-        XCTAssertTrue(source.contains("window.title == \"MyMacCalendar\""))
+        XCTAssertTrue(source.contains("window.title == AppVersion.name"))
         XCTAssertTrue(source.contains("mainWindow.makeKeyAndOrderFront(nil)"))
     }
 

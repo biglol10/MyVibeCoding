@@ -86,4 +86,31 @@ final class RelatedFileScannerTests: XCTestCase {
         XCTAssertEqual(scanned.evidence.first?.type, .bundleIdentifier)
         XCTAssertEqual(scanned.evidence.first?.matchedValue, "com.todesktop.230313mzl4w4u92")
     }
+
+    func testSkipsUnreadableScanRootsWithoutDroppingOtherCandidates() async throws {
+        let home = try TestFixtures.temporaryDirectory(named: "scanner-unreadable-home")
+        let app = InstalledApp(
+            displayName: "Figma",
+            bundleIdentifier: "com.figma.Desktop",
+            version: nil,
+            executableName: "Figma",
+            bundleURL: home.appendingPathComponent("Applications/Figma.app"),
+            iconIdentifier: nil,
+            bundleSize: 10,
+            lastOpenedAt: nil
+        )
+        let cache = home.appendingPathComponent("Library/Caches/com.figma.Desktop", isDirectory: true)
+        let unreadableRoot = home.appendingPathComponent("Unreadable", isDirectory: true)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: unreadableRoot, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: unreadableRoot.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: unreadableRoot.path) }
+
+        let candidates = try await RelatedFileScanner(
+            homeDirectory: home,
+            extraScanRoots: [unreadableRoot]
+        ).scanRelatedFiles(for: app)
+
+        XCTAssertTrue(candidates.contains { $0.url == cache })
+    }
 }

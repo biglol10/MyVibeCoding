@@ -4,7 +4,6 @@ public enum CaptureAreaType: String, CaseIterable, Codable, Identifiable {
     case rectangle
     case window
     case fullScreen
-    case freeform
 
     public var id: String { rawValue }
 
@@ -16,8 +15,6 @@ public enum CaptureAreaType: String, CaseIterable, Codable, Identifiable {
             return "Window"
         case .fullScreen:
             return "Full Screen"
-        case .freeform:
-            return "Freeform"
         }
     }
 }

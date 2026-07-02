@@ -117,11 +117,44 @@ final class FileOperationServiceTests: XCTestCase {
             _ = try await service.copyItems([folder], to: child)
             XCTFail("Expected copying a folder into its descendant to fail")
         } catch let error as ExplorerError {
-            XCTAssertEqual(error, .readFailed("Cannot copy a folder into itself."))
+            XCTAssertEqual(error, .operationFailed("Cannot copy a folder into itself."))
         }
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: child.appendingPathComponent("Folder").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("source.txt").path))
+    }
+
+    func testCopyItemsDescendantFailureIsNotReportedAsReadFailure() async throws {
+        let folder = tempDirectory.appendingPathComponent("OperationFolder", isDirectory: true)
+        let child = folder.appendingPathComponent("Child", isDirectory: true)
+        try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
+
+        let service = FileOperationService()
+
+        do {
+            _ = try await service.copyItems([folder], to: child)
+            XCTFail("Expected copying a folder into its descendant to fail")
+        } catch let error as ExplorerError {
+            XCTAssertEqual(error, .operationFailed("Cannot copy a folder into itself."))
+        }
+    }
+
+    func testDuplicateSystemFailureIsReportedAsOperationFailure() async throws {
+        let missing = tempDirectory.appendingPathComponent("missing.txt")
+        let service = FileOperationService()
+
+        do {
+            _ = try await service.duplicate(missing)
+            XCTFail("Expected duplicate of a missing item to fail")
+        } catch let error as ExplorerError {
+            if case .operationFailed(let message) = error {
+                XCTAssertTrue(message.contains("missing.txt"))
+            } else {
+                XCTFail("Expected operation failure, got \(error)")
+            }
+        } catch {
+            XCTFail("Expected operation failure, got \(error)")
+        }
     }
 
     func testCopyItemsPreflightsSourcesBeforeCopyingAnyItem() async throws {
@@ -209,6 +242,23 @@ final class FileOperationServiceTests: XCTestCase {
         XCTAssertTrue(snapshots.contains { $0.completedBytes == 4 && $0.totalBytes == 10 && $0.completedUnitCount == 0 })
         XCTAssertTrue(snapshots.contains { $0.completedBytes == 8 && $0.totalBytes == 10 && $0.completedUnitCount == 0 })
         XCTAssertTrue(snapshots.contains { $0.completedBytes == 10 && $0.totalBytes == 10 && $0.completedUnitCount == 1 })
+    }
+
+    func testCopySingleFilePreservesExtendedAttributesDuringStreamingCopy() async throws {
+        let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
+        let destFolder = tempDirectory.appendingPathComponent("dest", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceFolder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destFolder, withIntermediateDirectories: true)
+        let source = sourceFolder.appendingPathComponent("tagged.bin")
+        try Data(repeating: 1, count: 10).write(to: source)
+        let attributeName = "com.mymacfinder.test.metadata"
+        let attributeValue = Data("finder-tag-metadata".utf8)
+        try setExtendedAttribute(attributeName, value: attributeValue, for: source)
+
+        _ = try await FileOperationService(copyChunkSize: 4).copyItems([source], to: destFolder)
+
+        let destination = destFolder.appendingPathComponent(source.lastPathComponent)
+        XCTAssertEqual(try extendedAttribute(attributeName, for: destination), attributeValue)
     }
 
     func testCopyItemsStopsBeforeCopyingWhenProgressIsCancelledAfterStartUpdate() async throws {
@@ -300,7 +350,7 @@ final class FileOperationServiceTests: XCTestCase {
             _ = try await service.moveItems([folder], to: child)
             XCTFail("Expected moving a folder into its descendant to fail")
         } catch let error as ExplorerError {
-            XCTAssertEqual(error, .readFailed("Cannot move a folder into itself."))
+            XCTAssertEqual(error, .operationFailed("Cannot move a folder into itself."))
         }
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: folder.path))
@@ -399,6 +449,34 @@ final class FileOperationServiceTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: simulatedTrash.appendingPathComponent("first.txt").path))
     }
 
+    func testMoveToTrashReportsRollbackFailureWhenTrashedItemCannotBeRestored() async throws {
+        let first = tempDirectory.appendingPathComponent("first.txt")
+        let second = tempDirectory.appendingPathComponent("second.txt")
+        let simulatedTrash = tempDirectory.appendingPathComponent("SimulatedTrash", isDirectory: true)
+        try FileManager.default.createDirectory(at: simulatedTrash, withIntermediateDirectories: true)
+        try "first".write(to: first, atomically: true, encoding: .utf8)
+        try "second".write(to: second, atomically: true, encoding: .utf8)
+        let service = FileOperationService(trashItem: { url in
+            if url == second {
+                try "blocking replacement".write(to: first, atomically: true, encoding: .utf8)
+                throw ExplorerError.readFailed("trash failed")
+            }
+            let trashed = simulatedTrash.appendingPathComponent(url.lastPathComponent)
+            try FileManager.default.moveItem(at: url, to: trashed)
+            return trashed
+        })
+
+        do {
+            _ = try await service.moveToTrash([first, second])
+            XCTFail("Expected trash rollback failure")
+        } catch let error as ExplorerError {
+            XCTAssertTrue(error.localizedDescription.contains("rollback was incomplete"))
+            XCTAssertTrue(error.localizedDescription.contains("first.txt"))
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: simulatedTrash.appendingPathComponent("first.txt").path))
+    }
+
     func testCopyItemsReplacesExistingFileWhenResolverChoosesReplace() async throws {
         let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
         let destFolder = tempDirectory.appendingPathComponent("dest", isDirectory: true)
@@ -460,6 +538,44 @@ final class FileOperationServiceTests: XCTestCase {
                 "old"
             )
             XCTAssertFalse(FileManager.default.fileExists(atPath: existingDest.appendingPathComponent("unreadable.txt").path))
+        }
+    }
+
+    func testCopyReplaceReportsRollbackFailureWhenTrashedDestinationCannotBeRestored() async throws {
+        let itemName = "replace-copy-rollback-failure-\(UUID().uuidString)"
+        let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
+        let destFolder = tempDirectory.appendingPathComponent("dest", isDirectory: true)
+        let simulatedTrash = tempDirectory.appendingPathComponent("SimulatedTrash", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceFolder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destFolder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: simulatedTrash, withIntermediateDirectories: true)
+        let sourceDir = sourceFolder.appendingPathComponent(itemName, isDirectory: true)
+        let unreadableFile = sourceDir.appendingPathComponent("unreadable.txt")
+        let existingDest = destFolder.appendingPathComponent(itemName, isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+        try "new".write(to: unreadableFile, atomically: true, encoding: .utf8)
+        XCTAssertEqual(chmod(unreadableFile.path, 0), 0)
+        try FileManager.default.createDirectory(at: existingDest, withIntermediateDirectories: true)
+        try "old".write(to: existingDest.appendingPathComponent("old.txt"), atomically: true, encoding: .utf8)
+        defer {
+            _ = chmod(unreadableFile.path, S_IRUSR | S_IWUSR)
+        }
+        let service = FileOperationService(
+            conflictResolver: DefaultFileConflictResolver(decision: .replace),
+            trashItem: { url in
+                let trashed = simulatedTrash.appendingPathComponent(url.lastPathComponent)
+                try FileManager.default.moveItem(at: url, to: trashed)
+                try FileManager.default.removeItem(at: trashed)
+                return trashed
+            }
+        )
+
+        do {
+            _ = try await service.copyItems([sourceDir], to: destFolder)
+            XCTFail("Expected copy rollback failure")
+        } catch let error as ExplorerError {
+            XCTAssertTrue(error.localizedDescription.contains("rollback was incomplete"))
+            XCTAssertTrue(error.localizedDescription.contains(itemName))
         }
     }
 
@@ -528,6 +644,33 @@ private actor FileOperationProgressRecorder {
     func append(_ snapshot: FileOperationProgressSnapshot) {
         snapshots.append(snapshot)
     }
+}
+
+private func setExtendedAttribute(_ name: String, value: Data, for url: URL) throws {
+    let result = value.withUnsafeBytes { buffer in
+        setxattr(url.path, name, buffer.baseAddress, buffer.count, 0, 0)
+    }
+    guard result == 0 else {
+        if errno == ENOTSUP || errno == ENODATA {
+            throw XCTSkip("Extended attributes are not supported on this filesystem")
+        }
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+}
+
+private func extendedAttribute(_ name: String, for url: URL) throws -> Data {
+    let length = getxattr(url.path, name, nil, 0, 0, 0)
+    guard length >= 0 else {
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+    var data = Data(count: length)
+    let result = data.withUnsafeMutableBytes { buffer in
+        getxattr(url.path, name, buffer.baseAddress, length, 0, 0)
+    }
+    guard result >= 0 else {
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+    return data
 }
 
 private actor ProgressCanceller {

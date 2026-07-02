@@ -8,11 +8,16 @@ final class FloatingWidgetController {
     private var detailWindow: NSWindow?
     private var listWindow: NSWindow?
     private var hostingController: NSHostingController<FloatingWidgetView>?
+    private var latestOccurrences: [EventOccurrence] = []
+    private var latestOnSelect: ((EventOccurrence) -> Void)?
 
     func show(occurrences: [EventOccurrence], opacity: Double, alwaysOnTop: Bool, onSelect: @escaping (EventOccurrence) -> Void) {
+        latestOccurrences = occurrences
+        latestOnSelect = onSelect
         let onShowAll: () -> Void = { [weak self] in
-            guard let self else { return }
-            self.showAll(occurrences: occurrences, onSelect: onSelect)
+            guard let self,
+                  let latestOnSelect = self.latestOnSelect else { return }
+            self.showAll(occurrences: self.latestOccurrences, onSelect: latestOnSelect)
         }
 
         if window == nil {
@@ -44,6 +49,7 @@ final class FloatingWidgetController {
         }
 
         hostingController?.rootView = FloatingWidgetView(occurrences: occurrences, onSelect: onSelect, onShowAll: onShowAll)
+        refreshOpenListWindow()
         window?.level = alwaysOnTop ? .floating : .normal
         window?.alphaValue = opacity
         showWithoutActivating()
@@ -84,6 +90,13 @@ final class FloatingWidgetController {
         listWindow?.level = .floating
         listWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func refreshOpenListWindow() {
+        guard listWindow?.isVisible == true,
+              let latestOnSelect else { return }
+        (listWindow?.contentViewController as? NSHostingController<FloatingWidgetAllEventsView>)?.rootView =
+            FloatingWidgetAllEventsView(occurrences: latestOccurrences, onSelect: latestOnSelect)
     }
 
     func hide() {

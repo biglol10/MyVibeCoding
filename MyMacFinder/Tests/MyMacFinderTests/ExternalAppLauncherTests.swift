@@ -75,6 +75,63 @@ final class ExternalAppLauncherTests: XCTestCase {
         XCTAssertEqual(workspace.openCalls.map(\.urls), [[target.standardizedFileURL]])
         XCTAssertEqual(workspace.openCalls.map(\.applicationURL), [vscodeURL.standardizedFileURL])
     }
+
+    func testOpenVSCodeFallsBackToCodeCommandThroughUserShell() async throws {
+        let workspace = DuplicateCompletionWorkspaceOpener()
+        let commandRunner = RecordingExternalCommandRunner()
+        let target = URL(fileURLWithPath: "/Users/example/Project", isDirectory: true)
+        let shellURL = URL(fileURLWithPath: "/bin/zsh")
+        let launcher = AppKitExternalAppLauncher(
+            workspace: workspace,
+            commandRunner: commandRunner,
+            codeCommandShellURL: shellURL
+        )
+
+        try await launcher.openVSCode(at: target)
+
+        XCTAssertTrue(workspace.openCalls.isEmpty)
+        XCTAssertEqual(
+            commandRunner.invocations,
+            [
+                ExternalCommandInvocation(
+                    executableURL: shellURL,
+                    arguments: [
+                        "-lc",
+                        "exec code \"$1\"",
+                        "mymacfinder-code",
+                        target.standardizedFileURL.path
+                    ],
+                    failureMessage: "Visual Studio Code is not installed or the code command was not found."
+                )
+            ]
+        )
+    }
+
+    func testMissingTerminalIsNotReportedAsReadFailure() async throws {
+        let workspace = DuplicateCompletionWorkspaceOpener()
+        let missingTerminalURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MissingTerminal-\(UUID().uuidString).app", isDirectory: true)
+        let directory = URL(fileURLWithPath: "/Users/example/Project", isDirectory: true)
+        let launcher = AppKitExternalAppLauncher(
+            workspace: workspace,
+            terminalApplicationURL: missingTerminalURL
+        )
+
+        do {
+            try await launcher.openTerminal(at: directory)
+            XCTFail("Expected opening a missing Terminal app to fail")
+        } catch let error as ExplorerError {
+            XCTAssertEqual(error, .externalCommandFailed("Terminal.app was not found."))
+        }
+    }
+}
+
+private final class RecordingExternalCommandRunner: ExternalCommandRunning {
+    var invocations: [ExternalCommandInvocation] = []
+
+    func run(_ invocation: ExternalCommandInvocation) async throws {
+        invocations.append(invocation)
+    }
 }
 
 @MainActor

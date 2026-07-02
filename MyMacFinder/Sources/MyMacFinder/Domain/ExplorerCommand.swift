@@ -20,6 +20,8 @@ public enum ExplorerCommand: String, CaseIterable, Identifiable {
     case copy
     case cut
     case paste
+    case copyToOppositePane
+    case moveToOppositePane
     case moveToTrash
     case calculateFolderSize
     case refresh
@@ -59,6 +61,8 @@ public enum ExplorerCommand: String, CaseIterable, Identifiable {
         case .copy: return "Copy"
         case .cut: return "Cut"
         case .paste: return "Paste"
+        case .copyToOppositePane: return "Copy to Other Pane"
+        case .moveToOppositePane: return "Move to Other Pane"
         case .moveToTrash: return "Move to Trash"
         case .calculateFolderSize: return "Calculate Size"
         case .refresh: return "Refresh"
@@ -83,7 +87,7 @@ public enum ExplorerCommand: String, CaseIterable, Identifiable {
             return true
         case .open, .openInTerminal, .openInVSCode, .chooseOpenWithApplication, .quickLook, .revealInFinder,
              .copyPath, .newFolder, .rename, .duplicate, .extractZip, .compressToZip, .editTags,
-             .addToFavorites, .moveToTrash, .calculateFolderSize, .refresh,
+             .addToFavorites, .copyToOppositePane, .moveToOppositePane, .moveToTrash, .calculateFolderSize, .refresh,
              .focusSearch, .focusPath, .clearSearch, .toggleHiddenFiles, .toggleInspector, .goBack, .goForward,
              .goUp, .newTab, .closeTab, .nextTab, .previousTab:
             return false
@@ -149,7 +153,8 @@ public enum ExplorerCommand: String, CaseIterable, Identifiable {
             case .refresh, .focusSearch, .focusPath, .clearSearch, .toggleHiddenFiles, .toggleInspector, .selectAll:
                 return true
             case .newFolder, .openInTerminal, .openInVSCode, .chooseOpenWithApplication, .rename, .duplicate,
-                 .extractZip, .compressToZip, .editTags, .copy, .cut, .paste, .moveToTrash, .calculateFolderSize:
+                 .extractZip, .compressToZip, .editTags, .copy, .cut, .paste,
+                 .copyToOppositePane, .moveToOppositePane, .moveToTrash, .calculateFolderSize:
                 return false
             case .addToFavorites:
                 return false
@@ -196,7 +201,8 @@ public enum ExplorerCommand: String, CaseIterable, Identifiable {
             return selectionCount > 0 && selectedEntries.allSatisfy { !$0.isArchiveBacked }
         case .editTags:
             return selectionCount == 1 && selectedEntries.first?.isArchiveBacked != true
-        case .open, .quickLook, .revealInFinder, .copyPath, .duplicate, .copy, .cut, .moveToTrash:
+        case .open, .quickLook, .revealInFinder, .copyPath, .duplicate, .copy, .cut,
+             .copyToOppositePane, .moveToOppositePane, .moveToTrash:
             return selectionCount > 0
         }
     }

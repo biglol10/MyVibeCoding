@@ -50,7 +50,7 @@ final class FileDropValidatorTests: XCTestCase {
         XCTAssertThrowsError(
             try FileDropValidator.validate(urls: [folder], destinationFolder: child, operation: .copy)
         ) { error in
-            XCTAssertEqual(error as? ExplorerError, .readFailed("Cannot copy a folder into itself."))
+            XCTAssertEqual(error as? ExplorerError, .operationFailed("Cannot copy a folder into itself."))
         }
     }
 

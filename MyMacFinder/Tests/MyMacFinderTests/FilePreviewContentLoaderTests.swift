@@ -77,8 +77,8 @@ final class FilePreviewContentLoaderTests: XCTestCase {
         guard case .text(let preview) = content else {
             return XCTFail("Expected text preview, got \(content)")
         }
-        XCTAssertEqual(preview.byteLimit, 16 * 1024)
-        XCTAssertLessThanOrEqual(preview.text.utf8.count, 16 * 1024)
+        XCTAssertEqual(preview.byteLimit, FilePreviewByteLimit.balanced.rawValue)
+        XCTAssertLessThanOrEqual(preview.text.utf8.count, FilePreviewByteLimit.balanced.rawValue)
         XCTAssertTrue(preview.isTruncated)
     }
 

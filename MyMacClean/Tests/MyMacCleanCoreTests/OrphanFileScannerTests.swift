@@ -107,4 +107,31 @@ final class OrphanFileScannerTests: XCTestCase {
         XCTAssertFalse(groups[0].candidates[0].defaultSelected)
         XCTAssertTrue(groups[0].candidates[0].requiresManualReview)
     }
+
+    func testSkipsUnreadableRootsWithoutDroppingOtherOrphans() async throws {
+        let home = try TestFixtures.temporaryDirectory(named: "orphans-unreadable-home")
+        let cache = home.appendingPathComponent("Library/Caches/com.example.Leftover", isDirectory: true)
+        let unreadablePreferences = home.appendingPathComponent("Library/Preferences", isDirectory: true)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: unreadablePreferences, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: unreadablePreferences.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: unreadablePreferences.path) }
+
+        let groups = try await OrphanFileScanner(homeDirectory: home, installedApps: []).scan()
+
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups[0].inferredIdentifier, "com.example.Leftover")
+    }
+
+    func testDirectoryOrphanSizeIncludesNestedFiles() async throws {
+        let home = try TestFixtures.temporaryDirectory(named: "orphans-size-home")
+        let cache = home.appendingPathComponent("Library/Caches/com.example.BigLeftover", isDirectory: true)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        try Data(repeating: 1, count: 1_000_000).write(to: cache.appendingPathComponent("payload.bin"))
+
+        let groups = try await OrphanFileScanner(homeDirectory: home, installedApps: []).scan()
+
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertGreaterThanOrEqual(groups[0].totalSize, 1_000_000)
+    }
 }

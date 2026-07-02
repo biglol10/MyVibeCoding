@@ -19,12 +19,12 @@ public enum FileDropValidator {
 
         for source in urls.map(\.standardizedFileURL) {
             if source == destination {
-                throw ExplorerError.readFailed("Cannot drop an item onto itself.")
+                throw ExplorerError.operationFailed("Cannot drop an item onto itself.")
             }
 
             if isDescendant(destination, of: source) {
                 let verb = operation == .copy ? "copy" : "move"
-                throw ExplorerError.readFailed("Cannot \(verb) a folder into itself.")
+                throw ExplorerError.operationFailed("Cannot \(verb) a folder into itself.")
             }
         }
     }

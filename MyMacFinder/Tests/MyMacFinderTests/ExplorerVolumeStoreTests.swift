@@ -91,6 +91,37 @@ final class ExplorerVolumeStoreTests: XCTestCase {
         XCTAssertEqual(store.volumeError, .permissionDenied(unreadable.standardizedFileURL.path))
     }
 
+    func testMountedVolumeNavigationChecksPathStatusOffMainThread() async throws {
+        let root = try makeFixture()
+        let volumeURL = try makeFixture()
+        let checker = ThreadRecordingPathStatusChecker(
+            statuses: [
+                volumeURL.standardizedFileURL: FilePathStatus(
+                    exists: true,
+                    isDirectory: true,
+                    isReadable: true
+                )
+            ]
+        )
+        let volume = MountedVolume(
+            url: volumeURL,
+            name: "Threaded Volume",
+            isLocal: false
+        )
+        let store = ExplorerStore(
+            initialURL: root,
+            directoryWatcher: nil,
+            volumeService: StubVolumeService(result: .success([volume])),
+            pathStatusChecker: checker
+        )
+        await store.refreshMountedVolumes()
+
+        await store.navigateToMountedVolume(volume)
+
+        XCTAssertEqual(checker.recordedWasMainThread, false)
+        XCTAssertEqual(store.activePane.currentURL, volumeURL.standardizedFileURL)
+    }
+
     private func makeFixture() throws -> URL {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("MyMacFinderVolumeTests-\(UUID().uuidString)", isDirectory: true)
@@ -107,5 +138,36 @@ private struct StubVolumeService: VolumeListing {
 
     func mountedVolumes() async throws -> [MountedVolume] {
         try result.get()
+    }
+}
+
+private final class ThreadRecordingPathStatusChecker: PathStatusChecking, @unchecked Sendable {
+    private let lock = NSLock()
+    private let statuses: [URL: FilePathStatus]
+    private var wasMainThread: Bool?
+
+    init(statuses: [URL: FilePathStatus]) {
+        self.statuses = statuses
+    }
+
+    var recordedWasMainThread: Bool? {
+        lock.lock()
+        defer { lock.unlock() }
+        return wasMainThread
+    }
+
+    func status(for url: URL) async -> FilePathStatus {
+        recordThread()
+        return statuses[url.standardizedFileURL] ?? FilePathStatus(
+            exists: false,
+            isDirectory: false,
+            isReadable: false
+        )
+    }
+
+    private func recordThread() {
+        lock.lock()
+        wasMainThread = Thread.isMainThread
+        lock.unlock()
     }
 }
