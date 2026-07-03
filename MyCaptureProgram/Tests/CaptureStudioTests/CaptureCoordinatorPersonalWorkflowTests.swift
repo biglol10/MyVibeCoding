@@ -150,9 +150,66 @@ final class CaptureCoordinatorPersonalWorkflowTests: XCTestCase {
         let request = try XCTUnwrap(exporter.gifRequests.first)
         XCTAssertEqual(request.sourceURL, sourceURL)
         XCTAssertEqual(request.outputURL.pathExtension, "gif")
+        XCTAssertNil(request.maxDurationSeconds)
         XCTAssertEqual(appState.currentDocument?.fileURL, sourceURL)
         XCTAssertEqual(revealService.revealedURLs, [request.outputURL])
         XCTAssertEqual(appState.statusMessage, "GIF exported.")
+    }
+
+    @MainActor
+    func testTrimFailureRemovesPartialOutputFile() async throws {
+        let sourceURL = temporaryFile(name: "source-trim-failure.mp4", data: Data([0x00, 0x00, 0x00, 0x18]))
+        let appState = AppState(
+            currentDocument: EditorDocument(
+                kind: .recording,
+                createdAt: Date(timeIntervalSince1970: 10),
+                fileURL: sourceURL,
+                isDirty: false
+            )
+        )
+        let exporter = FailingRecordingExportService(operation: .trim)
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: makeSettingsStore("trimFailureCleanup"),
+            screenshotService: MockPersonalScreenshotService(),
+            selectionService: MockPersonalSelectionService(),
+            recordingExportService: exporter
+        )
+
+        await coordinator.trimCurrentRecording(startSeconds: 1, endSeconds: 3)
+
+        let outputURL = try XCTUnwrap(exporter.trimRequests.first?.outputURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: outputURL.path))
+        XCTAssertEqual(appState.currentDocument?.fileURL, sourceURL)
+        XCTAssertEqual(appState.statusMessage?.hasPrefix("Trim failed:"), true)
+    }
+
+    @MainActor
+    func testGIFFailureRemovesPartialOutputFile() async throws {
+        let sourceURL = temporaryFile(name: "source-gif-failure.mp4", data: Data([0x00, 0x00, 0x00, 0x18]))
+        let appState = AppState(
+            currentDocument: EditorDocument(
+                kind: .recording,
+                createdAt: Date(timeIntervalSince1970: 10),
+                fileURL: sourceURL,
+                isDirty: false
+            )
+        )
+        let exporter = FailingRecordingExportService(operation: .gif)
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: makeSettingsStore("gifFailureCleanup"),
+            screenshotService: MockPersonalScreenshotService(),
+            selectionService: MockPersonalSelectionService(),
+            recordingExportService: exporter
+        )
+
+        await coordinator.exportCurrentRecordingAsGIF()
+
+        let outputURL = try XCTUnwrap(exporter.gifRequests.first?.outputURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: outputURL.path))
+        XCTAssertEqual(appState.currentDocument?.fileURL, sourceURL)
+        XCTAssertEqual(appState.statusMessage?.hasPrefix("GIF export failed:"), true)
     }
 
     @MainActor
@@ -245,7 +302,7 @@ private final class MockRecordingExportService: RecordingExportServicing {
     struct GIFRequest: Equatable {
         let sourceURL: URL
         let outputURL: URL
-        let maxDurationSeconds: Double
+        let maxDurationSeconds: Double?
     }
 
     var trimRequests: [TrimRequest] = []
@@ -259,12 +316,52 @@ private final class MockRecordingExportService: RecordingExportServicing {
         return outputURL
     }
 
-    func exportGIF(sourceURL: URL, outputURL: URL, maxDurationSeconds: Double) async throws -> URL {
+    func exportGIF(sourceURL: URL, outputURL: URL, maxDurationSeconds: Double?) async throws -> URL {
         gifRequests.append(
             GIFRequest(sourceURL: sourceURL, outputURL: outputURL, maxDurationSeconds: maxDurationSeconds)
         )
         try Data("GIF89a".utf8).write(to: outputURL, options: .atomic)
         return outputURL
+    }
+}
+
+private final class FailingRecordingExportService: RecordingExportServicing {
+    enum Operation {
+        case trim
+        case gif
+    }
+
+    let operation: Operation
+    var trimRequests: [MockRecordingExportService.TrimRequest] = []
+    var gifRequests: [MockRecordingExportService.GIFRequest] = []
+
+    init(operation: Operation) {
+        self.operation = operation
+    }
+
+    func trimRecording(sourceURL: URL, startSeconds: Double, endSeconds: Double, outputURL: URL) async throws -> URL {
+        trimRequests.append(
+            MockRecordingExportService.TrimRequest(
+                sourceURL: sourceURL,
+                startSeconds: startSeconds,
+                endSeconds: endSeconds,
+                outputURL: outputURL
+            )
+        )
+        try Data([0x00, 0x00, 0x00, 0x18, 0x54]).write(to: outputURL, options: .atomic)
+        throw RecordingExportError.exportFailed("forced trim failure")
+    }
+
+    func exportGIF(sourceURL: URL, outputURL: URL, maxDurationSeconds: Double?) async throws -> URL {
+        gifRequests.append(
+            MockRecordingExportService.GIFRequest(
+                sourceURL: sourceURL,
+                outputURL: outputURL,
+                maxDurationSeconds: maxDurationSeconds
+            )
+        )
+        try Data("GIF89a".utf8).write(to: outputURL, options: .atomic)
+        throw RecordingExportError.gifDestinationFailed
     }
 }
 

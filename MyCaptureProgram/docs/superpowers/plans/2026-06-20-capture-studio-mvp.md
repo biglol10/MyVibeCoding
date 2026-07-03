@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status:** Historical implementation plan for the first MVP only. The current app has moved beyond this plan. Real region selection, screenshot capture, screen recording, editing, OCR, quick redact, recording preview, trim-copy export, GIF export, history, presets, smart filenames, floating pins, and result deletion are now covered by later work. Use `README.md` and the source code as the current source of truth.
+
 **Goal:** Build the first native macOS milestone: SwiftUI/AppKit app skeleton, minimal main window, Settings window, persistent settings, customizable shortcuts with reset defaults, file output naming/fallback, and capture coordinator interfaces.
 
 **Architecture:** Use a Swift Package executable target for a native macOS 15 SwiftUI app. Keep business logic in small Foundation-based files with XCTest coverage, and keep SwiftUI views thin by reading `AppState`, `SettingsStore`, and `ShortcutManager`.
@@ -22,7 +24,7 @@ This plan implements the first working foundation from the approved design spec:
 - Output filename and folder fallback model
 - Capture coordinator protocols and a simulated ScreenCaptureKit service
 
-This plan does not implement real region overlay capture, MP4 recording, annotation rendering, OCR, color picker, or recording trim. Those require separate implementation plans because they are independent subsystems with their own permissions and UI risks.
+At the MVP phase, this plan was limited to the app foundation and simulated capture coordinator. Later work added real region selection, MP4 recording, annotation rendering, OCR, and recording trim-copy export. Color picker remains future work unless added in source after this note.
 
 ## File Structure
 
@@ -1513,8 +1515,7 @@ final class CaptureCoordinatorTests: XCTestCase {
 
         await coordinator.startNewCapture()
 
-        XCTAssertNil(appState.currentDocument)
-        XCTAssertEqual(appState.statusMessage, "Recording will be added in the recording milestone.")
+        XCTAssertEqual(appState.statusMessage, "Recording captured.")
     }
 
     private func isolatedDefaults(_ name: String) -> UserDefaults {
@@ -1593,8 +1594,7 @@ public final class CaptureCoordinator: ObservableObject {
         case .screenshot:
             await startScreenshotCapture()
         case .record:
-            appState.currentDocument = nil
-            appState.statusMessage = "Recording will be added in the recording milestone."
+            appState.statusMessage = "Recording captured."
         }
     }
 
@@ -1693,7 +1693,7 @@ Expected: PASS.
 
 Run: `swift build && swift run CaptureStudio`
 
-Expected: PASS build. In the app, pressing New in Screenshot mode changes the preview state to "Capture preview" and status to "Screenshot captured." Pressing New in Record mode shows "Recording will be added in the recording milestone."
+Expected: PASS build. In the current app, pressing Capture starts screenshot selection and pressing Record starts recording selection.
 
 - [ ] **Step 9: Commit**
 
@@ -1732,18 +1732,13 @@ swift run CaptureStudio
 swift test
 ```
 
-## Current Milestone
+## Features
 
-This milestone includes:
-
-- Minimal main window
-- Settings window
-- Persistent settings
-- Customizable shortcut model with reset defaults
-- Output filename and folder fallback model
-- Capture coordinator interfaces
-
-Real screen region selection, screenshot capture, recording, editing, OCR, and color picker are separate implementation milestones.
+- Native macOS app bundle with a compact Capture / Record first workflow
+- Region screenshot capture and region screen recording
+- Settings, shortcuts, output folders, smart filenames, capture history, presets, and in-app guide
+- Screenshot editing, OCR, quick redaction, save/copy/delete, floating pins
+- Recording preview, trim-copy export, and GIF export
 ```
 
 - [ ] **Step 2: Run all tests**

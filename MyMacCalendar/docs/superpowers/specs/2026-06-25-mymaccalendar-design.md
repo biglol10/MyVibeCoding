@@ -2,6 +2,8 @@
 
 Date: 2026-06-25
 
+Status: Historical product/design baseline. The current implementation has evolved since this document was written; use `README.md` and the source tree as the current behavior reference.
+
 ## 1. Overview
 
 MyMacCalendar is a local-first macOS calendar app for managing all-day events with a professional, information-dense UI.

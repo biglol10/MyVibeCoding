@@ -1,5 +1,8 @@
 # MyMacClean Uninstaller Design
 
+Status: historical design. Current behavior is summarized in `../../../README.md`
+and `2026-07-03-mymacclean-personal-cleaner-design.md`.
+
 Date: 2026-06-19
 
 ## Decision Summary

@@ -27,7 +27,9 @@ MyMacClean is intentionally conservative.
 
 - Destructive actions require explicit selection.
 - Files are moved to Trash by default.
-- Permanent deletion is an explicit opt-in in the confirmation sheet.
+- Applications and Orphan Files can use permanent deletion only as an explicit
+  opt-in in the confirmation sheet.
+- Large Files and Developer Cache cleanup are Trash-only in the current app.
 - Confirmation uses `DELETE`.
 - Protected paths are checked again at execution time.
 - User documents, Desktop, Downloads, iCloud document roots, media folders,
@@ -37,6 +39,8 @@ MyMacClean is intentionally conservative.
 - Cleanup receipts are recorded for destructive attempts.
 - Startup item management does not edit plist contents, does not call
   `launchctl`, and does not modify system-wide LaunchAgents or LaunchDaemons.
+- Disabling a startup item renames the plist only. If the agent is already
+  loaded, it may keep running until the next login or restart.
 
 ## Current Features
 
@@ -58,14 +62,21 @@ MyMacClean is intentionally conservative.
 - Groups leftovers by inferred bundle identifier.
 - Excludes currently installed apps and the running MyMacClean bundle.
 - Requires manual selection before cleanup.
+- Moves selected leftovers to Trash by default.
+- Supports permanent deletion and force-delete options only after explicit
+  confirmation.
 - Records cleanup receipts.
 
 ### Large Files
 
 - Finds large files for manual review.
+- Scans top-level files in `~/Downloads` by default.
+- Uses a 500 MB minimum size threshold.
 - Does not auto-select results.
-- Excludes system roots and common package internals.
+- Excludes system roots and package internals.
+- Sorts results by size descending.
 - Supports reveal/copy-path and selected-file cleanup.
+- Moves selected large files to Trash only.
 
 ### Developer Cache
 
@@ -73,7 +84,12 @@ MyMacClean is intentionally conservative.
   CocoaPods, Gradle, and related cache roots.
 - Calculates reclaimable size.
 - Separates safer caches from review-only targets.
+- Selects Safe cache targets automatically; Review targets require manual
+  selection.
+- Shows Docker storage as read-only when the Docker data directory exists.
+- Blocks DerivedData cleanup while Xcode is running.
 - Reuses the same deletion, verification, and receipt pipeline.
+- Moves selected deletable caches to Trash only.
 
 ### Startup Items
 
@@ -90,6 +106,8 @@ MyMacClean is intentionally conservative.
   - `name.plist` -> `name.plist.mymacclean-disabled`
 - Disabled user LaunchAgents can be enabled by renaming them back.
 - System-wide items are read-only.
+- MyMacClean does not call `launchctl`; already loaded agents may continue
+  until the next login or restart.
 
 ## Install on Another Mac
 
@@ -189,4 +207,6 @@ docs/superpowers              Design and implementation notes
 - No automatic background cleanup.
 - No one-click broad system cleaner.
 - No system LaunchAgent or LaunchDaemon modification.
-- Startup item changes are reversible rename operations only.
+- Startup item changes are reversible rename operations only and are recorded
+  in Delete History as startup item changes.
+- Large Files currently scans top-level files in `~/Downloads` by default.

@@ -1,5 +1,6 @@
 import AppKit
 import AVKit
+import AppKit
 import SwiftUI
 
 struct MainWindowView: View {
@@ -192,7 +193,7 @@ struct MainWindowView: View {
 
         return Menu {
             Section("Presets") {
-                ForEach(presetStore.allPresets) { preset in
+                ForEach(CapturePreset.defaultPresets) { preset in
                     Button {
                         presetStore.apply(preset, to: appState, settingsStore: settingsStore)
                     } label: {
@@ -200,6 +201,29 @@ struct MainWindowView: View {
                             title: preset.name,
                             isSelected: appState.captureMode == preset.captureMode && appState.areaType == preset.areaType
                         )
+                    }
+                }
+
+                if !presetStore.userPresets.isEmpty {
+                    ForEach(presetStore.userPresets) { preset in
+                        Menu {
+                            Button {
+                                presetStore.apply(preset, to: appState, settingsStore: settingsStore)
+                            } label: {
+                                Label("Apply", systemImage: "checkmark")
+                            }
+
+                            Button(role: .destructive) {
+                                presetStore.remove(id: preset.id)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        } label: {
+                            quickOptionLabel(
+                                title: preset.name,
+                                isSelected: appState.captureMode == preset.captureMode && appState.areaType == preset.areaType
+                            )
+                        }
                     }
                 }
 
@@ -414,9 +438,18 @@ struct MainWindowView: View {
 
     private func historyItemButton(_ item: CaptureHistoryItem) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Image(systemName: item.kind == .recording ? "record.circle" : "photo")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(item.kind == .recording ? .red : .blue)
+            if let thumbnail = historyThumbnail(for: item) {
+                Image(nsImage: thumbnail)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 150, height: 58)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            } else {
+                Image(systemName: item.kind == .recording ? "record.circle" : "photo")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(item.kind == .recording ? .red : .blue)
+                    .frame(height: 58, alignment: .topLeading)
+            }
             Text(item.title)
                 .font(.caption.weight(.semibold))
                 .lineLimit(1)
@@ -447,6 +480,16 @@ struct MainWindowView: View {
         .padding(10)
         .frame(width: 170, alignment: .leading)
         .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func historyThumbnail(for item: CaptureHistoryItem) -> NSImage? {
+        if let thumbnailData = item.thumbnailData {
+            return NSImage(data: thumbnailData)
+        }
+        if let thumbnailURL = item.thumbnailURL {
+            return NSImage(contentsOf: thumbnailURL)
+        }
+        return nil
     }
 
     @ViewBuilder

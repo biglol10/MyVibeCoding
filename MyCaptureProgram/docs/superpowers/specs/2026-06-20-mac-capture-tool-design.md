@@ -2,6 +2,10 @@
 
 Date: 2026-06-20
 
+## Status
+
+Historical product spec. The app has moved past the original phased MVP described below: region capture, region recording, screenshot editing, OCR, quick redact, recording preview, recording trim-copy export, GIF export, history, presets, smart filenames, and floating pins are now implemented. Window/full-screen/freeform capture, window-mode recording, scrolling capture, audio device selection, color picker, print/share integrations, and Perfect Screenshot-style automatic region adjustment are still future work unless implemented in source after this note. Use `README.md` and the source code as the source of truth.
+
 ## Goal
 
 Build a native macOS screenshot and screen recording app that feels as convenient as Windows Snipping Tool, while fitting macOS interaction patterns. The app should keep the main screen minimal, move defaults and behavior controls into Settings, and support phased delivery from core capture and recording to advanced editing and OCR.
@@ -167,27 +171,29 @@ When manual save is active, closing an edited unsaved capture prompts the user i
 
 ### Editing
 
-Initial editor tools:
+Implemented editor tools include:
 
 - Pen
 - Highlighter
-- Eraser
-- Crop
+- Arrow
+- Rectangle
+- Ellipse
+- Text labels
+- Blur/redact
+- OCR text extraction
+- Quick redact
 - Undo and redo
 - Copy to clipboard
 - Save
 - Save As
-- Share
+- Delete current result
 
-Later editor tools:
+Still future or not currently documented as complete:
 
-- Shapes
-- Text labels
 - Emojis or stickers
-- OCR text extraction
-- Quick redact for email and phone number patterns
 - Color picker
-- Recording trim
+- Crop
+- Print/share integrations
 
 ### Settings
 
@@ -414,10 +420,7 @@ Errors should be recoverable where possible. Permission errors open Settings gui
 
 - Window capture and full-screen capture.
 - Window-mode recording.
-- OCR text extraction.
-- Quick redact.
 - Color picker.
-- Recording trim.
 - Perfect Screenshot-style automatic region adjustment.
 
 ## Testing Strategy

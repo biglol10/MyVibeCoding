@@ -18,10 +18,10 @@ public enum FloatingPinError: LocalizedError, Equatable {
 }
 
 @MainActor
-public final class AppKitFloatingPinService: FloatingPinServicing {
-    private var panels: [NSPanel] = []
+public final class AppKitFloatingPinService: NSObject, FloatingPinServicing, NSWindowDelegate {
+    private(set) var activePanels: [NSPanel] = []
 
-    public init() {}
+    public override init() {}
 
     public func pinImage(data: Data, title: String) throws {
         guard let image = NSImage(data: data), image.size.width > 0, image.size.height > 0 else {
@@ -45,9 +45,17 @@ public final class AppKitFloatingPinService: FloatingPinServicing {
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isReleasedWhenClosed = false
+        panel.delegate = self
         panel.contentView = imageView
         panel.center()
         panel.makeKeyAndOrderFront(nil)
-        panels.append(panel)
+        activePanels.append(panel)
+    }
+
+    public func windowWillClose(_ notification: Notification) {
+        guard let panel = notification.object as? NSPanel else {
+            return
+        }
+        activePanels.removeAll { $0 === panel }
     }
 }

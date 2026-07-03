@@ -469,7 +469,7 @@ struct FileTableView: NSViewRepresentable {
 
             let previousEntries = renderedEntries
             renderedEntries = parent.entries
-            iconCache.removeAll()
+            pruneIconCache(keeping: parent.entries)
             if reloadChangedRowsIfPossible(previousEntries: previousEntries, updatedEntries: parent.entries) {
                 return
             }
@@ -503,9 +503,14 @@ struct FileTableView: NSViewRepresentable {
             }
 
             renderedLocation = parent.currentLocation
-            iconCache.removeAll()
+            pruneIconCache(keeping: parent.entries)
             scrollView.contentView.scroll(to: .zero)
             scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+
+        private func pruneIconCache(keeping entries: [FileEntry]) {
+            let liveKeys = Set(entries.map(IconCacheKey.init(entry:)))
+            iconCache = iconCache.filter { liveKeys.contains($0.key) }
         }
 
         func syncColumns() {

@@ -54,6 +54,12 @@ final class SourceArchitectureTests: XCTestCase {
         XCTAssertFalse(source.contains("shortcutBinding(for: .newRecording).keyEquivalent"))
     }
 
+    func testQuickOptionsExposeUserPresetDeletion() throws {
+        let source = try String(contentsOf: sourceURL("Views/MainWindowView.swift"), encoding: .utf8)
+
+        XCTAssertTrue(source.contains("presetStore.remove"))
+    }
+
     private func sourceURL(_ relativePath: String) -> URL {
         repositoryRoot
             .appendingPathComponent("Sources")

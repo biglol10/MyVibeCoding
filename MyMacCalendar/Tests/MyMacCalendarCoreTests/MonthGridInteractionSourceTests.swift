@@ -47,6 +47,15 @@ final class MonthGridInteractionSourceTests: XCTestCase {
         XCTAssertTrue(eventEditorSource.contains("guard let year = components.year"))
     }
 
+    func testMonthGridPreparesEntriesOncePerRenderedMonth() throws {
+        let source = try String(contentsOfFile: sourcePath("Sources/MyMacCalendar/Views/MonthGridView.swift"), encoding: .utf8)
+
+        XCTAssertTrue(source.contains("let preparedData = makePreparedData()"))
+        XCTAssertTrue(source.contains("struct MonthGridPreparedData"))
+        XCTAssertTrue(source.contains("entriesByDay"))
+        XCTAssertFalse(source.contains("private var visibleOccurrences"))
+    }
+
     private func sourcePath(_ relativePath: String) -> String {
         let testFile = URL(fileURLWithPath: #filePath)
         return testFile

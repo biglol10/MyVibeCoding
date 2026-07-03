@@ -7,6 +7,7 @@ import MyMacCleanCore
 public final class StartupItemsViewModel {
     private let scanner: StartupItemScanner
     private let controller: StartupItemController
+    private let receiptStore: DeletionReceiptStore
 
     public var items: [StartupItem] = []
     public var selectedItemID: StartupItem.ID?
@@ -19,13 +20,16 @@ public final class StartupItemsViewModel {
     public var isApplyingChange = false
     public var hasScanned = false
     public var errorMessage: String?
+    public var statusMessage: String?
 
     public init(
         scanner: StartupItemScanner = StartupItemScanner(),
-        controller: StartupItemController = StartupItemController()
+        controller: StartupItemController = StartupItemController(),
+        receiptStore: DeletionReceiptStore = .default()
     ) {
         self.scanner = scanner
         self.controller = controller
+        self.receiptStore = receiptStore
     }
 
     public var visibleItems: [StartupItem] {
@@ -53,10 +57,12 @@ public final class StartupItemsViewModel {
             items = try await scanner.scan()
             hasScanned = true
             errorMessage = nil
+            statusMessage = nil
             reconcileSelection()
         } catch {
             hasScanned = true
             errorMessage = error.localizedDescription
+            statusMessage = nil
             items = []
             selectedItemID = nil
         }
@@ -72,7 +78,7 @@ public final class StartupItemsViewModel {
             errorMessage = "Select a startup item first."
             return
         }
-        await applyChange {
+        await applyChange(item: selectedItem, action: .startupItemDisable) {
             try controller.disable(selectedItem)
         }
     }
@@ -83,21 +89,67 @@ public final class StartupItemsViewModel {
             errorMessage = "Select a startup item first."
             return
         }
-        await applyChange {
+        await applyChange(item: selectedItem, action: .startupItemEnable) {
             try controller.enable(selectedItem)
         }
     }
 
-    private func applyChange(_ operation: () throws -> URL) async {
+    private func applyChange(item: StartupItem, action: DeletionAction, _ operation: () throws -> URL) async {
         isApplyingChange = true
         defer { isApplyingChange = false }
         do {
+            let sourceURL = item.plistURL
             let movedURL = try operation()
             items = try await scanner.scan()
             selectedItemID = items.first { $0.plistURL == movedURL }?.id ?? items.first?.id
             errorMessage = nil
+            let receipt = receipt(for: item, action: action, sourceURL: sourceURL)
+            do {
+                try receiptStore.append(receipt)
+                statusMessage = successMessage(for: action)
+            } catch {
+                statusMessage = nil
+                errorMessage = "Startup item changed, but history could not be saved: \(error.localizedDescription)"
+            }
         } catch {
             errorMessage = error.localizedDescription
+            statusMessage = nil
+        }
+    }
+
+    private func receipt(for item: StartupItem, action: DeletionAction, sourceURL: URL) -> DeletionReceipt {
+        DeletionReceipt(
+            appName: item.label,
+            bundleIdentifier: nil,
+            bundlePath: sourceURL.path,
+            action: action,
+            selectedCandidates: [
+                DeletionReceiptCandidate(
+                    path: sourceURL.path,
+                    kind: item.scope == .globalLaunchDaemon ? .launchDaemon : .launchAgent,
+                    size: 0,
+                    safety: .review,
+                    evidence: []
+                )
+            ],
+            executionResults: [
+                DeletionItemResult(path: sourceURL.path, success: true, errorMessage: nil)
+            ],
+            verificationResults: [
+                DeletionVerificationResult(path: sourceURL.path, status: .deleted, errorMessage: nil)
+            ],
+            confirmationMatched: true
+        )
+    }
+
+    private func successMessage(for action: DeletionAction) -> String {
+        switch action {
+        case .startupItemDisable:
+            "Startup item was disabled. It can keep running until you log out or restart because MyMacClean only renames the plist. The change is recorded in history."
+        case .startupItemEnable:
+            "Startup item was re-enabled. The change is recorded in history."
+        default:
+            "Startup item change is recorded in history."
         }
     }
 

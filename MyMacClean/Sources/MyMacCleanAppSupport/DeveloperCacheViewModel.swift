@@ -11,6 +11,7 @@ public final class DeveloperCacheViewModel {
     private let executor: DeletionExecutor
     private let verifier: DeletionVerifier
     private let receiptStore: DeletionReceiptStore
+    private let runningApplicationMonitor: RunningApplicationMonitor
 
     public var candidates: [DeveloperCacheCandidate] = []
     public var selectedCandidateIDs: Set<DeveloperCacheCandidate.ID> = []
@@ -28,7 +29,8 @@ public final class DeveloperCacheViewModel {
         planner: DeletionPlanner = DeletionPlanner(),
         executor: DeletionExecutor? = nil,
         verifier: DeletionVerifier = DeletionVerifier(),
-        receiptStore: DeletionReceiptStore = .default()
+        receiptStore: DeletionReceiptStore = .default(),
+        runningApplicationMonitor: RunningApplicationMonitor = RunningApplicationMonitor()
     ) {
         self.homeDirectory = homeDirectory
         self.dockerStorageURL = dockerStorageURL ?? Self.defaultDockerStorageURL(homeDirectory: homeDirectory)
@@ -38,6 +40,7 @@ public final class DeveloperCacheViewModel {
         )
         self.verifier = verifier
         self.receiptStore = receiptStore
+        self.runningApplicationMonitor = runningApplicationMonitor
     }
 
     public static func defaultDockerStorageURL(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
@@ -127,6 +130,11 @@ public final class DeveloperCacheViewModel {
             errorMessage = "Select at least one deletable item."
             return
         }
+        guard !selectedCandidates.contains(where: { $0.tool == .xcodeDerivedData }) || !isXcodeRunning() else {
+            deletionReport = nil
+            errorMessage = "Quit Xcode before deleting DerivedData."
+            return
+        }
 
         let app = InstalledApp(
             displayName: "Developer Cache",
@@ -171,6 +179,21 @@ public final class DeveloperCacheViewModel {
             errorMessage = error.localizedDescription
             isDeleting = false
         }
+    }
+
+    private func isXcodeRunning() -> Bool {
+        runningApplicationMonitor.isRunning(
+            InstalledApp(
+                displayName: "Xcode",
+                bundleIdentifier: "com.apple.dt.Xcode",
+                version: nil,
+                executableName: "Xcode",
+                bundleURL: URL(fileURLWithPath: "/Applications/Xcode.app", isDirectory: true),
+                iconIdentifier: nil,
+                bundleSize: 0,
+                lastOpenedAt: nil
+            )
+        )
     }
 
     private static func relatedCandidate(for candidate: DeveloperCacheCandidate) -> RelatedFileCandidate {

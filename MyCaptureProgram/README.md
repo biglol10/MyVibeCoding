@@ -93,6 +93,12 @@ Run ScreenCaptureKit and screenshot-editor integration tests:
 CAPTURE_STUDIO_RUN_INTEGRATION=1 swift test
 ```
 
+## Documentation
+
+The current user-facing feature list, install steps, packaging flow, and permission notes live in this README.
+
+Files under `docs/superpowers/` are historical planning/specification artifacts from earlier implementation phases. They are useful for design rationale, but they may include task-by-task implementation snippets from that phase. When those files conflict with this README or the current source code, treat this README and the source code as authoritative.
+
 ## Screenshot Editing
 
 After a screenshot is captured, the editor toolbar can annotate, OCR, and redact the screenshot before saving or copying. Save and Copy flatten annotation layers into a PNG. OCR and Quick Redact run on demand.

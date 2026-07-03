@@ -4,36 +4,57 @@ import XCTest
 
 @MainActor
 final class PrivacyAccessSettingsViewTests: XCTestCase {
-    func testPrivacyAccessSettingsViewBuildsForEmptyFolderGrants() {
-        let view = PrivacyAccessSettingsView(
+    func testPrivacyAccessSettingsPresentationDescribesEmptyFolderGrants() {
+        let presentation = PrivacyAccessSettingsPresentation(
             sandboxPolicy: SandboxPolicySummary(isSandboxed: false),
-            grantedFolderSummaries: [],
-            onChooseFolder: {},
-            onOpenPrivacySettings: {},
-            onRemoveGrant: { _ in },
-            onResetGrants: {}
+            grantedFolderSummaries: []
         )
 
-        XCTAssertNotNil(String(describing: view))
+        XCTAssertEqual(presentation.folderCountText, "0 folders")
+        XCTAssertFalse(presentation.showsResetAction)
+        XCTAssertEqual(presentation.emptyTitle, "No folders selected")
+        XCTAssertEqual(presentation.folderRows, [])
     }
 
-    func testPrivacyAccessSettingsViewBuildsForGrantedFolders() {
-        let view = PrivacyAccessSettingsView(
+    func testPrivacyAccessSettingsPresentationDescribesGrantedFolders() {
+        let availableGrant = FolderAccessGrantSummary(
+            grant: FolderAccessGrant(
+                url: URL(fileURLWithPath: "/Users/biglol/Documents/Work", isDirectory: true),
+                bookmarkData: Data()
+            ),
+            availability: .available
+        )
+        let staleGrant = FolderAccessGrantSummary(
+            grant: FolderAccessGrant(
+                url: URL(fileURLWithPath: "/Users/biglol/Documents/Archive", isDirectory: true),
+                bookmarkData: Data()
+            ),
+            availability: .available,
+            isStale: true
+        )
+        let unavailableGrant = FolderAccessGrantSummary(
+            grant: FolderAccessGrant(
+                url: URL(fileURLWithPath: "/Users/biglol/Documents/Missing", isDirectory: true),
+                bookmarkData: Data()
+            ),
+            availability: .unavailable
+        )
+        let presentation = PrivacyAccessSettingsPresentation(
             sandboxPolicy: SandboxPolicySummary(isSandboxed: true),
-            grantedFolderSummaries: [
-                FolderAccessGrantSummary(
-                    grant: FolderAccessGrant(
-                        url: URL(fileURLWithPath: "/Users/biglol/Documents/Work", isDirectory: true),
-                        bookmarkData: Data()
-                    )
-                )
-            ],
-            onChooseFolder: {},
-            onOpenPrivacySettings: {},
-            onRemoveGrant: { _ in },
-            onResetGrants: {}
+            grantedFolderSummaries: [availableGrant, staleGrant, unavailableGrant]
         )
 
-        XCTAssertNotNil(String(describing: view))
+        XCTAssertEqual(presentation.folderCountText, "3 folders")
+        XCTAssertTrue(presentation.showsResetAction)
+        XCTAssertEqual(presentation.folderRows.map(\.statusText), [
+            "Available",
+            "Bookmark refreshed",
+            "Needs selection again"
+        ])
+        XCTAssertEqual(presentation.folderRows.map(\.systemImageName), [
+            "checkmark.circle.fill",
+            "checkmark.circle.fill",
+            "exclamationmark.triangle.fill"
+        ])
     }
 }

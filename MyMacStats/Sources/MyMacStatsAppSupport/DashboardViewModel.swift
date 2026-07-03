@@ -48,6 +48,7 @@ public final class DashboardViewModel: ObservableObject {
     @Published public var terminationMessage: String?
 
     private let service: SystemMetricsService
+    private let healthAlertController: HealthAlertController
     private var terminator: ProcessTerminator
     private var terminationMessageProcessID: Int32?
     private var forceQuitCandidateGroupID: String?
@@ -63,10 +64,12 @@ public final class DashboardViewModel: ObservableObject {
     public init(
         snapshot: SystemMetricsSnapshot = .empty(),
         service: SystemMetricsService = SystemMetricsService(),
+        healthAlertController: HealthAlertController = HealthAlertController(),
         terminator: ProcessTerminator = ProcessTerminator()
     ) {
         self.snapshot = snapshot
         self.service = service
+        self.healthAlertController = healthAlertController
         self.terminator = terminator
         self.selectedKind = .cpu
         self.searchText = ""
@@ -355,6 +358,7 @@ public final class DashboardViewModel: ObservableObject {
 
     public func refreshNow() async {
         snapshot = await service.refresh()
+        await healthAlertController.observe(snapshot: snapshot)
     }
 
     public func start() {

@@ -1,5 +1,9 @@
 # MyMacClean Uninstaller Implementation Plan
 
+Status: historical implementation plan. Current behavior is summarized in
+`../../../README.md` and
+`../specs/2026-07-03-mymacclean-personal-cleaner-design.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build v1 of MyMacClean as a native macOS uninstaller that discovers installed apps, scans related files, shows a review-focused SwiftUI UI, and permanently deletes confirmed selections with safety checks and a local journal.

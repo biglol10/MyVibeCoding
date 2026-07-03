@@ -56,12 +56,13 @@ struct MonthGridView: View {
         GeometryReader { proxy in
             let headerHeight: CGFloat = 54
             let cellHeight = max(92, (proxy.size.height - headerHeight) / 6)
+            let preparedData = makePreparedData()
 
             VStack(spacing: 0) {
                 weekdayHeader(height: headerHeight)
                 LazyVGrid(columns: columns, spacing: 0) {
-                    ForEach(cells, id: \.date) { cell in
-                        dayCell(cell, height: cellHeight)
+                    ForEach(preparedData.cells, id: \.date) { cell in
+                        dayCell(cell, height: cellHeight, preparedData: preparedData)
                     }
                 }
             }
@@ -86,8 +87,8 @@ struct MonthGridView: View {
         }
     }
 
-    private func dayCell(_ cell: CalendarDayCell, height: CGFloat) -> some View {
-        let dayEntries = entries(for: cell.date)
+    private func dayCell(_ cell: CalendarDayCell, height: CGFloat, preparedData: MonthGridPreparedData) -> some View {
+        let dayEntries = preparedData.entriesByDay[dayKey(for: cell.date)] ?? []
         let visibleEntries = Array(dayEntries.prefix(CalendarGridLayout.visibleEntryLimit(for: density)))
         let overflowCount = max(0, dayEntries.count - visibleEntries.count)
 
@@ -97,7 +98,7 @@ struct MonthGridView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Spacer(minLength: 0)
-                    dateLabel(for: cell)
+                    dateLabel(for: cell, preparedData: preparedData)
                 }
                 .padding(.top, CalendarGridLayout.dateTopPadding)
                 .padding(.horizontal, CalendarGridLayout.dateHorizontalPadding(for: density))
@@ -124,7 +125,7 @@ struct MonthGridView: View {
                             DayOverflowPopover(
                                 date: cell.date,
                                 entries: dayEntries,
-                                events: events,
+                                eventsByID: preparedData.eventsByID,
                                 onSelectEvent: onSelectEvent
                             )
                         }
@@ -171,7 +172,7 @@ struct MonthGridView: View {
         }
     }
 
-    private func dateLabel(for cell: CalendarDayCell) -> some View {
+    private func dateLabel(for cell: CalendarDayCell, preparedData: MonthGridPreparedData) -> some View {
         HStack(alignment: .center, spacing: 4) {
             if cell.isToday {
                 Text("\(cell.day)")
@@ -183,11 +184,11 @@ struct MonthGridView: View {
 
                 Text("일")
                     .font(.system(size: CalendarGridTypography.dateFontSize, weight: .semibold))
-                    .foregroundStyle(textColor(for: cell))
+                    .foregroundStyle(textColor(for: cell, preparedData: preparedData))
             } else {
                 Text(dayText(for: cell))
                     .font(.system(size: CalendarGridTypography.dateFontSize, weight: .semibold))
-                    .foregroundStyle(textColor(for: cell))
+                    .foregroundStyle(textColor(for: cell, preparedData: preparedData))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
@@ -242,60 +243,88 @@ struct MonthGridView: View {
         return (try? CalendarGridBuilder().makeMonthGrid(year: year, month: month)) ?? []
     }
 
-    private var visibleOccurrences: [EventOccurrence] {
-        guard let firstDate = cells.first?.date,
-              let lastDate = cells.last?.date,
+    private func makePreparedData() -> MonthGridPreparedData {
+        let monthCells = cells
+        guard let firstDate = monthCells.first?.date,
+              let lastDate = monthCells.last?.date,
               let endDate = calendar.date(byAdding: .day, value: 1, to: lastDate) else {
-            return []
+            return MonthGridPreparedData(cells: monthCells, entriesByDay: [:], holidaysByDay: [:], eventsByID: [:])
         }
 
+        let dayKeys = Set(monthCells.map { dayKey(for: $0.date) })
+        let holidaysByDay = makeHolidaysByDay()
         let interval = DateInterval(start: firstDate, end: endDate)
         let expander = RecurrenceExpander(calendar: calendar)
-        return events.flatMap { expander.occurrences(for: $0, in: interval) }
-    }
+        let visibleOccurrences = events.flatMap { expander.occurrences(for: $0, in: interval) }
+        var eventEntriesByDay: [Date: [CalendarEntry]] = [:]
 
-    private func entries(for date: Date) -> [CalendarEntry] {
-        let holidayEntries = holidaysForDate(date).map { holiday in
-            CalendarEntry(
-                id: "holiday-\(holiday.id.uuidString)",
-                title: holiday.title,
-                kind: .holiday,
-                colorHex: nil,
-                eventID: nil
-            )
+        for occurrence in visibleOccurrences {
+            var currentDay = dayKey(for: occurrence.startDate)
+            let finalDay = dayKey(for: occurrence.endDate)
+            while currentDay <= finalDay {
+                if dayKeys.contains(currentDay) {
+                    eventEntriesByDay[currentDay, default: []].append(
+                        CalendarEntry(
+                            id: "event-\(occurrence.eventID.uuidString)-\(occurrence.startDate.timeIntervalSinceReferenceDate)-\(currentDay.timeIntervalSinceReferenceDate)",
+                            title: occurrence.title,
+                            kind: .event,
+                            colorHex: occurrence.colorHex,
+                            eventID: occurrence.eventID,
+                            sortDate: occurrence.startDate
+                        )
+                    )
+                }
+
+                guard let nextDay = calendar.date(byAdding: .day, value: 1, to: currentDay) else {
+                    break
+                }
+                currentDay = nextDay
+            }
         }
 
-        let eventEntries = visibleOccurrences
-            .filter { occurrence in
-                let start = calendar.startOfDay(for: occurrence.startDate)
-                let end = calendar.startOfDay(for: occurrence.endDate)
-                return start <= date && date <= end
-            }
-            .sorted {
-                if $0.startDate == $1.startDate {
-                    return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
-                }
-                return $0.startDate < $1.startDate
-            }
-            .map { occurrence in
+        var entriesByDay: [Date: [CalendarEntry]] = [:]
+        for cell in monthCells {
+            let key = dayKey(for: cell.date)
+            let holidayEntries = (holidaysByDay[key] ?? []).map { holiday in
                 CalendarEntry(
-                    id: "event-\(occurrence.eventID.uuidString)-\(occurrence.startDate.timeIntervalSinceReferenceDate)",
-                    title: occurrence.title,
-                    kind: .event,
-                    colorHex: occurrence.colorHex,
-                    eventID: occurrence.eventID
+                    id: "holiday-\(holiday.id.uuidString)",
+                    title: holiday.title,
+                    kind: .holiday,
+                    colorHex: nil,
+                    eventID: nil,
+                    sortDate: holiday.date
                 )
             }
+            let eventEntries = (eventEntriesByDay[key] ?? []).sorted {
+                if $0.sortDate == $1.sortDate {
+                    return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+                }
+                return $0.sortDate < $1.sortDate
+            }
+            entriesByDay[key] = holidayEntries + eventEntries
+        }
 
-        return holidayEntries + eventEntries
+        return MonthGridPreparedData(
+            cells: monthCells,
+            entriesByDay: entriesByDay,
+            holidaysByDay: holidaysByDay,
+            eventsByID: Dictionary(uniqueKeysWithValues: events.map { ($0.id, $0) })
+        )
     }
 
-    private func holidaysForDate(_ date: Date) -> [HolidayRecord] {
-        let visible = holidays.filter { holiday in
-            holiday.isHidden == false && calendar.isDate(holiday.date, inSameDayAs: date)
+    private func makeHolidaysByDay() -> [Date: [HolidayRecord]] {
+        var grouped: [Date: [HolidayRecord]] = [:]
+        for holiday in holidays where holiday.isHidden == false {
+            grouped[dayKey(for: holiday.date), default: []].append(holiday)
         }
-        let manual = visible.filter { $0.source == .manual }
-        return manual.isEmpty ? visible : manual
+        return grouped.mapValues { records in
+            let manual = records.filter { $0.source == .manual }
+            return manual.isEmpty ? records : manual
+        }
+    }
+
+    private func dayKey(for date: Date) -> Date {
+        calendar.startOfDay(for: date)
     }
 
     private func dayText(for cell: CalendarDayCell) -> String {
@@ -306,11 +335,11 @@ struct MonthGridView: View {
         return "\(cell.day)일"
     }
 
-    private func textColor(for cell: CalendarDayCell) -> Color {
+    private func textColor(for cell: CalendarDayCell, preparedData: MonthGridPreparedData) -> Color {
         if cell.isInDisplayedMonth == false {
             return AppTheme.mutedText
         }
-        if holidaysForDate(cell.date).isEmpty == false || cell.isSunday {
+        if (preparedData.holidaysByDay[dayKey(for: cell.date)]?.isEmpty == false) || cell.isSunday {
             return AppTheme.sundayText.opacity(0.82)
         }
         if cell.isSaturday {
@@ -347,7 +376,7 @@ struct MonthGridView: View {
 private struct DayOverflowPopover: View {
     let date: Date
     let entries: [CalendarEntry]
-    let events: [CalendarEvent]
+    let eventsByID: [UUID: CalendarEvent]
     let onSelectEvent: (CalendarEvent) -> Void
 
     var body: some View {
@@ -359,7 +388,7 @@ private struct DayOverflowPopover: View {
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(entries) { entry in
                     if let eventID = entry.eventID,
-                       let event = events.first(where: { $0.id == eventID }) {
+                       let event = eventsByID[eventID] {
                         Button {
                             onSelectEvent(event)
                         } label: {
@@ -410,6 +439,7 @@ private struct CalendarEntry: Identifiable {
     let kind: Kind
     let colorHex: String?
     let eventID: UUID?
+    let sortDate: Date
 
     var background: Color {
         switch kind {
@@ -419,4 +449,11 @@ private struct CalendarEntry: Identifiable {
             return Color(hex: colorHex ?? "#4F7DFF").opacity(0.82)
         }
     }
+}
+
+private struct MonthGridPreparedData {
+    let cells: [CalendarDayCell]
+    let entriesByDay: [Date: [CalendarEntry]]
+    let holidaysByDay: [Date: [HolidayRecord]]
+    let eventsByID: [UUID: CalendarEvent]
 }

@@ -4,6 +4,38 @@ import XCTest
 
 @MainActor
 final class StartupItemsViewModelTests: XCTestCase {
+    func testStartupActionPresentationWarnsThatRenameDoesNotStopLoadedAgents() {
+        let item = makeStartupItem(
+            label: "com.example.user-agent",
+            scope: .userLaunchAgent,
+            state: .enabled
+        )
+
+        let presentation = StartupItemActionPresentation(item: item)
+
+        XCTAssertEqual(presentation.action, .disable)
+        XCTAssertEqual(presentation.buttonTitle, "Disable Startup Item")
+        XCTAssertTrue(presentation.helpText.contains("does not call launchctl"))
+        XCTAssertTrue(presentation.helpText.contains("next login or restart"))
+        XCTAssertTrue(presentation.confirmationMessage.contains("currently loaded agent may keep running"))
+    }
+
+    func testStartupActionPresentationRequiresConfirmationBeforeReEnable() {
+        let item = makeStartupItem(
+            label: "com.example.user-agent",
+            scope: .userLaunchAgent,
+            state: .disabled,
+            disabledByRename: true
+        )
+
+        let presentation = StartupItemActionPresentation(item: item)
+
+        XCTAssertEqual(presentation.action, .enable)
+        XCTAssertEqual(presentation.buttonTitle, "Enable Startup Item")
+        XCTAssertTrue(presentation.confirmationMessage.contains("restore the original plist filename"))
+        XCTAssertTrue(presentation.confirmationMessage.contains("next login or restart"))
+    }
+
     func testListPresentationUsesCompactBadgesForNarrowRows() {
         let userItem = makeStartupItem(
             label: "com.example.user-agent",
@@ -48,7 +80,7 @@ final class StartupItemsViewModelTests: XCTestCase {
     func testScanLoadsItemsAndSelectsFirstVisibleItem() async throws {
         let root = try temporaryDirectory(named: "startup-viewmodel-scan")
         let userLaunchAgents = root.appendingPathComponent("UserLaunchAgents", isDirectory: true)
-        try writeLaunchPlist(
+        _ = try writeLaunchPlist(
             named: "com.example.alpha.plist",
             in: userLaunchAgents,
             values: [
@@ -106,6 +138,43 @@ final class StartupItemsViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedItem?.state, .enabled)
         XCTAssertTrue(FileManager.default.fileExists(atPath: plistURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: plistURL.path + ".mymacclean-disabled"))
+    }
+
+    func testDisableAndEnableSelectedUserItemRecordsReceipts() async throws {
+        let root = try temporaryDirectory(named: "startup-viewmodel-receipts")
+        let receiptURL = root.appendingPathComponent("receipts.jsonl")
+        let userLaunchAgents = root.appendingPathComponent("UserLaunchAgents", isDirectory: true)
+        _ = try writeLaunchPlist(
+            named: "com.example.receipt.plist",
+            in: userLaunchAgents,
+            values: [
+                "Label": "com.example.receipt",
+                "Program": "/bin/echo"
+            ]
+        )
+        let store = DeletionReceiptStore(fileURL: receiptURL)
+
+        let viewModel = StartupItemsViewModel(
+            scanner: StartupItemScanner(
+                userLaunchAgentsURL: userLaunchAgents,
+                globalLaunchAgentsURL: root.appendingPathComponent("GlobalLaunchAgents", isDirectory: true),
+                globalLaunchDaemonsURL: root.appendingPathComponent("GlobalLaunchDaemons", isDirectory: true)
+            ),
+            controller: StartupItemController(),
+            receiptStore: store
+        )
+
+        await viewModel.scan()
+        await viewModel.disableSelectedItem()
+        await viewModel.enableSelectedItem()
+
+        let receipts = try store.readReceipts()
+        XCTAssertEqual(receipts.map(\.action), [.startupItemDisable, .startupItemEnable])
+        XCTAssertEqual(receipts.map(\.appName), ["com.example.receipt", "com.example.receipt"])
+        XCTAssertTrue(receipts[0].bundlePath.hasSuffix("/UserLaunchAgents/com.example.receipt.plist"))
+        XCTAssertTrue(receipts[1].bundlePath.hasSuffix("/UserLaunchAgents/com.example.receipt.plist.mymacclean-disabled"))
+        XCTAssertEqual(receipts.flatMap(\.executionResults).map(\.success), [true, true])
+        XCTAssertEqual(viewModel.statusMessage, "Startup item was re-enabled. The change is recorded in history.")
     }
 
     func testSearchMovesSelectionToFirstVisibleItem() async throws {
@@ -185,7 +254,8 @@ final class StartupItemsViewModelTests: XCTestCase {
         scope: StartupItemScope,
         state: StartupItemState,
         targetURL: URL? = URL(fileURLWithPath: "/bin/echo"),
-        targetExists: Bool = true
+        targetExists: Bool = true,
+        disabledByRename: Bool = false
     ) -> StartupItem {
         StartupItem(
             label: label,
@@ -199,7 +269,7 @@ final class StartupItemsViewModelTests: XCTestCase {
             startInterval: nil,
             startCalendarSummary: nil,
             disabledFlag: state == .disabled,
-            disabledByRename: false,
+            disabledByRename: disabledByRename,
             targetURL: targetURL,
             targetExists: targetExists,
             ownerName: "Example",

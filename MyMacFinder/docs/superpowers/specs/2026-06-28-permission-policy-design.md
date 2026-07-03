@@ -8,9 +8,9 @@ Move MyMacFinder from passive permission error guidance to an explicit macOS acc
 
 ## Current State
 
-The app already detects whether it is sandboxed through `APP_SANDBOX_CONTAINER_ID` and shows permission-denied guidance through `PermissionGuidance`. Settings includes a small Privacy & Access section with the sandbox status and an Open Privacy Settings button.
+Status update, 2026-07-03: this phase has been implemented. The app detects whether it is sandboxed through `APP_SANDBOX_CONTAINER_ID`, shows permission-denied guidance through `PermissionGuidance`, stores user-selected folder grants, and exposes the Privacy & Access settings UI.
 
-The current implementation does not let users choose a folder from an open panel, does not persist security-scoped bookmarks, and does not show granted folders in Settings. Permission failures are therefore informational only: users can read the guidance, but MyMacFinder cannot recover by asking for explicit access to the blocked folder.
+At the start of this phase, MyMacFinder could not choose folders from an open panel, persist security-scoped bookmarks, or show granted folders in Settings. The current implementation now supports those flows through `UserSelectedFolderAccessService`, `SecurityScopedBookmarkStore`, `ExplorerStore`, and `PrivacyAccessSettingsView`.
 
 ## Scope
 
@@ -141,7 +141,7 @@ Store rules:
 
 ### Settings UI
 
-Keep Settings in `MyMacFinderApp.swift` for this phase, matching the existing Settings structure. If the Privacy & Access section grows too large during implementation, split it into a small `PrivacyAccessSettingsView` under `Sources/MyMacFinder/UI/`.
+Keep Settings ownership in `MyMacFinderApp.swift`, matching the existing Settings scene structure. The implemented Privacy & Access layout now lives in `Sources/MyMacFinder/App/PrivacyAccessSettingsView.swift`.
 
 Settings actions call store methods:
 

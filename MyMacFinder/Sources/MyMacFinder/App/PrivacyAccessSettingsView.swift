@@ -1,5 +1,69 @@
 import SwiftUI
 
+struct PrivacyAccessSettingsPresentation: Equatable {
+    let sandboxPolicy: SandboxPolicySummary
+    let folderRows: [PrivacyAccessFolderRowPresentation]
+
+    init(
+        sandboxPolicy: SandboxPolicySummary,
+        grantedFolderSummaries: [FolderAccessGrantSummary]
+    ) {
+        self.sandboxPolicy = sandboxPolicy
+        self.folderRows = grantedFolderSummaries.map(PrivacyAccessFolderRowPresentation.init)
+    }
+
+    var folderCountText: String {
+        "\(folderRows.count) folder\(folderRows.count == 1 ? "" : "s")"
+    }
+
+    var showsResetAction: Bool {
+        !folderRows.isEmpty
+    }
+
+    var emptyTitle: String {
+        "No folders selected"
+    }
+
+    var emptyMessage: String {
+        "Choose a folder when macOS blocks access to a location you trust."
+    }
+}
+
+struct PrivacyAccessFolderRowPresentation: Equatable, Identifiable {
+    let id: FolderAccessGrantID
+    let displayPath: String
+    let statusText: String
+    let systemImageName: String
+    let availability: FolderAccessGrantAvailability
+
+    init(grant: FolderAccessGrantSummary) {
+        self.id = grant.id
+        self.displayPath = grant.displayPath
+        self.statusText = Self.statusText(for: grant)
+        self.systemImageName = grant.availability.systemImageName
+        self.availability = grant.availability
+    }
+
+    var tint: Color {
+        availability.tint
+    }
+
+    private static func statusText(for grant: FolderAccessGrantSummary) -> String {
+        if grant.isStale {
+            return "Bookmark refreshed"
+        }
+
+        switch grant.availability {
+        case .available:
+            return "Available"
+        case .unavailable:
+            return "Needs selection again"
+        case .unknown:
+            return "Saved folder access"
+        }
+    }
+}
+
 struct PrivacyAccessSettingsView: View {
     let sandboxPolicy: SandboxPolicySummary
     let grantedFolderSummaries: [FolderAccessGrantSummary]
@@ -7,6 +71,13 @@ struct PrivacyAccessSettingsView: View {
     let onOpenPrivacySettings: () -> Void
     let onRemoveGrant: (FolderAccessGrantSummary.ID) -> Void
     let onResetGrants: () -> Void
+
+    private var presentation: PrivacyAccessSettingsPresentation {
+        PrivacyAccessSettingsPresentation(
+            sandboxPolicy: sandboxPolicy,
+            grantedFolderSummaries: grantedFolderSummaries
+        )
+    }
 
     var body: some View {
         ScrollView {
@@ -109,29 +180,29 @@ struct PrivacyAccessSettingsView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Selected Folders")
                             .font(.headline)
-                        Text("\(grantedFolderSummaries.count) folder\(grantedFolderSummaries.count == 1 ? "" : "s")")
+                        Text(presentation.folderCountText)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
 
                     Spacer()
 
-                    if !grantedFolderSummaries.isEmpty {
+                    if presentation.showsResetAction {
                         Button("Reset", role: .destructive, action: onResetGrants)
                             .controlSize(.small)
                     }
                 }
 
-                if grantedFolderSummaries.isEmpty {
+                if presentation.folderRows.isEmpty {
                     emptyFolderState
                 } else {
                     VStack(spacing: 0) {
-                        ForEach(grantedFolderSummaries) { grant in
+                        ForEach(presentation.folderRows) { row in
                             FolderGrantRow(
-                                grant: grant,
-                                onRemove: { onRemoveGrant(grant.id) }
+                                row: row,
+                                onRemove: { onRemoveGrant(row.id) }
                             )
-                            if grant.id != grantedFolderSummaries.last?.id {
+                            if row.id != presentation.folderRows.last?.id {
                                 Divider()
                                     .padding(.leading, 34)
                             }
@@ -159,9 +230,9 @@ struct PrivacyAccessSettingsView: View {
                 )
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("No folders selected")
+                Text(presentation.emptyTitle)
                     .font(.callout.weight(.medium))
-                Text("Choose a folder when macOS blocks access to a location you trust.")
+                Text(presentation.emptyMessage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -212,21 +283,21 @@ private struct StatusBadge: View {
 }
 
 private struct FolderGrantRow: View {
-    let grant: FolderAccessGrantSummary
+    let row: PrivacyAccessFolderRowPresentation
     let onRemove: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: grant.availability.systemImageName)
-                .foregroundStyle(grant.availability.tint)
+            Image(systemName: row.systemImageName)
+                .foregroundStyle(row.tint)
                 .frame(width: 24)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(grant.displayPath)
+                Text(row.displayPath)
                     .font(.callout)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text(grant.statusText)
+                Text(row.statusText)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -243,23 +314,6 @@ private struct FolderGrantRow: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 9)
         .background(Color.secondary.opacity(0.05))
-    }
-}
-
-private extension FolderAccessGrantSummary {
-    var statusText: String {
-        if isStale {
-            return "Bookmark refreshed"
-        }
-
-        switch availability {
-        case .available:
-            return "Available"
-        case .unavailable:
-            return "Needs selection again"
-        case .unknown:
-            return "Saved folder access"
-        }
     }
 }
 

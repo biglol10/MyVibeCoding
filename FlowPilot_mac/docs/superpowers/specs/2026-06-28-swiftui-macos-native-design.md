@@ -1,5 +1,9 @@
 # SwiftUI macOS Native FlowPilot Design
 
+> Historical note: this document describes the first SwiftUI native design pass. The native app now includes SQLite-backed
+> reporting, native macOS collection, Chrome/Edge bridge reuse, Safari Automation support, personal ZIP/DMG packaging,
+> and menu bar summary behavior. Use `README.md` and `docs/macos-development.md` for current commands.
+
 ## Goal
 
 Build a native macOS FlowPilot app in SwiftUI while keeping the existing Tauri/React/Rust app and Windows build intact.
@@ -17,7 +21,10 @@ The repository will contain two app surfaces:
 - Existing cross-platform app: `src/`, `src-tauri/`, `browser-extension/`
 - New native macOS app: `macos-native/`
 
-The native app uses SwiftUI for the main window, `MenuBarExtra` for the macOS menu bar item, and small Swift services for report state. It starts with mocked/sample report data so the UI can compile and be reviewed before collector and database migration. Later milestones can connect it to the existing SQLite database or port the Rust collector logic into Swift.
+The native app uses SwiftUI for the main window, `MenuBarExtra` for the macOS menu bar item, and small Swift services for
+report state. Original first-milestone scope started with mocked/sample report data so the UI could compile and be
+reviewed before collector and database migration. Current status: later work connected the native app to the existing
+SQLite-backed FlowPilot data, added native collection, reused the browser bridge, and added personal packaging scripts.
 
 ## Data Model
 
@@ -52,16 +59,18 @@ The native app includes:
 - Menu bar item with quick summary
 - Normal main window lifecycle
 
-Future collector milestones will add:
+Implemented after this first design:
 
 - Accessibility permission detection/request guidance
 - Screen Recording permission guidance
 - window/app observation
-- browser domain bridge migration or extension reuse
+- Chrome/Edge browser bridge reuse
+- Safari Automation domain capture
+- personal ZIP/DMG packaging
 
 ## Packaging
 
-The initial milestone uses Swift Package Manager to compile a macOS executable for development verification. Later packaging should add an `.app` bundle and personal install script matching the current personal macOS package flow.
+The initial milestone used Swift Package Manager to compile a macOS executable for development verification. Current native packaging creates ad-hoc signed personal ZIP and DMG packages with an app bundle and installer script matching the current personal macOS package flow.
 
 Developer ID signing and notarization remain a later release milestone.
 

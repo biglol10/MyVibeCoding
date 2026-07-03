@@ -49,6 +49,13 @@ final class ProtectionPolicyTests: XCTestCase {
         XCTAssertTrue(policy.isProtected(appBundle.appendingPathComponent("Contents/MacOS/MyMacClean")))
     }
 
+    func testDefaultPolicyProtectsCurrentApplicationBundle() {
+        let home = URL(fileURLWithPath: "/Users/tester", isDirectory: true)
+        let policy = ProtectionPolicy(homeDirectory: home)
+
+        XCTAssertTrue(policy.isProtected(Bundle.main.bundleURL))
+    }
+
     func testAllowsUserTemporaryDirectoryButBlocksSymlinkToProtectedRoot() throws {
         let home = try TestFixtures.temporaryDirectory(named: "protection-temp-home")
         let temporaryRoot = FileManager.default.temporaryDirectory

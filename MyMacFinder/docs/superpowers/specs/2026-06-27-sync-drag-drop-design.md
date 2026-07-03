@@ -33,7 +33,7 @@ This pass does not include:
 - Sidebar drag and drop.
 - Dragging into breadcrumb/path components.
 - Spring-loaded folders.
-- Cross-pane drag and drop, because dual-pane UI is not implemented yet.
+- Advanced cross-pane drag/drop workflows. At the time of this design, dual-pane UI was not implemented. The current app now has dual-pane mode, and the shared file-table drop path operates on the pane under the cursor, but folder comparison/sync-style dual-pane workflows are tracked separately.
 - Custom drag preview artwork.
 - Recursive home-wide watching.
 - Background indexing or Spotlight-style search refresh.
@@ -119,7 +119,7 @@ Drag/drop must avoid destructive or nonsensical operations:
 - Destination collisions reuse `FileOperationService` naming rules.
 - Failed operations set `visibleError` and do not partially mutate UI state beyond the filesystem result.
 
-The current app does not implement undo, so this pass must avoid direct delete semantics. Move operations are normal filesystem moves, not trash operations.
+At the time of this pass, undo was outside the drag/drop scope, so this design avoided direct delete semantics. The current app now records undo for copy/move/drop results through the centralized file operation path. Move operations are normal filesystem moves, not trash operations.
 
 ## Event Refresh Behavior
 

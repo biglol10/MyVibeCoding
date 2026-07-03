@@ -182,7 +182,7 @@ Expected: all commands exit 0. `swift test --enable-code-coverage` reports 366 t
 
 - [ ] **Step 2: Update README**
 
-Change the recent verification line from `364 tests / 0 failures` to `366 tests / 0 failures`.
+At the time of this plan, change the recent verification line from `364 tests / 0 failures` to `366 tests / 0 failures`.
 
 - [ ] **Step 3: Commit implementation**
 

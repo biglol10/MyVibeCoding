@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 @MainActor
 public protocol RecordingExportServicing {
     func trimRecording(sourceURL: URL, startSeconds: Double, endSeconds: Double, outputURL: URL) async throws -> URL
-    func exportGIF(sourceURL: URL, outputURL: URL, maxDurationSeconds: Double) async throws -> URL
+    func exportGIF(sourceURL: URL, outputURL: URL, maxDurationSeconds: Double?) async throws -> URL
 }
 
 public enum RecordingExportError: LocalizedError, Equatable {
@@ -58,11 +58,12 @@ public struct AVFoundationRecordingExportService: RecordingExportServicing {
             try await exportSession.export(to: outputURL, as: .mp4)
             return outputURL
         } catch {
+            try? FileManager.default.removeItem(at: outputURL)
             throw RecordingExportError.exportFailed(error.localizedDescription)
         }
     }
 
-    public func exportGIF(sourceURL: URL, outputURL: URL, maxDurationSeconds: Double) async throws -> URL {
+    public func exportGIF(sourceURL: URL, outputURL: URL, maxDurationSeconds: Double?) async throws -> URL {
         try await Task.detached(priority: .userInitiated) {
             let asset = AVURLAsset(url: sourceURL)
             let generator = AVAssetImageGenerator(asset: asset)
@@ -70,49 +71,56 @@ public struct AVFoundationRecordingExportService: RecordingExportServicing {
             generator.maximumSize = CGSize(width: 960, height: 960)
 
             let assetDuration = try await asset.load(.duration)
-            let duration = max(0.2, min(CMTimeGetSeconds(assetDuration), maxDurationSeconds))
+            let assetDurationSeconds = CMTimeGetSeconds(assetDuration)
+            let durationLimit = maxDurationSeconds.map { max(0.2, $0) } ?? assetDurationSeconds
+            let duration = max(0.2, min(assetDurationSeconds, durationLimit))
             let frameInterval = 0.2
             let frameCount = max(1, Int(duration / frameInterval))
             try? FileManager.default.removeItem(at: outputURL)
 
-            guard let destination = CGImageDestinationCreateWithURL(
-                outputURL as CFURL,
-                UTType.gif.identifier as CFString,
-                frameCount,
-                nil
-            ) else {
-                throw RecordingExportError.gifDestinationFailed
-            }
-
-            let gifProperties = [
-                kCGImagePropertyGIFDictionary: [
-                    kCGImagePropertyGIFLoopCount: 0
-                ]
-            ] as CFDictionary
-            CGImageDestinationSetProperties(destination, gifProperties)
-
-            var didAddFrame = false
-            for index in 0..<frameCount {
-                let seconds = Double(index) * frameInterval
-                let time = CMTime(seconds: seconds, preferredTimescale: 600)
-                if let image = try? generator.copyCGImage(at: time, actualTime: nil) {
-                    let frameProperties = [
-                        kCGImagePropertyGIFDictionary: [
-                            kCGImagePropertyGIFDelayTime: frameInterval
-                        ]
-                    ] as CFDictionary
-                    CGImageDestinationAddImage(destination, image, frameProperties)
-                    didAddFrame = true
+            do {
+                guard let destination = CGImageDestinationCreateWithURL(
+                    outputURL as CFURL,
+                    UTType.gif.identifier as CFString,
+                    frameCount,
+                    nil
+                ) else {
+                    throw RecordingExportError.gifDestinationFailed
                 }
-            }
 
-            guard didAddFrame else {
-                throw RecordingExportError.gifFrameFailed
+                let gifProperties = [
+                    kCGImagePropertyGIFDictionary: [
+                        kCGImagePropertyGIFLoopCount: 0
+                    ]
+                ] as CFDictionary
+                CGImageDestinationSetProperties(destination, gifProperties)
+
+                var didAddFrame = false
+                for index in 0..<frameCount {
+                    let seconds = Double(index) * frameInterval
+                    let time = CMTime(seconds: seconds, preferredTimescale: 600)
+                    if let image = try? generator.copyCGImage(at: time, actualTime: nil) {
+                        let frameProperties = [
+                            kCGImagePropertyGIFDictionary: [
+                                kCGImagePropertyGIFDelayTime: frameInterval
+                            ]
+                        ] as CFDictionary
+                        CGImageDestinationAddImage(destination, image, frameProperties)
+                        didAddFrame = true
+                    }
+                }
+
+                guard didAddFrame else {
+                    throw RecordingExportError.gifFrameFailed
+                }
+                guard CGImageDestinationFinalize(destination) else {
+                    throw RecordingExportError.gifDestinationFailed
+                }
+                return outputURL
+            } catch {
+                try? FileManager.default.removeItem(at: outputURL)
+                throw error
             }
-            guard CGImageDestinationFinalize(destination) else {
-                throw RecordingExportError.gifDestinationFailed
-            }
-            return outputURL
         }.value
     }
 }

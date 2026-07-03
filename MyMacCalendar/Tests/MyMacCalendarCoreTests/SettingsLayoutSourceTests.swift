@@ -33,6 +33,14 @@ final class SettingsLayoutSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("Text(\"12개\").tag(12)"))
     }
 
+    func testOpacitySliderCommitsAfterDragInsteadOfSavingEveryTick() throws {
+        let source = try String(contentsOfFile: sourcePath("Sources/MyMacCalendar/Views/SettingsView.swift"), encoding: .utf8)
+
+        XCTAssertTrue(source.contains("value: floatingWidgetOpacityDraftBinding"))
+        XCTAssertTrue(source.contains("onEditingChanged: handleFloatingWidgetOpacityEditingChanged"))
+        XCTAssertFalse(source.contains("Slider(value: binding(\\.floatingWidgetOpacity)"))
+    }
+
     func testSettingsSheetHasExplicitDismissAction() throws {
         let source = try String(contentsOfFile: sourcePath("Sources/MyMacCalendar/Views/SettingsView.swift"), encoding: .utf8)
 

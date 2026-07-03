@@ -77,4 +77,29 @@ final class DeletionHistoryReceiptSummaryTests: XCTestCase {
         XCTAssertEqual(summary.remainingCount, 0)
         XCTAssertTrue(summary.remainingPaths.isEmpty)
     }
+
+    func testMarksStartupItemChangeAsChanged() {
+        let receipt = DeletionReceipt(
+            appName: "com.example.agent",
+            bundleIdentifier: nil,
+            bundlePath: "/Users/me/Library/LaunchAgents/com.example.agent.plist",
+            action: .startupItemDisable,
+            selectedCandidates: [],
+            executionResults: [
+                DeletionItemResult(path: "/Users/me/Library/LaunchAgents/com.example.agent.plist", success: true, errorMessage: nil)
+            ],
+            verificationResults: [
+                DeletionVerificationResult(path: "/Users/me/Library/LaunchAgents/com.example.agent.plist", status: .deleted, errorMessage: nil)
+            ],
+            confirmationMatched: true
+        )
+
+        let summary = DeletionHistoryReceiptSummary(receipt: receipt)
+
+        XCTAssertEqual(summary.status, .verified)
+        XCTAssertEqual(summary.statusTitle, "Changed")
+        XCTAssertEqual(summary.primaryCountTitle, "Changed")
+        XCTAssertEqual(summary.primaryCount, 1)
+        XCTAssertEqual(summary.remainingCount, 0)
+    }
 }

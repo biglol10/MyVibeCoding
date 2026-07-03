@@ -10,11 +10,18 @@ public struct ResolvedFolderAccess: Equatable, Sendable {
     public var url: URL
     public var isStale: Bool
     public var didStartAccessing: Bool
+    public var refreshedBookmarkData: Data?
 
-    public init(url: URL, isStale: Bool, didStartAccessing: Bool) {
+    public init(
+        url: URL,
+        isStale: Bool,
+        didStartAccessing: Bool,
+        refreshedBookmarkData: Data? = nil
+    ) {
         self.url = url.standardizedFileURL
         self.isStale = isStale
         self.didStartAccessing = didStartAccessing
+        self.refreshedBookmarkData = refreshedBookmarkData
     }
 }
 
@@ -111,7 +118,13 @@ public final class SecurityScopedBookmarkResolver: BookmarkResolving, @unchecked
             bookmarkDataIsStale: &isStale
         )
         let didStart = url.startAccessingSecurityScopedResource()
-        return ResolvedFolderAccess(url: url, isStale: isStale, didStartAccessing: didStart)
+        let refreshedBookmarkData = isStale ? try bookmarkData(for: url, sandboxed: true) : nil
+        return ResolvedFolderAccess(
+            url: url,
+            isStale: isStale,
+            didStartAccessing: didStart,
+            refreshedBookmarkData: refreshedBookmarkData
+        )
     }
 
     public func startAccessing(_ url: URL, sandboxed: Bool) -> ResolvedFolderAccess {

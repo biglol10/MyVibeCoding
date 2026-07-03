@@ -14,13 +14,13 @@ MyMacCalendar는 macOS용 로컬 우선 캘린더 앱입니다. 하루 종일 �
 - 월간 달력 화면과 우측 일정 패널
 - 하루 종일 일정 생성, 수정, 삭제
 - 주간, 월간, 연간 반복 일정
-- 7일 전, 2일 전, 1일 전, 당일 알림 옵션 저장
+- 7일 전, 2일 전, 1일 전, 당일 알림 옵션 저장과 macOS 알림 예약/취소
 - 빠른 일정 추가: `6/30 codex 만료`, `2026-06-30 codex`, `다음주 월요일 병원`
 - 제목/메모 기반 일정 검색
-- 한국 공휴일 가져오기, 직접 휴일 등록과 삭제
-- API로 가져온 휴일을 숨김 처리할 수 있는 core merge 로직
+- 직접 휴일 등록/삭제, 온라인 휴일 가져오기, 가져온 휴일 숨김 처리
 - 메뉴바 아이콘과 플로팅 upcoming 위젯
 - 위젯 표시, 항상 위, 투명도, 표시 개수 설정
+- 시작 시 자동 실행, 메뉴바 표시, 달력 밀도 설정
 - 설정 창: General, Widget, Notifications, Holidays, Appearance, Data
 
 ## 현재 동작 확인
@@ -35,7 +35,7 @@ MyMacCalendar는 macOS용 로컬 우선 캘린더 앱입니다. 하루 종일 �
 - 플로팅 위젯에 upcoming 일정 표시
 - 오늘 일정은 위젯에서 빨간 막대, 이후 일정은 파란 막대로 표시
 - 설정에서 플로팅 위젯 on/off 시 실제 위젯 창 생성/숨김
-- 설정에서 메뉴바 아이콘 표시와 Mac 시작 시 자동 실행을 실제 앱 동작에 반영
+- 설정에서 온라인 휴일 가져오기, 숨김 유지, 메뉴바 표시, 시작 시 자동 실행 설정
 
 ## 요구사항
 
@@ -98,7 +98,7 @@ build/MyMacCalendar.app
 전체 테스트:
 
 ```bash
-swift test
+swift test --disable-sandbox
 ```
 
 현재 테스트 범위:
@@ -107,14 +107,13 @@ swift test
 - 반복 일정 occurrence 확장
 - upcoming 일정 정렬/검색
 - 빠른 추가 parser
-- 알림 예약 계획 계산
-- 휴일 API decode/merge
+- 알림 예약 계획 계산과 편집 화면 연결
+- 휴일 API decode/fetch/merge
 - API 휴일 숨김 유지
 - 수동 휴일 우선 처리
-- 기본 설정 생성
-- 설정 변경과 앱 동작 연결
-- 이벤트 편집, 월간 grid 상호작용, 플로팅 위젯 표시
-- 색상 hex 변환과 저장 오류 fallback
+- 기본 설정 생성과 설정 UI 동작 연결
+- 플로팅 위젯 표시/드래그/고정 크기/전체 보기
+- 일정 생성, 수정, 삭제, 휴일 처리 E2E 성격의 store workflow
 
 ## 프로젝트 구조
 
@@ -123,9 +122,6 @@ Sources/MyMacCalendar
   App/                 macOS 앱 진입점과 AppDelegate
   Controllers/         메뉴바, 플로팅 위젯 controller
   Views/               SwiftUI 화면
-
-Resources/
-  AppIcon.icns         앱 번들 아이콘
 
 Sources/MyMacCalendarCore
   Models/              SwiftData 모델
@@ -145,36 +141,36 @@ scripts/package_release.sh
 
 ## 데이터 저장
 
-앱 데이터는 SwiftData를 통해 로컬에 저장됩니다. 일정, 휴일, 설정은 앱을 종료하고 다시 열어도 유지됩니다. 현재 백업/복원 UI는 자리만 잡혀 있고 아직 구현하지 않았습니다.
+앱 데이터는 SwiftData를 통해 로컬에 저장됩니다. 일정, 휴일, 설정은 앱을 종료하고 다시 열어도 유지됩니다. 현재 백업/복원 UI는 아직 구현하지 않았습니다.
 
 ## 휴일 처리
 
-수동 휴일 등록과 삭제는 앱 설정의 `Holidays` 탭에서 사용할 수 있습니다.
+수동 휴일 등록과 삭제는 앱 설정의 `Holidays` 탭에서 사용할 수 있습니다. 같은 탭에서 온라인 휴일을 가져올 수 있고, API로 가져온 휴일이 잘못됐을 때 숨김 처리하면 같은 provider key로 다시 가져와도 숨김 상태가 유지됩니다.
 
-Core에는 Nager.Date API 응답 decode와 merge 로직이 있습니다. Settings의 Holidays 탭에서 한국 공휴일을 가져올 수 있고, API 휴일이 잘못됐을 때 숨김 처리하면 같은 provider key로 다시 가져와도 유지되도록 테스트되어 있습니다. 앱 시작 시 자동으로 API를 fetch하는 스케줄링은 아직 남은 작업입니다.
+현재 온라인 휴일 가져오기는 사용자가 설정 화면에서 직접 실행하는 방식입니다. 앱 시작 시 연도 변경을 감지해 자동으로 가져오는 스케줄링은 아직 넣지 않았습니다.
 
 ## 알림 처리
 
-일정 편집 화면에서 알림 offset 값을 저장할 수 있고, core에는 macOS notification request를 계산하고 예약하는 서비스가 있습니다. 현재 UI 저장 동작과 실제 `UNUserNotificationCenter` 예약 연결은 다음 단계 작업입니다.
+일정 편집 화면에서 알림 offset 값을 저장하면 `UNUserNotificationCenter`를 통해 macOS 알림을 예약합니다. 일정 수정/삭제 시 기존 알림 identifier를 기준으로 이전 예약을 취소하고 새 일정에 맞게 다시 예약합니다. macOS 알림 권한이 거부되어 있으면 시스템 알림은 표시되지 않습니다.
 
 ## 알려진 제한
 
 - 로그인/외부 캘린더 동기화는 없습니다.
+- 온라인 휴일 가져오기는 수동 실행 방식이며, 앱 시작 시 연도 변경 자동 fetch는 아직 없습니다.
 - 백업/복원 기능은 자리만 잡혀 있고 아직 구현하지 않았습니다.
-- 알림 권한 요청과 실제 알림 예약의 앱 UI 통합이 남아 있습니다.
-- 공개 배포용 notarized zip은 Developer ID 인증서와 notarization 설정이 필요합니다.
+- 공용 배포는 Developer ID 서명과 notarization 설정이 필요합니다.
 
 ## 개발 메모
 
 현재 검증 명령:
 
 ```bash
-swift test
+swift test --disable-sandbox
 ./scripts/build_app.sh
 ./scripts/package_personal.sh
 ```
 
-최근 검증 기준으로 세 명령 모두 성공합니다.
+최근 검증 기준으로 위 명령은 성공합니다. 개인 설치 zip은 `dist/MyMacCalendar-personal-mac.zip`에 생성됩니다.
 
 ## 다운로드 zip 다시 만들기
 

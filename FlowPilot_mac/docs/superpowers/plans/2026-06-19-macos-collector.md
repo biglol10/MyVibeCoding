@@ -1,5 +1,11 @@
 # FlowPilot macOS Collector Implementation Plan
 
+> Historical Tauri/Rust implementation plan: this file preserves the original task-by-task plan and may contain outdated
+> expected failures, deferred scope, and Safari/idle notes. Current personal macOS builds use the SwiftUI native app under
+> `macos-native/`, with native collection, idle detection, Chrome/Edge bridge reuse, Safari Automation, and personal ZIP/DMG
+> packaging. Use `README.md`, `docs/macos-development.md`, and `docs/macos-distribution.md` for current behavior and
+> commands.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add macOS activity collection, macOS permission guidance, preserved Windows collection behavior, Chromium domain bridge reuse, and macOS development/package documentation to FlowPilot.
@@ -1539,7 +1545,7 @@ Safari domain tracking requires a Safari Web Extension packaged through Xcode. T
 
 Until that package exists, Safari sessions are classified by app name and window title.
 
-## Unsigned Local Packaging
+## Local Ad-hoc Packaging
 
 Build an app bundle or DMG:
 
@@ -1643,7 +1649,7 @@ Expected:
 
 Stop the dev app after verification.
 
-- [ ] **Step 6: Build unsigned macOS bundle**
+- [ ] **Step 6: Build local macOS bundle**
 
 Run:
 

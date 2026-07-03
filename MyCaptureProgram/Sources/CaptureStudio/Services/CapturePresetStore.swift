@@ -39,7 +39,16 @@ public final class CapturePresetStore: ObservableObject {
         appState.captureMode = preset.captureMode
         appState.areaType = preset.areaType
         settingsStore.update { settings in
-            settings = preset.settings
+            settings.automaticallySaveScreenshots = preset.settings.automaticallySaveScreenshots
+            settings.automaticallySaveRecordings = preset.settings.automaticallySaveRecordings
+            settings.showInFinderAfterSave = preset.settings.showInFinderAfterSave
+            settings.copyCapturedImageToClipboard = preset.settings.copyCapturedImageToClipboard
+            settings.defaultDelaySeconds = preset.settings.defaultDelaySeconds
+            settings.includeSystemAudio = preset.settings.includeSystemAudio
+            settings.includeMicrophone = preset.settings.includeMicrophone
+            settings.showCursorInRecordings = preset.settings.showCursorInRecordings
+            settings.countdownSeconds = preset.settings.countdownSeconds
+            settings.recordingDurationSeconds = preset.settings.recordingDurationSeconds
         }
     }
 

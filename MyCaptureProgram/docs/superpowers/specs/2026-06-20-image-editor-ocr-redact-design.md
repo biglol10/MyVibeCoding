@@ -1,5 +1,9 @@
 # Image Editor, OCR, and Redact Design
 
+## Status
+
+Implemented and superseded by the current app. This design is still useful for screenshot editor rationale, but later work also added recording preview, recording trim-copy export, GIF export, capture history, presets, smart filenames, floating pins, and result deletion. Use `README.md` and the source code as the source of truth.
+
 ## Goal
 
 Add a practical post-capture workflow for screenshots: annotation editing, OCR text extraction, and quick redaction. The feature should turn Capture Studio from a capture-and-save utility into a tool that can prepare screenshots for sharing without opening Preview, Keynote, or another editor.
@@ -20,14 +24,11 @@ Included:
 - Quick redact for detected emails, phone numbers, URLs, API-key-like long tokens, and long numeric identifiers.
 - Tests for layer model behavior, flatten/export flow, OCR service contracts, and redaction detection.
 
-Excluded from this design:
+Not part of this screenshot-editor design:
 
-- MP4 recording trim.
-- GIF export.
 - Scrolling capture.
 - Multi-window editing.
 - AI summarization or external model calls.
-- Full document management/history.
 
 ## Product Behavior
 

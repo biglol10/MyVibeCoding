@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 @MainActor
@@ -5,13 +6,22 @@ public final class CaptureHistoryStore: ObservableObject {
     @Published public private(set) var items: [CaptureHistoryItem]
 
     private let defaults: UserDefaults
-    private let storageKey = "CaptureStudio.CaptureHistory.v1"
+    private static let storageKey = "CaptureStudio.CaptureHistory.v1"
     private let maxItems: Int
+    private let thumbnailDirectory: URL
+    private let fileManager: FileManager
 
-    public init(defaults: UserDefaults = .standard, maxItems: Int = 100) {
+    public init(
+        defaults: UserDefaults = .standard,
+        maxItems: Int = 100,
+        thumbnailDirectory: URL? = nil,
+        fileManager: FileManager = .default
+    ) {
         self.defaults = defaults
         self.maxItems = max(1, maxItems)
-        if let data = defaults.data(forKey: storageKey),
+        self.fileManager = fileManager
+        self.thumbnailDirectory = thumbnailDirectory ?? Self.defaultThumbnailDirectory(fileManager: fileManager)
+        if let data = defaults.data(forKey: Self.storageKey),
            let decoded = try? JSONDecoder().decode([CaptureHistoryItem].self, from: data) {
             items = decoded.sorted { $0.createdAt > $1.createdAt }
         } else {
@@ -20,23 +30,31 @@ public final class CaptureHistoryStore: ObservableObject {
     }
 
     public func add(_ item: CaptureHistoryItem) {
-        items.removeAll { existing in
+        let removedItems = items.filter { existing in
             existing.id == item.id || existing.fileURL.standardizedFileURL == item.fileURL.standardizedFileURL
         }
-        items.insert(item, at: 0)
+        removedItems.forEach(deleteThumbnailIfNeeded)
+        items.removeAll { removedItems.contains($0) }
+        items.insert(storedItem(from: item), at: 0)
         items.sort { $0.createdAt > $1.createdAt }
         if items.count > maxItems {
+            let droppedItems = Array(items.dropFirst(maxItems))
+            droppedItems.forEach(deleteThumbnailIfNeeded)
             items = Array(items.prefix(maxItems))
         }
         persist()
     }
 
     public func remove(id: UUID) {
+        let removedItems = items.filter { $0.id == id }
+        removedItems.forEach(deleteThumbnailIfNeeded)
         items.removeAll { $0.id == id }
         persist()
     }
 
     public func remove(fileURL: URL) {
+        let removedItems = items.filter { $0.fileURL.standardizedFileURL == fileURL.standardizedFileURL }
+        removedItems.forEach(deleteThumbnailIfNeeded)
         items.removeAll { $0.fileURL.standardizedFileURL == fileURL.standardizedFileURL }
         persist()
     }
@@ -53,6 +71,66 @@ public final class CaptureHistoryStore: ObservableObject {
         guard let data = try? JSONEncoder().encode(items) else {
             return
         }
-        defaults.set(data, forKey: storageKey)
+        defaults.set(data, forKey: Self.storageKey)
+    }
+
+    private func storedItem(from item: CaptureHistoryItem) -> CaptureHistoryItem {
+        var storedItem = item
+        if item.kind == .screenshot,
+           let sourceData = item.thumbnailData,
+           let thumbnailData = Self.thumbnailData(from: sourceData) {
+            try? fileManager.createDirectory(at: thumbnailDirectory, withIntermediateDirectories: true)
+            let thumbnailURL = thumbnailDirectory
+                .appendingPathComponent(item.id.uuidString)
+                .appendingPathExtension("png")
+            try? thumbnailData.write(to: thumbnailURL, options: .atomic)
+            storedItem.thumbnailURL = thumbnailURL
+        }
+        storedItem.thumbnailData = nil
+        return storedItem
+    }
+
+    static func thumbnailData(from sourceData: Data) -> Data? {
+        guard let image = NSImage(data: sourceData), image.size.width > 0, image.size.height > 0 else {
+            return nil
+        }
+
+        let maxSize = NSSize(width: 240, height: 160)
+        let scale = min(maxSize.width / image.size.width, maxSize.height / image.size.height, 1)
+        let targetSize = NSSize(
+            width: max(1, image.size.width * scale),
+            height: max(1, image.size.height * scale)
+        )
+        let thumbnail = NSImage(size: targetSize)
+        thumbnail.lockFocus()
+        image.draw(
+            in: NSRect(origin: .zero, size: targetSize),
+            from: NSRect(origin: .zero, size: image.size),
+            operation: .copy,
+            fraction: 1
+        )
+        thumbnail.unlockFocus()
+
+        guard let tiffData = thumbnail.tiffRepresentation,
+              let representation = NSBitmapImageRep(data: tiffData)
+        else {
+            return nil
+        }
+        return representation.representation(using: .png, properties: [:])
+    }
+
+    private func deleteThumbnailIfNeeded(_ item: CaptureHistoryItem) {
+        guard let thumbnailURL = item.thumbnailURL else {
+            return
+        }
+        try? fileManager.removeItem(at: thumbnailURL)
+    }
+
+    private static func defaultThumbnailDirectory(fileManager: FileManager) -> URL {
+        let baseURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fileManager.temporaryDirectory
+        return baseURL
+            .appendingPathComponent("CaptureStudio", isDirectory: true)
+            .appendingPathComponent("HistoryThumbnails", isDirectory: true)
     }
 }

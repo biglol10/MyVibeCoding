@@ -1,5 +1,8 @@
 # MyMacClean Trust and App Management Design
 
+Status: historical design. Current behavior is summarized in `../../../README.md`
+and `2026-07-03-mymacclean-personal-cleaner-design.md`.
+
 ## Context
 
 MyMacClean V1 is a native SwiftUI macOS app focused on installed application discovery, related-file scanning, explicit review, and permanent deletion. Recent manual testing exposed the product risk that matters most: users judge the app by whether deletion is visibly complete, not just whether `removeItem` succeeded.

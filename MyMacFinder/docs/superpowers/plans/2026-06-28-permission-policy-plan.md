@@ -1115,7 +1115,7 @@ Section("Privacy & Access") {
 }
 ```
 
-If this makes `MyMacFinderApp.swift` hard to scan, create `Sources/MyMacFinder/UI/PrivacyAccessSettingsView.swift` and move only this section into that view. Keep the same bindings and store methods.
+Status update, 2026-07-03: the Privacy & Access section was later extracted to `Sources/MyMacFinder/App/PrivacyAccessSettingsView.swift` so Settings ownership stays with `MyMacFinderApp.swift` while the tab layout remains readable.
 
 - [ ] **Step 5: Run UI compile and focused tests**
 

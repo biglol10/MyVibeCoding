@@ -31,7 +31,7 @@ public struct ProtectionPolicy: Sendable {
             homeDirectory.appendingPathComponent("Library/Application Scripts", isDirectory: true),
             homeDirectory.appendingPathComponent("Library/LaunchAgents", isDirectory: true)
         ]
-        self.additionalProtectedRoots = additionalProtectedRoots
+        self.additionalProtectedRoots = ProtectionPolicy.defaultAdditionalProtectedRoots() + additionalProtectedRoots
         self.protectedUserRoots = [
             homeDirectory.appendingPathComponent("Desktop", isDirectory: true),
             homeDirectory.appendingPathComponent("Documents", isDirectory: true),
@@ -93,5 +93,9 @@ public struct ProtectionPolicy: Sendable {
 
     private var allowedRoots: [URL] {
         allowedUserApplicationRoots + allowedUserLibraryAppDataRoots + allowedTemporaryRoots
+    }
+
+    private static func defaultAdditionalProtectedRoots() -> [URL] {
+        [Bundle.main.bundleURL]
     }
 }

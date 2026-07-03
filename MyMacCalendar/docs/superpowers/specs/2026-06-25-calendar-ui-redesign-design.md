@@ -2,6 +2,8 @@
 
 Date: 2026-06-25
 
+Status: Historical redesign spec. It records the direction used for the UI pass, but the current implementation details live in `README.md` and the source tree.
+
 ## 1. Problem
 
 The current main UI looks like a set of disconnected date cards rather than a professional calendar. The right-side panel dominates too much of the window, the month grid lacks real calendar structure, and the date cells do not provide enough room for actual event bars.

@@ -9,6 +9,16 @@ public struct DeletionReportViewModel: Equatable, Sendable {
     }
 
     public var statusTitle: String {
+        if receipt.action.isStartupItemChange {
+            if receipt.executionResults.contains(where: { !$0.success }) {
+                return "Startup item change failed"
+            }
+            if remainingCount > 0 {
+                return "Startup item changed with remaining items"
+            }
+            return "Startup item changed"
+        }
+
         let hasDeletedItems = receipt.verificationResults.contains { $0.status == .deleted }
         let hasRemainingItems = receipt.verificationResults.contains { $0.status == .stillExists || $0.status == .permissionDenied }
         if hasDeletedItems && hasRemainingItems {
@@ -27,6 +37,14 @@ public struct DeletionReportViewModel: Equatable, Sendable {
         receipt.verificationResults.filter { $0.status == .deleted }.count
     }
 
+    public var completedCountTitle: String {
+        receipt.action.isStartupItemChange ? "Changed" : "Deleted"
+    }
+
+    public var completedCount: Int {
+        deletedCount
+    }
+
     public var remainingCount: Int {
         receipt.verificationResults.filter { $0.status == .stillExists || $0.status == .permissionDenied }.count
     }
@@ -37,14 +55,21 @@ public struct DeletionReportViewModel: Equatable, Sendable {
             .map(\.path)
     }
 
+    public var summaryLine: String {
+        if receipt.action.isStartupItemChange {
+            return "\(completedCount) changed, \(remainingCount) remaining"
+        }
+        return "\(completedCount) deleted, \(remainingCount) remaining"
+    }
+
     public var copyableReportText: String {
         var lines = [
-            "MyMacClean Deletion Report",
+            receipt.action.isStartupItemChange ? "MyMacClean Startup Item Report" : "MyMacClean Deletion Report",
             "App: \(receipt.appName)",
             "Bundle ID: \(receipt.bundleIdentifier ?? "Unknown")",
             "Action: \(receipt.action.rawValue)",
             "Status: \(statusTitle)",
-            "Deleted: \(deletedCount)",
+            "\(completedCountTitle): \(completedCount)",
             "Remaining: \(remainingCount)"
         ]
 

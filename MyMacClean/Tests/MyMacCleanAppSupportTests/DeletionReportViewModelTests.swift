@@ -132,4 +132,31 @@ final class DeletionReportViewModelTests: XCTestCase {
         /Users/me/Library/Caches/com.todesktop.230313mzl4w4u92 - Operation not permitted
         """)
     }
+
+    func testSummarizesStartupItemChangeWithoutDeletionLanguage() {
+        let report = DeletionReportViewModel(
+            receipt: DeletionReceipt(
+                appName: "com.example.agent",
+                bundleIdentifier: nil,
+                bundlePath: "/Users/me/Library/LaunchAgents/com.example.agent.plist",
+                action: .startupItemDisable,
+                selectedCandidates: [],
+                executionResults: [
+                    DeletionItemResult(path: "/Users/me/Library/LaunchAgents/com.example.agent.plist", success: true, errorMessage: nil)
+                ],
+                verificationResults: [
+                    DeletionVerificationResult(path: "/Users/me/Library/LaunchAgents/com.example.agent.plist", status: .deleted, errorMessage: nil)
+                ],
+                confirmationMatched: true
+            )
+        )
+
+        XCTAssertEqual(report.statusTitle, "Startup item changed")
+        XCTAssertEqual(report.completedCountTitle, "Changed")
+        XCTAssertEqual(report.completedCount, 1)
+        XCTAssertEqual(report.summaryLine, "1 changed, 0 remaining")
+        XCTAssertTrue(report.copyableReportText.contains("MyMacClean Startup Item Report"))
+        XCTAssertTrue(report.copyableReportText.contains("Changed: 1"))
+        XCTAssertFalse(report.copyableReportText.contains("Deleted:"))
+    }
 }

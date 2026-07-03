@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 @testable import CaptureStudio
 
 final class CaptureHistoryStoreTests: XCTestCase {
@@ -32,7 +33,9 @@ final class CaptureHistoryStoreTests: XCTestCase {
         store.add(newer)
 
         let reloaded = CaptureHistoryStore(defaults: defaults)
-        XCTAssertEqual(reloaded.items, [newer, older])
+        var persistedOlder = older
+        persistedOlder.thumbnailData = nil
+        XCTAssertEqual(reloaded.items, [newer, persistedOlder])
     }
 
     @MainActor
@@ -89,6 +92,69 @@ final class CaptureHistoryStoreTests: XCTestCase {
         XCTAssertTrue(CaptureHistoryStore(defaults: defaults).items.isEmpty)
     }
 
+    @MainActor
+    func testScreenshotHistoryWritesThumbnailFileAndDoesNotPersistImageBytesInDefaults() throws {
+        let defaults = isolatedDefaults("thumbnailPayload")
+        let thumbnailDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CaptureHistoryStoreTests-\(UUID().uuidString)", isDirectory: true)
+        let fullSizeData = try pngData(width: 1400, height: 900)
+        let store = CaptureHistoryStore(
+            defaults: defaults,
+            maxItems: 100,
+            thumbnailDirectory: thumbnailDirectory
+        )
+
+        store.add(
+            CaptureHistoryItem(
+                kind: .screenshot,
+                createdAt: Date(timeIntervalSince1970: 10),
+                fileURL: URL(fileURLWithPath: "/tmp/large.png"),
+                title: "Large screenshot",
+                detail: "Screenshot",
+                thumbnailData: fullSizeData
+            )
+        )
+
+        let storedItem = try XCTUnwrap(store.items.first)
+        let thumbnailURL = try XCTUnwrap(storedItem.thumbnailURL)
+        let persistedData = try XCTUnwrap(defaults.data(forKey: "CaptureStudio.CaptureHistory.v1"))
+        let persistedJSON = try XCTUnwrap(String(data: persistedData, encoding: .utf8))
+        let thumbnailAttributes = try FileManager.default.attributesOfItem(atPath: thumbnailURL.path)
+        let thumbnailSize = try XCTUnwrap(thumbnailAttributes[FileAttributeKey.size] as? NSNumber).intValue
+
+        XCTAssertNil(storedItem.thumbnailData)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: thumbnailURL.path))
+        XCTAssertLessThan(thumbnailSize, fullSizeData.count)
+        XCTAssertFalse(persistedJSON.contains(fullSizeData.base64EncodedString()))
+        XCTAssertEqual(CaptureHistoryStore(defaults: defaults, thumbnailDirectory: thumbnailDirectory).items.first?.thumbnailURL, thumbnailURL)
+    }
+
+    @MainActor
+    func testRemovingHistoryItemDeletesThumbnailFile() throws {
+        let thumbnailDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CaptureHistoryStoreTests-\(UUID().uuidString)", isDirectory: true)
+        let store = CaptureHistoryStore(
+            defaults: isolatedDefaults("thumbnailRemoval"),
+            thumbnailDirectory: thumbnailDirectory
+        )
+        store.add(
+            CaptureHistoryItem(
+                kind: .screenshot,
+                createdAt: Date(timeIntervalSince1970: 10),
+                fileURL: URL(fileURLWithPath: "/tmp/remove-thumbnail.png"),
+                title: "Remove thumbnail",
+                detail: "Screenshot",
+                thumbnailData: try pngData(width: 800, height: 600)
+            )
+        )
+        let item = try XCTUnwrap(store.items.first)
+        let thumbnailURL = try XCTUnwrap(item.thumbnailURL)
+
+        store.remove(id: item.id)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: thumbnailURL.path))
+    }
+
     private func item(title: String, date: TimeInterval) -> CaptureHistoryItem {
         CaptureHistoryItem(
             kind: .screenshot,
@@ -106,5 +172,17 @@ final class CaptureHistoryStoreTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
         return defaults
+    }
+
+    private func pngData(width: CGFloat, height: CGFloat) throws -> Data {
+        let image = NSImage(size: NSSize(width: width, height: height))
+        image.lockFocus()
+        NSColor.systemBlue.setFill()
+        NSBezierPath(rect: NSRect(x: 0, y: 0, width: width, height: height)).fill()
+        image.unlockFocus()
+
+        let tiffData = try XCTUnwrap(image.tiffRepresentation)
+        let representation = try XCTUnwrap(NSBitmapImageRep(data: tiffData))
+        return try XCTUnwrap(representation.representation(using: .png, properties: [:]))
     }
 }

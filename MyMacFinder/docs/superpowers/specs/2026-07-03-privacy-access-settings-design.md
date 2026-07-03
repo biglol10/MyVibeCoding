@@ -1,8 +1,10 @@
 # Privacy & Access Settings Design
 
+Status update, 2026-07-03: implemented in `Sources/MyMacFinder/App/PrivacyAccessSettingsView.swift`. The context below describes the pre-change UI problem that this design fixed.
+
 ## Context
 
-The current Privacy & Access settings tab uses a default SwiftUI `Form` inside the app settings `TabView`. In the current fixed-size settings window this leaves the main content visually sparse, puts labels and values in an awkward row, and makes the empty folder-grant state look unfinished.
+Before this change, the Privacy & Access settings tab used a default SwiftUI `Form` inside the app settings `TabView`. In the fixed-size settings window this left the main content visually sparse, put labels and values in an awkward row, and made the empty folder-grant state look unfinished.
 
 ## Goals
 

@@ -573,7 +573,7 @@ public final class ExplorerStore: ObservableObject {
         } catch let error as ExplorerError {
             present(error)
         } catch {
-            visibleError = .readFailed(error.localizedDescription)
+            visibleError = .operationFailed(error.localizedDescription)
         }
     }
 
@@ -625,7 +625,7 @@ public final class ExplorerStore: ObservableObject {
         } catch let error as ExplorerError {
             present(error)
         } catch {
-            visibleError = .readFailed(error.localizedDescription)
+            visibleError = .operationFailed(error.localizedDescription)
         }
     }
 
@@ -673,7 +673,7 @@ public final class ExplorerStore: ObservableObject {
         } catch let error as ExplorerError {
             present(error)
         } catch {
-            visibleError = .readFailed(error.localizedDescription)
+            visibleError = .operationFailed(error.localizedDescription)
         }
     }
 
@@ -691,7 +691,7 @@ public final class ExplorerStore: ObservableObject {
         } catch let error as ExplorerError {
             present(error)
         } catch {
-            visibleError = .readFailed(error.localizedDescription)
+            visibleError = .operationFailed(error.localizedDescription)
         }
     }
 
@@ -937,7 +937,7 @@ public final class ExplorerStore: ObservableObject {
         } catch let error as ExplorerError {
             present(error)
         } catch {
-            visibleError = .readFailed(error.localizedDescription)
+            visibleError = .operationFailed(error.localizedDescription)
         }
     }
 
@@ -1233,7 +1233,7 @@ public final class ExplorerStore: ObservableObject {
         } catch let error as ExplorerError {
             present(error)
         } catch {
-            visibleError = .readFailed(error.localizedDescription)
+            visibleError = .operationFailed(error.localizedDescription)
         }
     }
 
@@ -1333,6 +1333,9 @@ public final class ExplorerStore: ObservableObject {
 
                 var resolvedGrant = grant
                 resolvedGrant.url = access.url
+                if let refreshedBookmarkData = access.refreshedBookmarkData {
+                    resolvedGrant.bookmarkData = refreshedBookmarkData
+                }
                 resolvedGrant.lastResolvedAt = Date()
                 try? bookmarkStore.save(resolvedGrant)
 
@@ -1973,16 +1976,16 @@ public final class ExplorerStore: ObservableObject {
         "\(verb) \(count) \(count == 1 ? "item" : "items")"
     }
 
-    private func fallbackError(for command: ExplorerCommand, underlying error: Error) -> ExplorerError {
+    func fallbackError(for command: ExplorerCommand, underlying error: Error) -> ExplorerError {
         switch command {
         case .extractZip, .compressToZip:
             return .archiveFailed(error.localizedDescription)
         case .openInTerminal, .openInVSCode:
             return .externalCommandFailed(error.localizedDescription)
         case .newFolder, .duplicate, .editTags, .paste, .copyToOppositePane, .moveToOppositePane,
-             .moveToTrash, .calculateFolderSize, .undo:
+             .moveToTrash, .calculateFolderSize, .undo, .rename:
             return .operationFailed(error.localizedDescription)
-        case .open, .chooseOpenWithApplication, .quickLook, .revealInFinder, .copyPath, .rename,
+        case .open, .chooseOpenWithApplication, .quickLook, .revealInFinder, .copyPath,
              .selectAll, .addToFavorites, .copy, .cut, .refresh, .focusSearch, .focusPath, .clearSearch,
              .toggleHiddenFiles, .toggleInspector, .goBack, .goForward, .goUp, .newTab, .closeTab,
              .nextTab, .previousTab:

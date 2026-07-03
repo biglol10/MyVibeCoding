@@ -1,5 +1,9 @@
 # Startup Items Implementation Plan
 
+Status: implemented. This file is kept as execution history; current behavior
+is summarized in `../../../README.md` and
+`../specs/2026-07-03-mymacclean-personal-cleaner-design.md`.
+
 ## Goal
 
 Move `Startup Items` from roadmap placeholder to a working current-release feature that audits macOS launch agents/daemons and safely disables or re-enables user-owned LaunchAgent plists.

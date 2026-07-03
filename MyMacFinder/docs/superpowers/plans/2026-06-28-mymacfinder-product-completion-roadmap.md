@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status update, 2026-07-03:** This is a historical roadmap, not the current source of truth for shipped features. The current feature list, run commands, packaging commands, and latest verification count live in `README.md`. Several early phases have since been implemented or superseded by focused plans; later roadmap phases such as icon grid, Activity View, folder compare/sync, and writable archive mutation remain optional future candidates unless a newer plan says otherwise.
+
 **Goal:** Turn MyMacFinder from a working Finder-style MVP into a production-grade local file manager through ordered, independently verifiable phases.
 
 **Architecture:** Keep the app SwiftUI + AppKit hybrid. File mutations remain centralized in services and coordinated by `ExplorerStore`; UI surfaces consume typed state rather than touching the filesystem directly. Each major feature gets its own focused service/model/store tests before UI wiring, and every phase ends with automated verification plus release-app manual QA.

@@ -1,5 +1,10 @@
 # SwiftUI macOS Native Milestone 1 Implementation Plan
 
+> Historical implementation plan: this file describes the initial native skeleton milestone and is not the current
+> implementation checklist. The native app now includes database-backed reporting, collection, browser bridge reuse, Safari
+> Automation support, packaging scripts, and menu bar summary behavior. Use `README.md` and `docs/macos-development.md` for
+> current commands.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a buildable native SwiftUI macOS FlowPilot app skeleton without breaking the existing Tauri/React/Rust app.
@@ -697,5 +702,8 @@ Expected: native Swift tests pass.
 ## Self-Review
 
 - Spec coverage: This plan covers the first milestone from the SwiftUI native design: separate native app, native shell, mirrored data concepts, menu bar item, and tests.
-- Known deferred scope: collector migration, SQLite migration, browser bridge reuse, `.app` packaging, signing, notarization, and replacing the installed Tauri app are intentionally outside milestone 1.
+- Original deferred scope at milestone 1: collector migration, SQLite migration, browser bridge reuse, `.app` packaging,
+  signing, notarization, and replacing the installed Tauri app were intentionally outside the first milestone. Current
+  native work has since added database-backed reporting, native collection, browser bridge reuse, and personal `.app`/DMG
+  packaging; Developer ID signing and notarization remain release-only steps.
 - Placeholder scan: Placeholder views are explicit milestone placeholders with user-facing Korean copy and are limited to screens that cannot be real until data migration starts.

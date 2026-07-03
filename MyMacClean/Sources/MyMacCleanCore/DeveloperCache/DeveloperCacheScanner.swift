@@ -49,7 +49,7 @@ public struct DeveloperCacheScanner: Sendable {
                 relativePath: "Library/Developer/Xcode/DerivedData",
                 explicitURL: nil,
                 safety: .safe,
-                explanation: "Xcode will recreate DerivedData when projects build again."
+                explanation: "Xcode will recreate DerivedData when projects build again. Close Xcode before deleting it during active builds."
             ),
             Target(
                 tool: .xcodeArchives,

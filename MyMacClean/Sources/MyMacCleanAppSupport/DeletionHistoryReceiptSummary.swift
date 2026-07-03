@@ -33,7 +33,21 @@ public struct DeletionHistoryReceiptSummary: Equatable, Sendable {
     }
 
     public var statusTitle: String {
-        status.title
+        if receipt.action.isStartupItemChange && status == .verified {
+            return "Changed"
+        }
+        return status.title
+    }
+
+    public var primaryCountTitle: String {
+        receipt.action.isStartupItemChange ? "Changed" : "Deleted"
+    }
+
+    public var primaryCount: Int {
+        if receipt.action.isStartupItemChange {
+            return receipt.executionResults.filter(\.success).count
+        }
+        return deletedCount
     }
 
     public var deletedCount: Int {

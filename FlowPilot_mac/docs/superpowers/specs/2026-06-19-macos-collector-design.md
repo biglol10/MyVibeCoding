@@ -1,11 +1,17 @@
 # FlowPilot macOS Collector Design
 
 Date: 2026-06-19
-Status: Approved for specification review
+Status: Historical Tauri/Rust collector design; superseded for current personal macOS builds
+
+> Historical note: this document records the original Tauri/Rust macOS collector design. The current recommended personal
+> macOS path is the SwiftUI native app under `macos-native/`, which reads and writes the existing FlowPilot SQLite database,
+> uses direct AppKit/CoreGraphics collection, includes idle detection, reuses the Chrome/Edge bridge, and reads Safari
+> active tab domains through macOS Automation when permission is granted. Use `README.md`, `docs/macos-development.md`,
+> and `docs/macos-distribution.md` for current commands and behavior.
 
 ## Objective
 
-Add a macOS version to the existing FlowPilot Tauri 2, React, and Rust codebase without breaking the Windows implementation. The macOS version should collect open application and window activity, keep browser reporting domain-based, explain required macOS permissions in Korean, preserve the existing reporting and rules workflows, and support local development plus unsigned `.app`/`.dmg` packaging.
+Add a macOS version to the existing FlowPilot Tauri 2, React, and Rust codebase without breaking the Windows implementation. The macOS version should collect open application and window activity, keep browser reporting domain-based, explain required macOS permissions in Korean, preserve the existing reporting and rules workflows, and support local development plus local `.app`/`.dmg` packaging. This was the historical Tauri/Rust direction; current personal macOS packaging is the SwiftUI native package.
 
 ## Existing Codebase Shape
 
@@ -42,7 +48,7 @@ Included:
 - Document Safari's separate Safari Web Extension path.
 - Preserve daily/weekly reports, chart/table/timeline views, exclusion and classification rules, display names, auto-refresh, and SQLite persistence.
 - Confirm tray/menu behavior remains available through Tauri's tray integration on macOS.
-- Produce development-run instructions and unsigned `.app`/`.dmg` packaging instructions.
+- Produce development-run instructions and local `.app`/`.dmg` packaging instructions.
 - Document Developer ID signing and notarization as a separate release step.
 
 Excluded from this implementation pass:
@@ -144,7 +150,9 @@ The UI should not claim that permission is enabled until the backend reports it.
 
 ### Idle Detection
 
-The existing Windows idle reader is Windows-only and is not wired into the current collector service. macOS idle detection is not included in this implementation pass. It should remain a separate follow-up so activity snapshot work does not mix with idle-threshold behavior.
+Original scope note: macOS idle detection was left out of the first collector implementation pass so activity snapshot
+work did not mix with idle-threshold behavior. Current status: macOS idle detection has since been implemented and is
+documented in the current README/development docs.
 
 ## Browser Design
 
@@ -167,7 +175,9 @@ Design decision:
 
 - Document that Safari domain-level tracking requires a Safari Web Extension package or a separate macOS native messaging flow.
 - Keep the current browser bridge payload shape (`domain`, optional `url`, `title`) so a future Safari extension can report into the same backend path.
-- Until that extension exists, Safari activity is classified by app/window/title fallback, not domain.
+- Current status after later native work: the SwiftUI native macOS app can read Safari's active tab URL/title through
+  macOS Automation when Safari is frontmost, then classify/store the canonical domain. If Automation is denied or the
+  URL is unavailable, FlowPilot falls back to app/window/title tracking.
 
 ## Frontend UX
 
@@ -241,7 +251,7 @@ Development run:
 3. Install Rust and Tauri prerequisites for macOS.
 4. Run `npm run tauri dev`.
 
-Unsigned local packaging:
+Local ad-hoc packaging:
 
 - Build app bundle and DMG through Tauri's macOS bundler.
 - Keep `productName` as `FlowPilot`.

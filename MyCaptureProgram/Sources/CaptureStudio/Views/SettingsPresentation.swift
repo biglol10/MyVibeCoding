@@ -213,7 +213,7 @@ public enum CaptureStudioGuidePresentation {
             systemImage: "slider.horizontal.3",
             items: [
                 "Options is for quick timing changes without opening the full settings window.",
-                "Presets apply saved combinations for capture mode, area, timing, output, and quality.",
+                "Presets apply capture mode, area, timing, clipboard, and save behavior without changing folders or recording quality.",
                 "The status text shows where files will save and which timing values are active."
             ]
         ),

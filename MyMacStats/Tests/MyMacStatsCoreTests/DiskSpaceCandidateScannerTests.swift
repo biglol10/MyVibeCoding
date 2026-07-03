@@ -26,6 +26,35 @@ final class DiskSpaceCandidateScannerTests: XCTestCase {
         XCTAssertGreaterThan(candidates[1].sizeBytes, 0)
     }
 
+    func testSlowDuCommandTimesOutAndFallsBackToLimitedScan() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mymacstats-disk-scanner-timeout-\(UUID().uuidString)", isDirectory: true)
+        let caches = root.appendingPathComponent("Caches", isDirectory: true)
+        try FileManager.default.createDirectory(at: caches, withIntermediateDirectories: true)
+        try Data(repeating: 1, count: 4_096).write(to: caches.appendingPathComponent("item.bin"))
+        let slowDu = root.appendingPathComponent("slow-du.sh")
+        try """
+        #!/bin/sh
+        sleep 5
+        """.write(to: slowDu, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: slowDu.path)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let scanner = DiskSpaceCandidateScanner(
+            duExecutableURL: slowDu,
+            duTimeout: 0.05
+        )
+        let start = Date()
+        let candidates = scanner.scan(targets: [
+            DiskSpaceCandidateTarget(title: "Caches", url: caches)
+        ])
+        let elapsed = Date().timeIntervalSince(start)
+
+        XCTAssertLessThan(elapsed, 1)
+        XCTAssertEqual(candidates.map(\.title), ["Caches"])
+        XCTAssertGreaterThan(candidates[0].sizeBytes, 0)
+    }
+
     func testDefaultTargetsUseNonTCCLibraryFolders() {
         let home = URL(fileURLWithPath: "/Users/example", isDirectory: true)
         let targets = DiskSpaceCandidateScanner.defaultTargets(home: home)

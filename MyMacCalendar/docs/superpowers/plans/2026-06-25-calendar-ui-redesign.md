@@ -1,5 +1,7 @@
 # Calendar UI Redesign Implementation Plan
 
+Status: Historical implementation plan. This file is kept for traceability; some planned steps and snippets may differ from the current implementation. Use `README.md`, current source files, and tests as the source of truth.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the weak card-like month UI with a professional dark full-grid calendar inspired by the approved reference.

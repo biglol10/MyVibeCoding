@@ -5,6 +5,8 @@ public enum DeletionAction: String, Codable, Equatable, Sendable {
     case orphanCleanup
     case largeFileCleanup
     case developerCacheCleanup
+    case startupItemDisable
+    case startupItemEnable
 }
 
 public struct DeletionReceiptCandidate: Codable, Equatable, Sendable {

@@ -1,5 +1,7 @@
 # MyMacCalendar Implementation Plan
 
+Status: Historical implementation plan. This file is kept for traceability and contains planned file names and snippets that may no longer match the current app. Use `README.md`, current source files, and tests as the source of truth.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a local-first SwiftUI macOS calendar app with all-day events, simple recurrence, editable holidays, notifications, quick add, menu bar access, settings, and an always-on-top floating upcoming-events widget.

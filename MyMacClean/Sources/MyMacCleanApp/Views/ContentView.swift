@@ -20,6 +20,7 @@ struct ContentView: View {
     @State private var navigationState = SidebarNavigationState()
     @State private var confirmationText = ""
     @State private var confirmationMode: DeletionConfirmationMode?
+    @State private var pendingStartupAction: StartupItemAction?
     @State private var forceDelete = false
     @State private var permanentDelete = false
 
@@ -53,6 +54,20 @@ struct ContentView: View {
         .sheet(item: $confirmationMode) { mode in
             confirmationSheet(for: mode)
         }
+        .alert("Startup Item Change", isPresented: startupActionAlertBinding) {
+            Button("Cancel", role: .cancel) {
+                pendingStartupAction = nil
+            }
+            if let pendingStartupAction {
+                Button(pendingStartupAction == .disable ? "Disable Startup Item" : "Enable Startup Item", role: pendingStartupAction == .disable ? .destructive : nil) {
+                    performStartupAction(pendingStartupAction)
+                }
+            }
+        } message: {
+            if let item = startupItemsViewModel.selectedItem {
+                Text(StartupItemActionPresentation(item: item).confirmationMessage)
+            }
+        }
     }
 
     private var sidebar: some View {
@@ -75,6 +90,17 @@ struct ContentView: View {
             set: { isPresented in
                 if !isPresented {
                     clearErrorMessages()
+                }
+            }
+        )
+    }
+
+    private var startupActionAlertBinding: Binding<Bool> {
+        Binding(
+            get: { pendingStartupAction != nil },
+            set: { isPresented in
+                if !isPresented {
+                    pendingStartupAction = nil
                 }
             }
         )
@@ -800,7 +826,7 @@ struct ContentView: View {
 
             HStack(spacing: 18) {
                 HistoryMetric(title: "Selected", value: "\(receipt.selectedCandidates.count)")
-                HistoryMetric(title: "Deleted", value: "\(summary.deletedCount)")
+                HistoryMetric(title: summary.primaryCountTitle, value: "\(summary.primaryCount)")
                 HistoryMetric(title: "Remaining", value: "\(summary.remainingCount)")
             }
 
@@ -986,6 +1012,12 @@ struct ContentView: View {
 
                 VStack(alignment: .leading, spacing: 10) {
                     startupActionButton(for: item)
+                    if let statusMessage = startupItemsViewModel.statusMessage {
+                        Label(statusMessage, systemImage: "checkmark.circle")
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     Text(startupActionHelp(for: item))
                         .font(.callout.weight(.medium))
                         .foregroundStyle(.secondary)
@@ -1409,16 +1441,7 @@ struct ContentView: View {
     }
 
     private func startupActionHelp(for item: StartupItem) -> String {
-        if item.isReadOnly {
-            return "System-wide launch items are shown for auditing only."
-        }
-        if item.state == .enabled {
-            return "Disabling renames the plist with a .mymacclean-disabled suffix. MyMacClean does not edit plist contents or call launchctl."
-        }
-        if item.disabledByRename {
-            return "Re-enabling restores the original plist filename."
-        }
-        return "This item is disabled inside the plist. MyMacClean will not edit plist contents."
+        StartupItemActionPresentation(item: item).helpText
     }
 
     private func startupDetailRow(
@@ -1475,44 +1498,48 @@ struct ContentView: View {
 
     @ViewBuilder
     private func startupActionButton(for item: StartupItem) -> some View {
-        if item.isReadOnly {
+        let presentation = StartupItemActionPresentation(item: item)
+        if presentation.action == nil {
             Button {
             } label: {
-                Label("Read-only System Item", systemImage: "lock")
+                Label(presentation.buttonTitle, systemImage: presentation.systemImage)
                     .font(.headline.weight(.semibold))
                     .frame(maxWidth: .infinity, minHeight: 44)
             }
             .buttonStyle(.bordered)
             .disabled(true)
-        } else if item.state == .enabled {
+        } else if presentation.action == .disable {
             Button {
-                Task { await startupItemsViewModel.disableSelectedItem() }
+                pendingStartupAction = .disable
             } label: {
-                Label(startupItemsViewModel.isApplyingChange ? "Disabling..." : "Disable Startup Item", systemImage: "pause.circle")
+                Label(startupItemsViewModel.isApplyingChange ? presentation.applyingTitle : presentation.buttonTitle, systemImage: presentation.systemImage)
                     .font(.headline.weight(.semibold))
                     .frame(maxWidth: .infinity, minHeight: 44)
             }
             .buttonStyle(.borderedProminent)
             .disabled(startupItemsViewModel.isApplyingChange)
-        } else if item.disabledByRename {
+        } else if presentation.action == .enable {
             Button {
-                Task { await startupItemsViewModel.enableSelectedItem() }
+                pendingStartupAction = .enable
             } label: {
-                Label(startupItemsViewModel.isApplyingChange ? "Enabling..." : "Enable Startup Item", systemImage: "play.circle")
+                Label(startupItemsViewModel.isApplyingChange ? presentation.applyingTitle : presentation.buttonTitle, systemImage: presentation.systemImage)
                     .font(.headline.weight(.semibold))
                     .frame(maxWidth: .infinity, minHeight: 44)
             }
             .buttonStyle(.borderedProminent)
             .disabled(startupItemsViewModel.isApplyingChange)
-        } else {
-            Button {
-            } label: {
-                Label("Disabled by Plist Flag", systemImage: "checkmark.circle")
-                    .font(.headline.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 44)
+        }
+    }
+
+    private func performStartupAction(_ action: StartupItemAction) {
+        pendingStartupAction = nil
+        Task {
+            switch action {
+            case .disable:
+                await startupItemsViewModel.disableSelectedItem()
+            case .enable:
+                await startupItemsViewModel.enableSelectedItem()
             }
-            .buttonStyle(.bordered)
-            .disabled(true)
         }
     }
 
@@ -1576,7 +1603,7 @@ private struct DeletionReportPanel: View {
                 .buttonStyle(.borderless)
                 .help("Copy Report")
             }
-            Text("\(report.deletedCount) deleted, \(report.remainingCount) remaining")
+            Text(report.summaryLine)
                 .font(.callout.weight(.medium))
                 .foregroundStyle(.secondary)
             ForEach(report.remainingPaths, id: \.self) { path in

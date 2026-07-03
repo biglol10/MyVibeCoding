@@ -93,6 +93,43 @@ final class DeveloperCacheViewModelTests: XCTestCase {
         XCTAssertEqual(receipts[0].verificationResults.map(\.status), [.deleted])
     }
 
+    func testMoveSelectedCachesToTrashBlocksDerivedDataWhileXcodeIsRunning() async throws {
+        let home = try temporaryHome(named: "developer-cache-vm-xcode-running")
+        let receiptRoot = try temporaryHome(named: "developer-cache-vm-xcode-running-receipts")
+        defer {
+            try? FileManager.default.removeItem(at: home)
+            try? FileManager.default.removeItem(at: receiptRoot)
+        }
+        let derivedData = home.appendingPathComponent("Library/Developer/Xcode/DerivedData", isDirectory: true)
+        try writePayload(in: derivedData, name: "Build/data.bin", size: 12)
+        let store = DeletionReceiptStore(fileURL: receiptRoot.appendingPathComponent("receipts.jsonl"))
+        let remover = DeletionFileRemover(
+            trash: { url in try FileManager.default.removeItem(at: url) },
+            remove: { url in try FileManager.default.removeItem(at: url) }
+        )
+
+        let viewModel = DeveloperCacheViewModel(
+            homeDirectory: home,
+            executor: DeletionExecutor(
+                fileRemover: remover,
+                deletionProtectionPolicy: UserFileCleanupPolicy(allowedRoots: [derivedData]).deletionProtectionPolicy
+            ),
+            receiptStore: store,
+            runningApplicationMonitor: RunningApplicationMonitor(isRunning: { app in
+                app.bundleIdentifier == "com.apple.dt.Xcode"
+            })
+        )
+
+        await viewModel.scan()
+        await viewModel.moveSelectedToTrash(confirmation: "DELETE")
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: derivedData.path))
+        XCTAssertNil(viewModel.deletionReport)
+        XCTAssertEqual(viewModel.errorMessage, "Quit Xcode before deleting DerivedData.")
+        XCTAssertTrue(try store.readReceipts().isEmpty)
+        XCTAssertFalse(viewModel.isDeleting)
+    }
+
     private func temporaryHome(named name: String) throws -> URL {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("MyMacClean-\(name)-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)

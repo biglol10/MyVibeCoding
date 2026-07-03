@@ -373,12 +373,12 @@ public final class CaptureCoordinator: ObservableObject {
             return
         }
 
+        let outputURL = fileOutputService.trimmedRecordingURL(
+            settings: settingsStore.settings,
+            date: Date(),
+            context: document.namingContext
+        )
         do {
-            let outputURL = fileOutputService.trimmedRecordingURL(
-                settings: settingsStore.settings,
-                date: Date(),
-                context: document.namingContext
-            )
             let trimmedURL = try await recordingExportService.trimRecording(
                 sourceURL: sourceURL,
                 startSeconds: startSeconds,
@@ -393,6 +393,7 @@ public final class CaptureCoordinator: ObservableObject {
             revealIfNeeded(trimmedURL, settings: settingsStore.settings)
             appState.statusMessage = "Recording trimmed."
         } catch {
+            try? FileManager.default.removeItem(at: outputURL)
             appState.statusMessage = "Trim failed: \(error.localizedDescription)"
         }
     }
@@ -407,20 +408,21 @@ public final class CaptureCoordinator: ObservableObject {
             return
         }
 
+        let outputURL = fileOutputService.gifRecordingURL(
+            settings: settingsStore.settings,
+            date: Date(),
+            context: document.namingContext
+        )
         do {
-            let outputURL = fileOutputService.gifRecordingURL(
-                settings: settingsStore.settings,
-                date: Date(),
-                context: document.namingContext
-            )
             let gifURL = try await recordingExportService.exportGIF(
                 sourceURL: sourceURL,
                 outputURL: outputURL,
-                maxDurationSeconds: Double(settingsStore.settings.recordingDurationSeconds)
+                maxDurationSeconds: nil
             )
             fileRevealService.reveal(gifURL)
             appState.statusMessage = "GIF exported."
         } catch {
+            try? FileManager.default.removeItem(at: outputURL)
             appState.statusMessage = "GIF export failed: \(error.localizedDescription)"
         }
     }
@@ -567,11 +569,20 @@ public final class CaptureCoordinator: ObservableObject {
                 fileURL: fileURL,
                 title: title,
                 detail: detail,
-                thumbnailData: document.kind == .screenshot ? document.currentImageData : nil,
+                thumbnailData: Self.historyThumbnailData(for: document),
                 sourceApplication: context?.applicationName,
                 windowTitle: context?.windowTitle
             )
         )
+    }
+
+    private static func historyThumbnailData(for document: EditorDocument) -> Data? {
+        guard document.kind == .screenshot,
+              let imageData = document.currentImageData
+        else {
+            return nil
+        }
+        return CaptureHistoryStore.thumbnailData(from: imageData)
     }
 
     private func waitIfNeeded(seconds: Int) async throws {

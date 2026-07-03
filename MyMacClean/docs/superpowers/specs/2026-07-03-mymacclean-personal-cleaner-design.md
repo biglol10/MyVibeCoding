@@ -1,5 +1,10 @@
 # MyMacClean Personal Cleaner Design
 
+Status: updated after implementation on 2026-07-03. This document describes
+the current personal-use direction and notes where the implemented app is more
+limited than the original plan. Older files under `docs/superpowers/plans` are
+historical execution records, not current product documentation.
+
 ## Context
 
 MyMacClean is already a native SwiftUI app with working application discovery,
@@ -110,29 +115,31 @@ Purpose: find large files that are worth manual review.
 
 Scanner:
 
-- Scan user-selected roots, defaulting to the home directory.
-- The first release should scan common review roots: Downloads, Desktop,
-  Movies, Documents, and selected developer folders, but never auto-select
-  results.
-- Exclude system roots and app internals.
-- Ignore package contents by default for `.app`, `.framework`, `.bundle`, and
-  `.photoslibrary` packages.
-- Return files above a configurable threshold, default 500 MB.
+- The current app scans top-level files in `~/Downloads` by default.
+- `LargeFileScanner` supports recursive scanning internally, but
+  `LargeFilesViewModel` currently calls it with `recursive: false`.
+- Exclude system roots and package internals.
+- Ignore package contents such as `.app`, `.framework`, `.bundle`, and
+  `.photoslibrary`.
+- Return files above the configured threshold, currently 500 MB.
+- Never auto-select results.
 
 UI:
 
 - Sidebar destination: Large Files.
-- Table columns: name, size, modified date, path, kind.
-- Filters: minimum size, root, file kind, older-than.
-- Sort: size descending, modified date, path.
+- List rows show selection, name, parent path, kind, and size.
+- Search by name, kind, or path.
+- Sort is currently size descending in the main UI.
 - Actions: Reveal in Finder, Copy Path, Move Selected to Trash.
 - No default selection.
 
 Deletion:
 
 - Reuse `DeletionExecutor`, `DeletionVerifier`, and receipt infrastructure.
-- Use a new receipt action such as `largeFileCleanup`.
+- Use the `largeFileCleanup` receipt action.
 - Move to Trash by default.
+- Permanent deletion and force-delete are not exposed for Large Files in the
+  current app.
 
 ### 4. Developer Cache
 
@@ -164,8 +171,8 @@ Scanner:
 
 UI:
 
-- Sidebar destination: Maintenance. In this phase the screen title becomes
-  Developer Cache and the primary action becomes Scan Developer Caches.
+- Sidebar destination appears as Developer Cache in Current Release. The
+  internal enum case remains `maintenance`.
 - Group by tool: Xcode, Swift, Node, CocoaPods, Gradle, Docker.
 - Show total reclaimable size.
 - Default-select Safe groups only.
@@ -174,8 +181,10 @@ UI:
 Deletion:
 
 - Reuse existing deletion pipeline.
-- Record receipt action such as `developerCacheCleanup`.
+- Record the `developerCacheCleanup` receipt action.
 - Do not run package-manager cleanup commands in the first release.
+- Permanent deletion and force-delete are not exposed for Developer Cache in
+  the current app.
 
 ### 5. Startup Items
 
@@ -222,6 +231,8 @@ Safety:
 - Never edit plist contents.
 - Never call `launchctl` in the first release. File rename is simpler,
   reversible, and testable.
+- Because MyMacClean does not call `launchctl`, a currently loaded user agent
+  may keep running until the next login or restart.
 - Show a warning when an item target path is missing.
 
 ## Architecture
@@ -252,7 +263,6 @@ Shared infrastructure:
 - Extend `DeletionAction` with:
   - `largeFileCleanup`
   - `developerCacheCleanup`
-  - `startupItemChange`
 
 ### MyMacCleanAppSupport
 
@@ -274,12 +284,10 @@ Each view model owns:
 
 Navigation:
 
-- Move Large Files from Roadmap to Current Release when implemented.
-- Move Startup Items from Roadmap to Current Release when implemented.
-- Use the existing Maintenance destination for Developer Cache in the first
-  implementation: keep the enum value if that keeps changes smaller, but show
-  the screen title as Developer Cache and the primary action as Scan Developer
-  Caches.
+- Large Files and Startup Items are in Current Release.
+- Developer Cache is in Current Release. The internal destination enum case is
+  still `maintenance`, but the visible title and primary action are Developer
+  Cache / Scan Developer Caches.
 
 UI pattern:
 
@@ -288,11 +296,11 @@ UI pattern:
 - Use existing `DeleteActionButton` for file cleanup where possible.
 - Use a separate reversible action button for Startup Items disable/enable.
 
-## Implementation Phases
+## Implementation Status
 
-### Phase 1: Large Files
+### Large Files
 
-Deliver a complete Large Files screen:
+Implemented:
 
 - Scanner.
 - View model.
@@ -302,9 +310,16 @@ Deliver a complete Large Files screen:
 - Tests for scan filtering, sorting, protected roots, selection, and deletion
   reconciliation.
 
-### Phase 2: Developer Cache
+Current limits:
 
-Deliver a complete Developer Cache screen under Maintenance:
+- Default scan root is top-level `~/Downloads` only.
+- UI does not yet expose root selection, kind filters, older-than filters, or a
+  minimum-size control.
+- Permanent deletion and force-delete are not available for this cleanup type.
+
+### Developer Cache
+
+Implemented:
 
 - Known cache target scanner.
 - Safety classification.
@@ -314,9 +329,17 @@ Deliver a complete Developer Cache screen under Maintenance:
 - Tests for missing roots, size calculation, safety classification, and
   deletion receipts.
 
-### Phase 3: Startup Items
+Current limits:
 
-Deliver a Startup Items screen:
+- Docker is reported read-only.
+- Package-manager cleanup commands are not run.
+- Permanent deletion and force-delete are not available for this cleanup type.
+- DerivedData remains classified Safe, but cleanup is blocked while Xcode is
+  running.
+
+### Startup Items
+
+Implemented:
 
 - Launch plist parser.
 - Scanner for user and system locations.
@@ -324,10 +347,21 @@ Deliver a Startup Items screen:
 - Read-only system items.
 - Tests for plist parsing, classification, disable/enable, and read-only
   behavior.
+- Compact list presentation for narrow windows.
 
-### Phase 4: Existing Cleanup UX Polish
+Current limits:
 
-Refine Applications and Orphan Files after new modules are in place:
+- No deletion of startup plist files.
+- No plist editing.
+- No `launchctl` calls.
+- Startup enable/disable operations are recorded in Delete History as startup
+  item changes.
+- Disable/enable actions require confirmation and explain that already loaded
+  agents may continue until next login or restart.
+
+### Remaining Cleanup UX Polish
+
+Still useful to refine:
 
 - Consistent receipts and report panels.
 - Group-level selection for orphan leftovers.
@@ -359,6 +393,7 @@ App-support tests:
   actions.
 - Each view model prevents duplicate operations while already scanning or
   applying changes.
+- Startup item list presentation uses compact badge labels for narrow rows.
 
 Manual verification:
 

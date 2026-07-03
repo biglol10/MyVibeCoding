@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status:** Historical implementation plan for the screenshot editor phase. The editor work is implemented, and later work added recording preview, recording trim-copy export, GIF export, capture history, presets, smart filenames, floating pins, and result deletion. Use `README.md` and the source code as the current source of truth.
+
 **Goal:** Add screenshot annotation editing, flattened Save/Copy, OCR text extraction, and quick redaction to Capture Studio.
 
 **Architecture:** Screenshot editing state lives in `EditorDocument` as image-coordinate layers. Rendering is isolated in an `ImageRenderServicing` implementation that flattens base PNG data plus layers into PNG data. OCR and redaction are separate services so the UI and `CaptureCoordinator` can be tested with deterministic fakes.
@@ -28,11 +30,9 @@ Included:
 
 Out of scope:
 
-- Recording trim.
-- GIF export.
 - Scrolling capture.
 - AI calls.
-- Multi-document history.
+- Multi-window editing.
 
 ## File Structure
 
@@ -2461,21 +2461,13 @@ CAPTURE_STUDIO_RUN_INTEGRATION=1 swift test
 
 After a screenshot is captured, the editor toolbar can annotate, OCR, and redact the screenshot before saving or copying. Save and Copy flatten annotation layers into a PNG. OCR and Quick Redact run on demand.
 
-## Current Milestone
+## Features
 
-This milestone includes:
-
-- Minimal main window
-- Settings window
-- Persistent settings
-- Customizable shortcut model with reset defaults
-- Output filename and folder fallback model
-- Capture coordinator interfaces
-- Real screen region selection
-- Screenshot capture and screen recording
-- Screenshot editing, OCR, and quick redaction
-
-Color picker and recording trim are separate implementation milestones.
+- Native macOS app bundle with a compact Capture / Record first workflow
+- Region screenshot capture and region screen recording
+- Settings, shortcuts, output folders, smart filenames, capture history, presets, and in-app guide
+- Screenshot editing, OCR, quick redaction, save/copy/delete, floating pins
+- Recording preview, trim-copy export, and GIF export
 ````
 
 - [ ] **Step 3: Run full verification**

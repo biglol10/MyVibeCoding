@@ -35,13 +35,21 @@ final class CapturePresetStoreTests: XCTestCase {
     }
 
     @MainActor
-    func testApplyingPresetUpdatesCaptureModeAreaTypeAndSettings() {
+    func testApplyingPresetUpdatesWorkflowSettingsWithoutResettingDurableUserPreferences() {
         let settingsStore = SettingsStore(defaults: isolatedDefaults("applySettings"))
         let appState = AppState(captureMode: .screenshot, areaType: .rectangle)
+        settingsStore.update { settings in
+            settings.screenshotFolderPath = "/Users/me/Screenshots"
+            settings.recordingFolderPath = "/Users/me/Recordings"
+            settings.recordingQuality = .high
+        }
         var settings = AppSettings.defaults
         settings.automaticallySaveScreenshots = false
         settings.copyCapturedImageToClipboard = false
         settings.defaultDelaySeconds = 5
+        settings.screenshotFolderPath = "/tmp/preset-screenshots"
+        settings.recordingFolderPath = "/tmp/preset-recordings"
+        settings.recordingQuality = .standard
         let preset = CapturePreset(
             name: "Manual Clipboard Off",
             captureMode: .screenshot,
@@ -60,6 +68,9 @@ final class CapturePresetStoreTests: XCTestCase {
         XCTAssertEqual(settingsStore.settings.automaticallySaveScreenshots, false)
         XCTAssertEqual(settingsStore.settings.copyCapturedImageToClipboard, false)
         XCTAssertEqual(settingsStore.settings.defaultDelaySeconds, 5)
+        XCTAssertEqual(settingsStore.settings.screenshotFolderPath, "/Users/me/Screenshots")
+        XCTAssertEqual(settingsStore.settings.recordingFolderPath, "/Users/me/Recordings")
+        XCTAssertEqual(settingsStore.settings.recordingQuality, .high)
     }
 
     private func isolatedDefaults(_ name: String) -> UserDefaults {

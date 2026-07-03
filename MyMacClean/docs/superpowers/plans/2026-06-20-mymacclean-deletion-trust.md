@@ -1,5 +1,9 @@
 # MyMacClean Deletion Trust Implementation Plan
 
+Status: historical implementation plan. Current behavior is summarized in
+`../../../README.md` and
+`../specs/2026-07-03-mymacclean-personal-cleaner-design.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build Milestone 1 from the trust-and-app-management spec: safety scores, structured match evidence, post-delete verification reports, persistent deletion receipts, a working Delete History screen, and Orphan Files Finder.

@@ -27,9 +27,17 @@ public struct DiskSpaceCandidateTarget: Equatable, Sendable {
 
 public struct DiskSpaceCandidateScanner {
     private let fileManager: FileManager
+    private let duExecutableURL: URL
+    private let duTimeout: TimeInterval
 
-    public init(fileManager: FileManager = .default) {
+    public init(
+        fileManager: FileManager = .default,
+        duExecutableURL: URL = URL(fileURLWithPath: "/usr/bin/du"),
+        duTimeout: TimeInterval = 1.5
+    ) {
         self.fileManager = fileManager
+        self.duExecutableURL = duExecutableURL
+        self.duTimeout = duTimeout
     }
 
     public func scan(targets: [DiskSpaceCandidateTarget]? = nil) -> [DiskSpaceCandidate] {
@@ -55,14 +63,18 @@ public struct DiskSpaceCandidateScanner {
         return limitedFolderSize(at: url)
     }
 
-    private func duSize(at url: URL, timeout: TimeInterval = 1.5) -> UInt64? {
+    private func duSize(at url: URL) -> UInt64? {
         let process = Process()
         let output = Pipe()
         let error = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/du")
+        let termination = DispatchSemaphore(value: 0)
+        process.executableURL = duExecutableURL
         process.arguments = ["-sk", url.path]
         process.standardOutput = output
         process.standardError = error
+        process.terminationHandler = { _ in
+            termination.signal()
+        }
 
         do {
             try process.run()
@@ -70,12 +82,7 @@ public struct DiskSpaceCandidateScanner {
             return nil
         }
 
-        let deadline = Date().addingTimeInterval(timeout)
-        while process.isRunning && Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.02)
-        }
-
-        guard !process.isRunning else {
+        guard termination.wait(timeout: .now() + duTimeout) == .success else {
             kill(process.processIdentifier, SIGKILL)
             process.waitUntilExit()
             return nil

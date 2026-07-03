@@ -549,6 +549,81 @@ final class FileTableViewReuseTests: XCTestCase {
         XCTAssertEqual(resolveCount, 1)
     }
 
+    func testMetadataOnlyReloadKeepsIconCacheForUnchangedFileIdentity() throws {
+        let entry = makeTableEntry(name: "alpha.txt")
+        var resolveCount = 0
+        let icon = NSImage(size: NSSize(width: 16, height: 16))
+        let fileTable = FileTableView(
+            entries: [entry],
+            selectedURLs: [],
+            canPaste: false,
+            canUndo: false,
+            canCloseTab: false,
+            currentURL: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            currentLocation: .fileSystem(URL(fileURLWithPath: "/tmp", isDirectory: true)),
+            currentSort: EntrySortDescriptor(),
+            showsPathColumn: false,
+            onSelectionChange: { _ in },
+            onOpen: { _ in },
+            onCommand: { _ in },
+            iconResolver: FileTableIconResolver { _ in
+                resolveCount += 1
+                return icon
+            },
+            onDropItems: { _, _, _ in },
+            onSortChange: { _ in }
+        )
+        let coordinator = fileTable.makeCoordinator()
+        let tableView = ReloadRecordingTableView()
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
+        tableView.addTableColumn(column)
+        coordinator.tableView = tableView
+
+        _ = try XCTUnwrap(coordinator.tableView(tableView, viewFor: column, row: 0) as? NSTableCellView)
+
+        let updatedEntry = FileEntry(
+            url: entry.url,
+            name: entry.name,
+            kind: entry.kind,
+            typeDescription: entry.typeDescription,
+            fileExtension: entry.fileExtension,
+            size: entry.size,
+            dateModified: entry.dateModified,
+            dateCreated: entry.dateCreated,
+            dateAccessed: entry.dateAccessed,
+            isHidden: entry.isHidden,
+            isDirectoryLike: entry.isDirectoryLike,
+            isReadable: entry.isReadable,
+            finderTags: [FinderTag("Work")],
+            source: entry.source
+        )
+        coordinator.parent = FileTableView(
+            entries: [updatedEntry],
+            selectedURLs: [],
+            canPaste: false,
+            canUndo: false,
+            canCloseTab: false,
+            currentURL: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            currentLocation: .fileSystem(URL(fileURLWithPath: "/tmp", isDirectory: true)),
+            currentSort: EntrySortDescriptor(),
+            showsPathColumn: false,
+            onSelectionChange: { _ in },
+            onOpen: { _ in },
+            onCommand: { _ in },
+            iconResolver: FileTableIconResolver { _ in
+                resolveCount += 1
+                return icon
+            },
+            onDropItems: { _, _, _ in },
+            onSortChange: { _ in }
+        )
+
+        coordinator.reloadDataIfNeeded()
+        _ = try XCTUnwrap(coordinator.tableView(tableView, viewFor: column, row: 0) as? NSTableCellView)
+
+        XCTAssertEqual(resolveCount, 1)
+    }
+
     func testMetadataOnlyEntryChangesReloadOnlyChangedRows() {
         let first = makeTableEntry(name: "alpha.txt")
         let second = makeTableEntry(name: "beta.txt")

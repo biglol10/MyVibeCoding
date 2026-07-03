@@ -1,5 +1,9 @@
 # Large Files Implementation Plan
 
+Status: implemented. This file is kept as execution history; current behavior
+is summarized in `../../../README.md` and
+`../specs/2026-07-03-mymacclean-personal-cleaner-design.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a safe Large Files screen that scans user-review roots, lists large files without auto-selecting them, and moves explicitly selected files to Trash through the existing verified deletion pipeline.

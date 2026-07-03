@@ -75,6 +75,7 @@ MyMacFinder는 macOS Finder를 Windows 파일 탐색기와 ForkLift에 가까운
 - 파일 목록 아이콘은 파일 경로별 동기 `fileExists`/`NSWorkspace.icon(forFile:)` 조회 없이 metadata 기반 아이콘을 캐시
 - 파일 목록에서 URL 순서가 같은 metadata-only 변경은 전체 table reload 대신 변경 행만 갱신
 - 권한 안내, 선택 폴더 grant 저장/초기화, sandboxed launch 시 persisted grant resolve와 stale/unavailable 표시
+- Settings > Privacy & Access는 전용 설정 뷰에서 sandbox 상태, 폴더 grant empty/list 상태, remove/reset, Privacy Settings 이동을 표시
 - 외부에서 Finder tag 변경 후 Refresh로 table과 inspector 동기화
 
 ## 요구사항
@@ -191,6 +192,8 @@ GitHub Actions CI도 루트 `.github/workflows/ci.yml`에서 `swift test --enabl
 
 수동 QA 기록:
 
+아래 문서들은 실행 당시의 스냅샷입니다. 각 파일 안의 테스트 개수나 번들 경로가 현재 최신 검증 숫자와 다를 수 있으므로, 최신 실행/검증 기준은 이 README의 실행, 테스트, 개발 메모 섹션을 우선합니다.
+
 ```text
 docs/qa/file-operations-stabilization-manual-qa.md
 docs/qa/large-file-operation-ux-manual-qa.md
@@ -210,7 +213,7 @@ docs/qa/e2e-ui-ux-audit-2026-06-30.md
 
 ```text
 Sources/MyMacFinder
-  App/                 macOS 앱 진입점
+  App/                 macOS 앱 진입점과 Settings 전용 뷰
   Domain/              파일, 정렬, 명령, 충돌, undo, archive, permission, tag 모델
   Resources/           App icon과 번들 리소스
   Services/            파일 시스템, 파일 작업, 압축, 검색, 감시, 권한, tag 서비스
@@ -248,4 +251,4 @@ git diff --check
 ./scripts/package_personal.sh
 ```
 
-최근 검증 기준으로 `swift test --enable-code-coverage`는 366 tests / 0 failures로 통과했습니다. `swift build`, `git diff --check`, CI YAML parse, `./scripts/build_app.sh`, `./scripts/verify-app-icon.sh`, `./scripts/package_personal.sh`도 통과했고, 개인 설치 zip은 `dist/MyMacFinder-personal-mac.zip`에 생성됩니다. 최근 수동 QA에서는 `build/MyMacFinder.app`을 직접 실행해 홈 폴더 목록, 사이드바, 검색창, Inspector 렌더링, inline rename을 확인했습니다.
+최근 검증 기준으로 `swift test --enable-code-coverage`는 367 tests / 0 failures로 통과했습니다. `swift build`, `git diff --check`, CI YAML parse, `./scripts/build_app.sh`, `./scripts/verify-app-icon.sh`, `./scripts/package_personal.sh`도 통과했고, 개인 설치 zip은 `dist/MyMacFinder-personal-mac.zip`에 생성됩니다. 최근 수동 QA에서는 `build/MyMacFinder.app`을 직접 실행해 기본 파일 탐색 화면과 Settings 창 실행을 확인했습니다.

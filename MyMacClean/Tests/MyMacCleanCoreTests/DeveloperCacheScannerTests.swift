@@ -43,6 +43,7 @@ final class DeveloperCacheScannerTests: XCTestCase {
         XCTAssertEqual(results.first(where: { $0.tool == .cocoaPods })?.safety, .review)
         XCTAssertEqual(results.first(where: { $0.tool == .gradle })?.safety, .review)
         XCTAssertGreaterThan(results.first(where: { $0.tool == .xcodeDerivedData })?.size ?? 0, 0)
+        XCTAssertTrue(results.first(where: { $0.tool == .xcodeDerivedData })?.explanation.contains("Close Xcode") ?? false)
         XCTAssertTrue(results.allSatisfy { !$0.explanation.isEmpty })
     }
 

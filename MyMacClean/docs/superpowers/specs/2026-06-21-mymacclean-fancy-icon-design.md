@@ -1,5 +1,8 @@
 # MyMacClean Fancy App Icon Design
 
+Status: historical design. Current behavior is summarized in `../../../README.md`
+and `2026-07-03-mymacclean-personal-cleaner-design.md`.
+
 ## Goal
 
 Replace the default macOS application icon with a polished icon that makes MyMacClean feel like a premium Mac utility.

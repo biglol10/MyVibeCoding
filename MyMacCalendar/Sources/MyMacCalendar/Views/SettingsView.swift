@@ -13,6 +13,7 @@ struct SettingsView: View {
     @State private var settingsErrorMessage: String?
     @State private var isFetchingHolidays = false
     @State private var holidayFetchMessage: String?
+    @State private var floatingWidgetOpacityDraft: Double?
 
     private let reminderPresets = [
         ReminderTimePreset(hour: 8, minute: 0),
@@ -105,7 +106,11 @@ struct SettingsView: View {
                 SettingsDivider()
                 SettingsRow("투명도") {
                     HStack(spacing: 12) {
-                        Slider(value: binding(\.floatingWidgetOpacity), in: 0.4...1.0)
+                        Slider(
+                            value: floatingWidgetOpacityDraftBinding,
+                            in: 0.4...1.0,
+                            onEditingChanged: handleFloatingWidgetOpacityEditingChanged
+                        )
                             .frame(width: SettingsLayout.compactSliderWidth)
                         Text(opacityPercentText)
                             .font(.system(size: 12, weight: .semibold))
@@ -241,7 +246,18 @@ struct SettingsView: View {
     }
 
     private var opacityPercentText: String {
-        "\(Int((settings.floatingWidgetOpacity * 100).rounded()))%"
+        "\(Int((floatingWidgetOpacityValue * 100).rounded()))%"
+    }
+
+    private var floatingWidgetOpacityValue: Double {
+        floatingWidgetOpacityDraft ?? settings.floatingWidgetOpacity
+    }
+
+    private var floatingWidgetOpacityDraftBinding: Binding<Double> {
+        Binding(
+            get: { floatingWidgetOpacityValue },
+            set: { floatingWidgetOpacityDraft = $0 }
+        )
     }
 
     private var reminderTimeBinding: Binding<Date> {
@@ -288,6 +304,23 @@ struct SettingsView: View {
         settings.defaultReminderHour = min(max(hour, 0), 23)
         settings.defaultReminderMinute = min(max(minute, 0), 59)
         saveModelContext("알림 시간을 저장할 수 없습니다.")
+    }
+
+    private func handleFloatingWidgetOpacityEditingChanged(_ isEditing: Bool) {
+        if isEditing {
+            floatingWidgetOpacityDraft = floatingWidgetOpacityValue
+            return
+        }
+        commitFloatingWidgetOpacity()
+    }
+
+    private func commitFloatingWidgetOpacity() {
+        guard let draft = floatingWidgetOpacityDraft else { return }
+        settings.floatingWidgetOpacity = min(max(draft, 0.4), 1.0)
+        floatingWidgetOpacityDraft = nil
+        if saveModelContext("위젯 투명도를 저장할 수 없습니다.") {
+            notifyAppSettingsChanged()
+        }
     }
 
     private func setLaunchAtLogin(_ isEnabled: Bool) {

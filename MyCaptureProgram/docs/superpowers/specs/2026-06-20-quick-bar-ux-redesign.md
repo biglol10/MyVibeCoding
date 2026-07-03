@@ -2,6 +2,10 @@
 
 Date: 2026-06-20
 
+## Status
+
+Implemented and superseded by the current app. This document remains as design rationale for the quick-bar direction. For the current feature list, install flow, packaging flow, and permission notes, use `README.md` and the source code as the source of truth.
+
 ## Goal
 
 Redesign Capture Studio so the most common actions, screenshot capture and screen recording, are immediately obvious and usable from the first screen. The app should keep the professional depth already implemented, including settings, annotation, OCR, redaction, shortcuts, and save behavior, but those secondary features should appear only when they are relevant.
@@ -159,7 +163,7 @@ Recording post-capture actions:
 - Reveal
 - Play
 - Copy path or file reference where supported
-- Trim later, when recording trim is implemented
+- Trim copy and GIF export where the current implementation supports them
 
 Image-only annotation tools must not appear for recording documents.
 

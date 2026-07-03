@@ -1,5 +1,9 @@
 # MyMacClean Fancy Icon Implementation Plan
 
+Status: historical implementation plan. Current behavior is summarized in
+`../../../README.md` and
+`../specs/2026-07-03-mymacclean-personal-cleaner-design.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the default MyMacClean app icon with the approved Dark Utility Mark icon and wire it into the built `.app`.
