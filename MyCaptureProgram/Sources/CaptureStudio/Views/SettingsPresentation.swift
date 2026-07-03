@@ -192,7 +192,8 @@ public enum CaptureStudioGuidePresentation {
             items: [
                 "Capture lets you drag a rectangle and save only that selected area.",
                 "The app hides itself while you select, so it does not cover the target.",
-                "Screenshots can auto-save, stay unsaved until Save, and copy to clipboard."
+                "Screenshots can auto-save, stay unsaved until Save, and copy to clipboard.",
+                "History keeps recent captures searchable, and Pin floats a screenshot above other windows."
             ]
         ),
         Section(
@@ -202,7 +203,8 @@ public enum CaptureStudioGuidePresentation {
             items: [
                 "Record lets you drag a rectangle and create an MP4 of that area.",
                 "Countdown controls the wait before recording starts; duration controls how long it records.",
-                "After recording, the preview area plays the saved video."
+                "After recording, the preview area plays the saved video.",
+                "Use Trim Copy or GIF export when you only need the useful part of a recording."
             ]
         ),
         Section(
@@ -211,6 +213,7 @@ public enum CaptureStudioGuidePresentation {
             systemImage: "slider.horizontal.3",
             items: [
                 "Options is for quick timing changes without opening the full settings window.",
+                "Presets apply saved combinations for capture mode, area, timing, output, and quality.",
                 "The status text shows where files will save and which timing values are active."
             ]
         ),
@@ -230,7 +233,7 @@ public enum CaptureStudioGuidePresentation {
             title: "Settings",
             systemImage: "gearshape",
             items: [
-                "Output controls folders, auto-save, and Finder reveal behavior.",
+                "Output controls folders, auto-save, Finder reveal behavior, and smart filenames.",
                 "Capture controls screenshot delay and clipboard behavior.",
                 "Record controls audio, cursor visibility, countdown, duration, and quality.",
                 "Shortcuts lets you customize hotkeys and reset them to defaults."

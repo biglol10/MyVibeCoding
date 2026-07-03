@@ -55,6 +55,7 @@ struct SettingsView: View {
                 Toggle("Automatically save screenshots", isOn: binding(\.automaticallySaveScreenshots))
                 Toggle("Automatically save recordings", isOn: binding(\.automaticallySaveRecordings))
                 Toggle("Show in Finder after save", isOn: binding(\.showInFinderAfterSave))
+                Toggle("Use app and window names in filenames", isOn: binding(\.smartFilenamesEnabled))
             }
 
             settingsSection("Folders") {
@@ -79,6 +80,7 @@ struct SettingsView: View {
                         settings.screenshotFolderPath = defaults.screenshotFolderPath
                         settings.recordingFolderPath = defaults.recordingFolderPath
                         settings.showInFinderAfterSave = defaults.showInFinderAfterSave
+                        settings.smartFilenamesEnabled = defaults.smartFilenamesEnabled
                     }
                 }
             }

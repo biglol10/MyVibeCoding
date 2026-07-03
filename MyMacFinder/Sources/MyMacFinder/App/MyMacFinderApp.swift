@@ -253,65 +253,26 @@ struct MyMacFinderApp: App {
                     Label("General", systemImage: "slider.horizontal.3")
                 }
 
-                Form {
-                    Section("Privacy & Access") {
-                        LabeledContent("Sandbox") {
-                            Text(explorerStore.sandboxPolicy.statusTitle)
+                PrivacyAccessSettingsView(
+                    sandboxPolicy: explorerStore.sandboxPolicy,
+                    grantedFolderSummaries: explorerStore.grantedFolderSummaries,
+                    onChooseFolder: {
+                        Task {
+                            await explorerStore.chooseFolderForAccess()
                         }
-                        Text(explorerStore.sandboxPolicy.detail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        HStack {
-                            Button {
-                                Task {
-                                    await explorerStore.chooseFolderForAccess()
-                                }
-                            } label: {
-                                Label("Choose Folder...", systemImage: "folder.badge.plus")
-                            }
-
-                            Button {
-                                openPrivacySettings()
-                            } label: {
-                                Label("Privacy Settings", systemImage: "lock.shield")
-                            }
+                    },
+                    onOpenPrivacySettings: openPrivacySettings,
+                    onRemoveGrant: { id in
+                        Task {
+                            await explorerStore.removeGrantedFolder(id: id)
                         }
-
-                        if explorerStore.grantedFolderSummaries.isEmpty {
-                            Text("No folders selected")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ForEach(explorerStore.grantedFolderSummaries) { grant in
-                                HStack(spacing: 10) {
-                                    Image(systemName: "folder")
-                                        .foregroundStyle(.secondary)
-                                    Text(grant.displayPath)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                    Spacer()
-                                    Button(role: .destructive) {
-                                        Task {
-                                            await explorerStore.removeGrantedFolder(id: grant.id)
-                                        }
-                                    } label: {
-                                        Image(systemName: "minus.circle")
-                                    }
-                                    .buttonStyle(.borderless)
-                                    .help("Remove")
-                                }
-                            }
-
-                            Button("Reset Folder Access", role: .destructive) {
-                                Task {
-                                    await explorerStore.resetGrantedFolders()
-                                }
-                            }
+                    },
+                    onResetGrants: {
+                        Task {
+                            await explorerStore.resetGrantedFolders()
                         }
                     }
-                }
-                .padding(.top, 8)
+                )
                 .tabItem {
                     Label("Privacy & Access", systemImage: "lock.shield")
                 }

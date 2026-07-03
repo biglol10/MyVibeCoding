@@ -23,6 +23,68 @@ final class FileOutputServiceTests: XCTestCase {
         XCTAssertTrue(filename.hasSuffix(".mp4"))
     }
 
+    func testSmartScreenshotFilenameUsesAppAndWindowContextWhenEnabled() {
+        let service = FileOutputService()
+        var settings = AppSettings.defaults
+        settings.smartFilenamesEnabled = true
+        let context = FileNamingContext(
+            applicationName: "Google Chrome",
+            windowTitle: "Naver News / Economy: Market <Live>"
+        )
+
+        let filename = service.screenshotFilename(
+            for: Date(timeIntervalSince1970: 1_782_000_000),
+            settings: settings,
+            context: context
+        )
+
+        XCTAssertTrue(filename.contains("Google Chrome"))
+        XCTAssertTrue(filename.contains("Naver News Economy Market Live"))
+        XCTAssertFalse(filename.contains("/"))
+        XCTAssertFalse(filename.contains(":"))
+        XCTAssertFalse(filename.contains("<"))
+        XCTAssertTrue(filename.hasSuffix(".png"))
+    }
+
+    func testSmartFilenameSettingCanFallbackToClassicNames() {
+        let service = FileOutputService()
+        var settings = AppSettings.defaults
+        settings.smartFilenamesEnabled = false
+        let context = FileNamingContext(applicationName: "Chrome", windowTitle: "Ignored")
+
+        let filename = service.screenshotFilename(
+            for: Date(timeIntervalSince1970: 1_782_000_000),
+            settings: settings,
+            context: context
+        )
+
+        XCTAssertTrue(filename.hasPrefix("Screenshot "))
+        XCTAssertFalse(filename.contains("Chrome"))
+    }
+
+    func testTrimmedRecordingAndGIFURLsUseExpectedExtensions() {
+        let service = FileOutputService()
+        var settings = AppSettings.defaults
+        settings.smartFilenamesEnabled = true
+        let context = FileNamingContext(applicationName: "Codex", windowTitle: "Bug Report")
+
+        let trimmed = service.trimmedRecordingURL(
+            settings: settings,
+            date: Date(timeIntervalSince1970: 1_782_000_000),
+            context: context
+        )
+        let gif = service.gifRecordingURL(
+            settings: settings,
+            date: Date(timeIntervalSince1970: 1_782_000_000),
+            context: context
+        )
+
+        XCTAssertEqual(trimmed.pathExtension, "mp4")
+        XCTAssertEqual(gif.pathExtension, "gif")
+        XCTAssertTrue(trimmed.lastPathComponent.contains("Trimmed"))
+        XCTAssertTrue(gif.lastPathComponent.contains("GIF"))
+    }
+
     func testExistingDirectoryIsUsed() throws {
         let temporaryDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

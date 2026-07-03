@@ -7,16 +7,23 @@ struct CaptureStudioApp: App {
     @StateObject private var shortcutManager = ShortcutManager()
     @StateObject private var globalShortcutController = GlobalShortcutController()
     @StateObject private var captureCoordinator: CaptureCoordinator
+    @StateObject private var historyStore: CaptureHistoryStore
+    @StateObject private var presetStore: CapturePresetStore
 
     init() {
         let appState = AppState()
         let settingsStore = SettingsStore()
+        let historyStore = CaptureHistoryStore()
+        let presetStore = CapturePresetStore()
         _appState = StateObject(wrappedValue: appState)
         _settingsStore = StateObject(wrappedValue: settingsStore)
+        _historyStore = StateObject(wrappedValue: historyStore)
+        _presetStore = StateObject(wrappedValue: presetStore)
         _captureCoordinator = StateObject(
             wrappedValue: CaptureCoordinator(
                 appState: appState,
-                settingsStore: settingsStore
+                settingsStore: settingsStore,
+                historyStore: historyStore
             )
         )
     }
@@ -31,6 +38,8 @@ struct CaptureStudioApp: App {
                 .environmentObject(appState)
                 .environmentObject(settingsStore)
                 .environmentObject(shortcutManager)
+                .environmentObject(historyStore)
+                .environmentObject(presetStore)
                 .onAppear {
                     globalShortcutController.configure(shortcutManager: shortcutManager, actionHandler: handleShortcutAction)
                 }

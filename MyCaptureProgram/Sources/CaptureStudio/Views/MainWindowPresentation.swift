@@ -1,7 +1,8 @@
 import Foundation
 
 public enum MainWindowPresentation {
-    public static let mainWindowMinimumWidth: Double = 710
+    public static let mainWindowMinimumWidth: Double = 780
+    public static let historySearchPlaceholder = "Search history"
 
     public struct QuickOptionsControl: Equatable, Sendable {
         public let title: String

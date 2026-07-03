@@ -2098,17 +2098,33 @@ public final class ExplorerStore: ObservableObject {
             return
         }
 
-        let currentTags = (try? finderTagService.tags(for: entry.url)) ?? entry.finderTags
+        let currentTags = await finderTags(for: entry)
         guard let tags = finderTagPrompt(entry.replacingFinderTags(currentTags)) else {
             return
         }
 
         cancelFinderTagPopulation()
-        try finderTagService.setTags(tags, for: entry.url)
+        try await setFinderTags(tags, for: entry.url)
         await refresh()
         updateFinderTags(tags, for: entry.url)
         updateSelection([entry.url.standardizedFileURL])
         trimSelectionToVisibleEntries()
+    }
+
+    private func finderTags(for entry: FileEntry) async -> [FinderTag] {
+        let service = finderTagService
+        let url = entry.url
+        let fallback = entry.finderTags
+        return await Task.detached(priority: .utility) {
+            (try? service.tags(for: url)) ?? fallback
+        }.value
+    }
+
+    private func setFinderTags(_ tags: [FinderTag], for url: URL) async throws {
+        let service = finderTagService
+        try await Task.detached(priority: .utility) {
+            try service.setTags(tags, for: url)
+        }.value
     }
 
     private func updateFinderTags(_ tags: [FinderTag], for url: URL) {

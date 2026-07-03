@@ -54,6 +54,11 @@ final class MainWindowPresentationTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(control.minimumWidth, 128)
     }
 
+    func testHistorySearchPlaceholderIsShortEnoughForCompactToolbar() {
+        XCTAssertEqual(MainWindowPresentation.historySearchPlaceholder, "Search history")
+        XCTAssertLessThanOrEqual(MainWindowPresentation.historySearchPlaceholder.count, 16)
+    }
+
     func testMainWindowMinimumWidthFitsQuickBarControls() {
         let estimatedQuickBarWidth =
             104.0 + // Capture

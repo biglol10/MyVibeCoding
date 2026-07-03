@@ -34,6 +34,16 @@ final class SettingsPresentationTests: XCTestCase {
         XCTAssertFalse(editorItems.contains { $0.localizedCaseInsensitiveContains("blur") })
     }
 
+    func testGuideSectionsMentionPersonalWorkflowFeatures() {
+        let allItems = CaptureStudioGuidePresentation.sections.flatMap(\.items).joined(separator: " ")
+
+        XCTAssertTrue(allItems.contains("History"))
+        XCTAssertTrue(allItems.contains("Pin"))
+        XCTAssertTrue(allItems.contains("GIF"))
+        XCTAssertTrue(allItems.contains("Presets"))
+        XCTAssertTrue(allItems.contains("smart filenames"))
+    }
+
     func testGuideLaunchPolicyShowsUntilUserHasSeenGuide() {
         XCTAssertTrue(CaptureStudioGuidePresentation.shouldPresentOnLaunch(hasSeenGuide: false))
         XCTAssertFalse(CaptureStudioGuidePresentation.shouldPresentOnLaunch(hasSeenGuide: true))

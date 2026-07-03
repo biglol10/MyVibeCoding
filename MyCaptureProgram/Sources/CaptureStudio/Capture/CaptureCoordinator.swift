@@ -18,6 +18,10 @@ public final class CaptureCoordinator: ObservableObject {
     private let ocrService: OCRServicing
     private let redactionDetector: RedactionDetector
     private let screenCapturePermissionChecker: ScreenCapturePermissionChecking
+    private let historyStore: CaptureHistoryStore?
+    private let metadataService: CaptureMetadataServicing
+    private let floatingPinService: FloatingPinServicing
+    private let recordingExportService: RecordingExportServicing
 
     public init(
         appState: AppState,
@@ -34,7 +38,11 @@ public final class CaptureCoordinator: ObservableObject {
         fileRevealService: FileRevealServicing = WorkspaceFileRevealService(),
         fileTrashService: FileTrashServicing = WorkspaceFileTrashService(),
         windowVisibilityController: CaptureWindowVisibilityControlling = AppKitCaptureWindowVisibilityController(),
-        screenCapturePermissionChecker: ScreenCapturePermissionChecking = CoreGraphicsScreenCapturePermissionChecker()
+        screenCapturePermissionChecker: ScreenCapturePermissionChecking = CoreGraphicsScreenCapturePermissionChecker(),
+        historyStore: CaptureHistoryStore? = nil,
+        metadataService: CaptureMetadataServicing = CoreGraphicsCaptureMetadataService(),
+        floatingPinService: FloatingPinServicing = AppKitFloatingPinService(),
+        recordingExportService: RecordingExportServicing = AVFoundationRecordingExportService()
     ) {
         self.appState = appState
         self.settingsStore = settingsStore
@@ -51,6 +59,10 @@ public final class CaptureCoordinator: ObservableObject {
         self.fileTrashService = fileTrashService
         self.windowVisibilityController = windowVisibilityController
         self.screenCapturePermissionChecker = screenCapturePermissionChecker
+        self.historyStore = historyStore
+        self.metadataService = metadataService
+        self.floatingPinService = floatingPinService
+        self.recordingExportService = recordingExportService
     }
 
     public func startNewCapture() async {
@@ -70,28 +82,34 @@ public final class CaptureCoordinator: ObservableObject {
             defer { restoreCaptureWindowsIfNeeded(didHideCaptureWindows) }
             try await waitIfNeeded(seconds: settings.defaultDelaySeconds)
             let selection = try await selectCaptureArea()
+            let namingContext = metadataService.namingContext(for: selection)
             let result = try await screenshotService.captureImage(selection: selection)
             copyToClipboardIfNeeded(result.pngData, settings: settings)
             if settings.automaticallySaveScreenshots {
                 let fileURL = try fileOutputService.writeScreenshotData(
                     result.pngData,
                     settings: settings,
-                    date: result.createdAt
+                    date: result.createdAt,
+                    context: namingContext
                 )
                 revealIfNeeded(fileURL, settings: settings)
-                appState.currentDocument = EditorDocument(
+                let document = EditorDocument(
                     kind: .screenshot,
                     createdAt: result.createdAt,
                     fileURL: fileURL,
                     data: result.pngData,
+                    namingContext: namingContext,
                     isDirty: false
                 )
+                appState.currentDocument = document
+                addHistoryItem(for: document)
                 appState.statusMessage = "Screenshot captured."
             } else {
                 appState.currentDocument = EditorDocument(
                     kind: .screenshot,
                     createdAt: result.createdAt,
-                    data: result.pngData
+                    data: result.pngData,
+                    namingContext: namingContext
                 )
                 appState.statusMessage = "Screenshot captured. Press Save to write the file."
             }
@@ -112,20 +130,24 @@ public final class CaptureCoordinator: ObservableObject {
             let didHideCaptureWindows = hideCaptureWindowsIfNeeded(settings: settings)
             defer { restoreCaptureWindowsIfNeeded(didHideCaptureWindows) }
             let selection = try await selectCaptureArea()
+            let namingContext = metadataService.namingContext(for: selection)
             try await waitIfNeeded(seconds: settings.countdownSeconds)
             let outputURL = settings.automaticallySaveRecordings
-                ? fileOutputService.availableRecordingURL(settings: settings)
+                ? fileOutputService.availableRecordingURL(settings: settings, context: namingContext)
                 : fileOutputService.temporaryRecordingURL()
             appState.isRecordingInProgress = true
             defer { appState.isRecordingInProgress = false }
             let result = try await recordingService.recordScreen(selection: selection, to: outputURL, settings: settings)
-            appState.currentDocument = EditorDocument(
+            let document = EditorDocument(
                 kind: .recording,
                 createdAt: result.createdAt,
                 fileURL: result.fileURL,
+                namingContext: namingContext,
                 isDirty: !settings.automaticallySaveRecordings
             )
+            appState.currentDocument = document
             if settings.automaticallySaveRecordings {
+                addHistoryItem(for: document)
                 revealIfNeeded(result.fileURL, settings: settings)
                 appState.statusMessage = "Recording saved."
             } else {
@@ -166,7 +188,8 @@ public final class CaptureCoordinator: ObservableObject {
                 let fileURL = try fileOutputService.writeScreenshotData(
                     outputData,
                     settings: settingsStore.settings,
-                    date: document.createdAt
+                    date: document.createdAt,
+                    context: document.namingContext
                 )
                 revealIfNeeded(fileURL, settings: settingsStore.settings)
                 document.data = outputData
@@ -175,6 +198,7 @@ public final class CaptureCoordinator: ObservableObject {
                 document.savedSnapshot = document.currentSnapshot
                 document.isDirty = false
                 appState.currentDocument = document
+                addHistoryItem(for: document)
                 appState.statusMessage = "Screenshot saved."
             } catch let error as ImageRenderError {
                 appState.statusMessage = "Image render failed: \(error.localizedDescription)"
@@ -197,12 +221,14 @@ public final class CaptureCoordinator: ObservableObject {
                 let fileURL = try fileOutputService.moveRecordingFile(
                     from: sourceURL,
                     settings: settings,
-                    date: document.createdAt
+                    date: document.createdAt,
+                    context: document.namingContext
                 )
                 revealIfNeeded(fileURL, settings: settings)
                 document.fileURL = fileURL
                 document.isDirty = false
                 appState.currentDocument = document
+                addHistoryItem(for: document)
                 appState.statusMessage = "Recording saved."
             } catch {
                 appState.statusMessage = "Save failed: \(error.localizedDescription)"
@@ -257,10 +283,145 @@ public final class CaptureCoordinator: ObservableObject {
 
         do {
             try fileTrashService.trash(fileURL)
+            historyStore?.remove(fileURL: fileURL)
             appState.currentDocument = nil
             appState.statusMessage = deletedMessage
         } catch {
             appState.statusMessage = "Delete failed: \(error.localizedDescription)"
+        }
+    }
+
+    public func openHistoryItem(_ item: CaptureHistoryItem) {
+        guard FileManager.default.fileExists(atPath: item.fileURL.path) else {
+            historyStore?.remove(id: item.id)
+            appState.statusMessage = "History file is missing."
+            return
+        }
+
+        switch item.kind {
+        case .screenshot:
+            do {
+                let data = try Data(contentsOf: item.fileURL)
+                appState.currentDocument = EditorDocument(
+                    kind: .screenshot,
+                    createdAt: item.createdAt,
+                    fileURL: item.fileURL,
+                    data: data,
+                    namingContext: FileNamingContext(
+                        applicationName: item.sourceApplication ?? item.detail,
+                        windowTitle: item.windowTitle
+                    ),
+                    isDirty: false
+                )
+                appState.statusMessage = "History item opened."
+            } catch {
+                appState.statusMessage = "History item could not be opened."
+            }
+        case .recording:
+            appState.currentDocument = EditorDocument(
+                kind: .recording,
+                createdAt: item.createdAt,
+                fileURL: item.fileURL,
+                namingContext: FileNamingContext(
+                    applicationName: item.sourceApplication ?? item.detail,
+                    windowTitle: item.windowTitle
+                ),
+                isDirty: false
+            )
+            appState.statusMessage = "History item opened."
+        }
+    }
+
+    public func deleteHistoryItem(_ item: CaptureHistoryItem) {
+        do {
+            if FileManager.default.fileExists(atPath: item.fileURL.path) {
+                try fileTrashService.trash(item.fileURL)
+            }
+            historyStore?.remove(id: item.id)
+            if appState.currentDocument?.fileURL?.standardizedFileURL == item.fileURL.standardizedFileURL {
+                appState.currentDocument = nil
+            }
+            appState.statusMessage = item.kind == .recording ? "Recording deleted." : "Screenshot deleted."
+        } catch {
+            appState.statusMessage = "Delete failed: \(error.localizedDescription)"
+        }
+    }
+
+    public func pinCurrentScreenshot() async {
+        guard let document = appState.currentDocument, document.kind == .screenshot else {
+            appState.statusMessage = "No screenshot to pin."
+            return
+        }
+
+        do {
+            let data = try await screenshotDataForOutput(document)
+            let title = document.fileURL?.lastPathComponent ?? "Screenshot"
+            try floatingPinService.pinImage(data: data, title: title)
+            appState.statusMessage = "Screenshot pinned."
+        } catch {
+            appState.statusMessage = "Pin failed: \(error.localizedDescription)"
+        }
+    }
+
+    public func trimCurrentRecording(startSeconds: Double, endSeconds: Double) async {
+        guard var document = appState.currentDocument, document.kind == .recording else {
+            appState.statusMessage = "No recording to trim."
+            return
+        }
+        guard let sourceURL = document.fileURL else {
+            appState.statusMessage = "No recording file to trim."
+            return
+        }
+
+        do {
+            let outputURL = fileOutputService.trimmedRecordingURL(
+                settings: settingsStore.settings,
+                date: Date(),
+                context: document.namingContext
+            )
+            let trimmedURL = try await recordingExportService.trimRecording(
+                sourceURL: sourceURL,
+                startSeconds: startSeconds,
+                endSeconds: endSeconds,
+                outputURL: outputURL
+            )
+            document.fileURL = trimmedURL
+            document.createdAt = Date()
+            document.isDirty = false
+            appState.currentDocument = document
+            addHistoryItem(for: document)
+            revealIfNeeded(trimmedURL, settings: settingsStore.settings)
+            appState.statusMessage = "Recording trimmed."
+        } catch {
+            appState.statusMessage = "Trim failed: \(error.localizedDescription)"
+        }
+    }
+
+    public func exportCurrentRecordingAsGIF() async {
+        guard let document = appState.currentDocument, document.kind == .recording else {
+            appState.statusMessage = "No recording to export."
+            return
+        }
+        guard let sourceURL = document.fileURL else {
+            appState.statusMessage = "No recording file to export."
+            return
+        }
+
+        do {
+            let outputURL = fileOutputService.gifRecordingURL(
+                settings: settingsStore.settings,
+                date: Date(),
+                context: document.namingContext
+            )
+            let gifURL = try await recordingExportService.exportGIF(
+                sourceURL: sourceURL,
+                outputURL: outputURL,
+                maxDurationSeconds: Double(settingsStore.settings.recordingDurationSeconds)
+            )
+            fileRevealService.reveal(gifURL)
+            appState.statusMessage = "GIF exported."
+        } catch {
+            appState.statusMessage = "GIF export failed: \(error.localizedDescription)"
         }
     }
 
@@ -387,6 +548,30 @@ public final class CaptureCoordinator: ObservableObject {
         }
 
         fileRevealService.reveal(url)
+    }
+
+    private func addHistoryItem(for document: EditorDocument) {
+        guard let fileURL = document.fileURL else {
+            return
+        }
+
+        let context = document.namingContext
+        let title = context?.displayTitle.isEmpty == false
+            ? context?.displayTitle ?? fileURL.lastPathComponent
+            : fileURL.lastPathComponent
+        let detail = document.kind == .recording ? "Recording" : "Screenshot"
+        historyStore?.add(
+            CaptureHistoryItem(
+                kind: document.kind,
+                createdAt: document.createdAt,
+                fileURL: fileURL,
+                title: title,
+                detail: detail,
+                thumbnailData: document.kind == .screenshot ? document.currentImageData : nil,
+                sourceApplication: context?.applicationName,
+                windowTitle: context?.windowTitle
+            )
+        )
     }
 
     private func waitIfNeeded(seconds: Int) async throws {

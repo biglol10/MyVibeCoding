@@ -1,7 +1,7 @@
 import Foundation
 
 public struct EditorDocument: Equatable, Identifiable {
-    public enum Kind: Equatable {
+    public enum Kind: String, Codable, Equatable, Sendable {
         case screenshot
         case recording
     }
@@ -16,6 +16,7 @@ public struct EditorDocument: Equatable, Identifiable {
     public var layers: [EditorLayer]
     public var selectedLayerID: UUID?
     public var ocrResult: OCRResult?
+    public var namingContext: FileNamingContext?
     public var undoStack: [EditorSnapshot]
     public var redoStack: [EditorSnapshot]
     public var savedSnapshot: EditorSnapshot?
@@ -32,6 +33,7 @@ public struct EditorDocument: Equatable, Identifiable {
         layers: [EditorLayer] = [],
         selectedLayerID: UUID? = nil,
         ocrResult: OCRResult? = nil,
+        namingContext: FileNamingContext? = nil,
         undoStack: [EditorSnapshot] = [],
         redoStack: [EditorSnapshot] = [],
         savedSnapshot: EditorSnapshot? = nil,
@@ -47,6 +49,7 @@ public struct EditorDocument: Equatable, Identifiable {
         self.layers = layers
         self.selectedLayerID = selectedLayerID
         self.ocrResult = ocrResult
+        self.namingContext = namingContext
         self.undoStack = undoStack
         self.redoStack = redoStack
         self.savedSnapshot = savedSnapshot ?? Self.defaultSavedSnapshot(

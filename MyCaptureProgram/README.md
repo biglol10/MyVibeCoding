@@ -106,9 +106,11 @@ This milestone includes:
 - Persistent settings
 - Customizable shortcut model with reset defaults
 - Output filename and folder fallback model
+- Smart file naming with optional app/window context
+- Capture history and reusable capture presets
 - Capture coordinator interfaces
 - Rectangle, window, and full-screen selection modes
 - Screenshot capture and screen recording with off-main-thread sample handling
-- Screenshot editing, OCR, and quick redaction
+- Screenshot editing, OCR, quick redaction, floating pins, recording trim, and GIF export
 
-Color picker and recording trim are separate implementation milestones.
+Color picker is a separate implementation milestone.

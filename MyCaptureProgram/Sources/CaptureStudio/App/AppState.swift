@@ -9,6 +9,8 @@ public final class AppState: ObservableObject {
     @Published public var statusMessage: String?
     @Published public var isGuidePresented: Bool
     @Published public var isRecordingInProgress: Bool
+    @Published public var isHistoryPresented: Bool
+    @Published public var historySearchText: String
 
     public init(
         captureMode: CaptureMode = .screenshot,
@@ -16,7 +18,9 @@ public final class AppState: ObservableObject {
         currentDocument: EditorDocument? = nil,
         statusMessage: String? = nil,
         isGuidePresented: Bool = false,
-        isRecordingInProgress: Bool = false
+        isRecordingInProgress: Bool = false,
+        isHistoryPresented: Bool = false,
+        historySearchText: String = ""
     ) {
         self.captureMode = captureMode
         self.areaType = areaType
@@ -24,5 +28,7 @@ public final class AppState: ObservableObject {
         self.statusMessage = statusMessage
         self.isGuidePresented = isGuidePresented
         self.isRecordingInProgress = isRecordingInProgress
+        self.isHistoryPresented = isHistoryPresented
+        self.historySearchText = historySearchText
     }
 }

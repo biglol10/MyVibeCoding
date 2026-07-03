@@ -1,6 +1,6 @@
 import Foundation
 
-public enum CaptureMode: String, CaseIterable, Codable, Identifiable {
+public enum CaptureMode: String, CaseIterable, Codable, Identifiable, Sendable {
     case screenshot
     case record
 

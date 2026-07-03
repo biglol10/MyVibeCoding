@@ -4,6 +4,8 @@ import SwiftUI
 
 struct MainWindowView: View {
     @EnvironmentObject private var settingsStore: SettingsStore
+    @EnvironmentObject private var historyStore: CaptureHistoryStore
+    @EnvironmentObject private var presetStore: CapturePresetStore
     @Environment(\.openSettings) private var openSettings
     @ObservedObject private var appState: AppState
     @ObservedObject var captureCoordinator: CaptureCoordinator
@@ -11,6 +13,8 @@ struct MainWindowView: View {
     @AppStorage("CaptureStudio.HasSeenGuide.v1") private var hasSeenGuide = false
     @State private var didEvaluateGuideOnAppear = false
     @State private var guideDontShowAgain = true
+    @State private var trimStartText = "0"
+    @State private var trimEndText = ""
 
     init(captureCoordinator: CaptureCoordinator, appState: AppState) {
         self.captureCoordinator = captureCoordinator
@@ -22,6 +26,11 @@ struct MainWindowView: View {
         VStack(spacing: 0) {
             quickBar
 
+            if appState.isHistoryPresented {
+                Divider()
+                historyPanel
+            }
+
             if let document = appState.currentDocument {
                 Divider()
                 recentResultRow(for: document)
@@ -30,6 +39,11 @@ struct MainWindowView: View {
             if appState.currentDocument != nil {
                 Divider()
                 previewArea
+            }
+
+            if appState.currentDocument?.kind == .recording {
+                Divider()
+                recordingTools
             }
 
             if appState.currentDocument?.kind == .screenshot,
@@ -124,6 +138,17 @@ struct MainWindowView: View {
             .controlSize(.large)
             .help("CaptureStudio Guide")
 
+            Button {
+                appState.isHistoryPresented.toggle()
+            } label: {
+                Image(systemName: "clock.arrow.circlepath")
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .disabled(appState.isRecordingInProgress)
+            .help("Capture history")
+
             Spacer(minLength: 12)
 
             VStack(alignment: .trailing, spacing: 2) {
@@ -166,6 +191,33 @@ struct MainWindowView: View {
         let control = MainWindowPresentation.quickOptionsControl
 
         return Menu {
+            Section("Presets") {
+                ForEach(presetStore.allPresets) { preset in
+                    Button {
+                        presetStore.apply(preset, to: appState, settingsStore: settingsStore)
+                    } label: {
+                        quickOptionLabel(
+                            title: preset.name,
+                            isSelected: appState.captureMode == preset.captureMode && appState.areaType == preset.areaType
+                        )
+                    }
+                }
+
+                Button("Save Current Settings as Preset") {
+                    let nextIndex = presetStore.userPresets.count + 1
+                    presetStore.save(
+                        CapturePreset(
+                            name: "Personal \(nextIndex)",
+                            captureMode: appState.captureMode,
+                            areaType: appState.areaType,
+                            settings: settingsStore.settings
+                        )
+                    )
+                }
+            }
+
+            Divider()
+
             Section("Capture Area") {
                 ForEach(CaptureAreaType.allCases) { areaType in
                     Button {
@@ -262,7 +314,16 @@ struct MainWindowView: View {
 
             Spacer()
 
-            if result.canCopy && document.kind != .screenshot {
+            if document.kind == .screenshot {
+                Button {
+                    Task { await captureCoordinator.pinCurrentScreenshot() }
+                } label: {
+                    Image(systemName: "pin")
+                }
+                .help("Pin above other windows")
+            }
+
+            if result.canCopy {
                 Button {
                     Task { await captureCoordinator.copyCurrentDocument() }
                 } label: {
@@ -280,7 +341,7 @@ struct MainWindowView: View {
                 .help("Reveal in Finder")
             }
 
-            if result.canSave && document.kind != .screenshot {
+            if result.canSave {
                 if result.requiresSave {
                     Button {
                         Task { await captureCoordinator.saveCurrentDocument() }
@@ -310,6 +371,82 @@ struct MainWindowView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+    }
+
+    private var historyPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Label("History", systemImage: "clock.arrow.circlepath")
+                    .font(.headline)
+                TextField(MainWindowPresentation.historySearchPlaceholder, text: $appState.historySearchText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 240)
+                Spacer()
+                Button {
+                    appState.isHistoryPresented = false
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.borderless)
+                .help("Close history")
+            }
+
+            let filteredItems = historyStore.items(matching: appState.historySearchText)
+            if filteredItems.isEmpty {
+                Text("No captures yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 58, alignment: .center)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(filteredItems) { item in
+                            historyItemButton(item)
+                        }
+                    }
+                    .padding(.bottom, 2)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func historyItemButton(_ item: CaptureHistoryItem) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Image(systemName: item.kind == .recording ? "record.circle" : "photo")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(item.kind == .recording ? .red : .blue)
+            Text(item.title)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Text(item.fileURL.lastPathComponent)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            HStack(spacing: 8) {
+                Button {
+                    captureCoordinator.openHistoryItem(item)
+                } label: {
+                    Image(systemName: "arrow.up.forward.app")
+                }
+                .buttonStyle(.borderless)
+                .help("Open")
+
+                Button {
+                    captureCoordinator.deleteHistoryItem(item)
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help("Delete")
+            }
+        }
+        .padding(10)
+        .frame(width: 170, alignment: .leading)
+        .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     @ViewBuilder
@@ -370,6 +507,45 @@ struct MainWindowView: View {
         return AnyView(
             recordingFallbackPreview(title: preview.title, detail: preview.detail)
         )
+    }
+
+    private var recordingTools: some View {
+        HStack(spacing: 10) {
+            Label("Trim", systemImage: "timeline.selection")
+                .font(.subheadline.weight(.semibold))
+            TextField("Start", text: $trimStartText)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 72)
+                .multilineTextAlignment(.trailing)
+            TextField("End", text: $trimEndText)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 72)
+                .multilineTextAlignment(.trailing)
+            Button {
+                Task {
+                    await captureCoordinator.trimCurrentRecording(
+                        startSeconds: Double(trimStartText) ?? 0,
+                        endSeconds: Double(trimEndText) ?? Double(settingsStore.settings.recordingDurationSeconds)
+                    )
+                }
+            } label: {
+                Label("Trim Copy", systemImage: "scissors")
+            }
+            .disabled(appState.isRecordingInProgress)
+
+            Divider()
+
+            Button {
+                Task { await captureCoordinator.exportCurrentRecordingAsGIF() }
+            } label: {
+                Label("GIF", systemImage: "square.stack.3d.forward.dottedline")
+            }
+            .disabled(appState.isRecordingInProgress)
+
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 
     private func recordingFallbackPreview(title: String, detail: String) -> some View {

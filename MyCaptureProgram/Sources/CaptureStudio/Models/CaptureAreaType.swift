@@ -1,6 +1,6 @@
 import Foundation
 
-public enum CaptureAreaType: String, CaseIterable, Codable, Identifiable {
+public enum CaptureAreaType: String, CaseIterable, Codable, Identifiable, Sendable {
     case rectangle
     case window
     case fullScreen
