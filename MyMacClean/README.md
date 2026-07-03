@@ -1,108 +1,192 @@
 # MyMacClean
 
-MyMacClean은 macOS 앱 삭제와 잔여 파일 정리를 돕는 SwiftUI 유틸리티입니다. 설치된 앱을 스캔하고, 관련 파일과 고아 파일을 확인한 뒤 사용자가 직접 검토하고 삭제할 수 있게 만드는 것을 목표로 합니다.
+MyMacClean is a personal macOS cleaner and uninstaller built as a native SwiftUI
+app. It is designed for review-first cleanup, not one-click system cleaning.
 
-## 다운로드
+The app focuses on five daily-use cleanup areas:
 
-- macOS 테스트 빌드 zip: [MyMacClean-test-build.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacClean/MyMacClean-test-build.zip)
+- Applications: uninstall apps and selected related files.
+- Orphan Files: find leftovers from apps that are no longer installed.
+- Large Files: review large user files before moving anything to Trash.
+- Developer Cache: clean regenerable developer caches after manual review.
+- Startup Items: audit LaunchAgents and LaunchDaemons, and safely disable user
+  LaunchAgents.
 
-현재 배포 파일은 개발/테스트용 빌드입니다. Apple Developer ID 서명과 공증이 없기 때문에, GitHub에서 다운로드한 zip을 바로 실행하면 macOS Gatekeeper가 "손상되었으므로 휴지통으로 이동" 경고를 표시할 수 있습니다. 시스템 파일 삭제와 관련된 기능은 반드시 목록을 검토한 뒤 사용하세요.
+## Download
 
-### 처음 실행 방법
+- macOS personal/test build zip: [MyMacClean-test-build.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacClean/MyMacClean-test-build.zip)
 
-방법 1: 동봉된 설치 헬퍼 사용 (권장)
+The zip is an ad-hoc signed personal build, not an Apple-notarized public
+release. After unzipping, use the included `Install MyMacClean.command` from
+Finder to remove quarantine, copy the app to `/Applications`, verify the local
+signature, and open the installed app.
 
-1. zip 압축을 풉니다.
-2. `MyMacClean` 폴더 안의 `Install MyMacClean.command`를 Finder에서 우클릭합니다.
-3. `열기`를 선택합니다.
-4. 헬퍼가 `MyMacClean.app`의 다운로드 격리 속성을 제거하고 `/Applications/MyMacClean.app`으로 설치한 뒤 앱을 실행합니다.
+## Safety Model
 
-설치하지 않고 압축을 푼 위치에서 바로 실행하려면 `Open MyMacClean.command`를 우클릭해서 열 수 있습니다.
+MyMacClean is intentionally conservative.
 
-방법 2: 터미널에서 격리 속성 직접 제거
+- Destructive actions require explicit selection.
+- Files are moved to Trash by default.
+- Permanent deletion is an explicit opt-in in the confirmation sheet.
+- Confirmation uses `DELETE`.
+- Protected paths are checked again at execution time.
+- User documents, Desktop, Downloads, iCloud document roots, media folders,
+  system paths, and the running MyMacClean app bundle are protected for
+  app-related cleanup.
+- Symlink targets are resolved before deletion decisions.
+- Cleanup receipts are recorded for destructive attempts.
+- Startup item management does not edit plist contents, does not call
+  `launchctl`, and does not modify system-wide LaunchAgents or LaunchDaemons.
+
+## Current Features
+
+### Applications
+
+- Discovers installed apps.
+- Filters and sorts app list.
+- Scans the selected app bundle and related Library files.
+- Shows match evidence and safety level for each candidate.
+- Blocks deletion of running apps and protected paths.
+- Moves selected items to Trash by default.
+- Supports permanent deletion and force-delete options only after explicit
+  confirmation.
+- Refreshes the app list and clears stale details after deletion.
+
+### Orphan Files
+
+- Scans known user Library cleanup roots.
+- Groups leftovers by inferred bundle identifier.
+- Excludes currently installed apps and the running MyMacClean bundle.
+- Requires manual selection before cleanup.
+- Records cleanup receipts.
+
+### Large Files
+
+- Finds large files for manual review.
+- Does not auto-select results.
+- Excludes system roots and common package internals.
+- Supports reveal/copy-path and selected-file cleanup.
+
+### Developer Cache
+
+- Detects common developer cache locations such as Xcode, SwiftPM, Node,
+  CocoaPods, Gradle, and related cache roots.
+- Calculates reclaimable size.
+- Separates safer caches from review-only targets.
+- Reuses the same deletion, verification, and receipt pipeline.
+
+### Startup Items
+
+- Scans:
+  - `~/Library/LaunchAgents`
+  - `/Library/LaunchAgents`
+  - `/Library/LaunchDaemons`
+- Parses common launchd plist fields such as `Label`, `Program`,
+  `ProgramArguments`, `RunAtLoad`, `KeepAlive`, `StartInterval`,
+  `StartCalendarInterval`, and `Disabled`.
+- Shows enabled/disabled state, owner evidence, read-only status, and missing
+  targets.
+- User LaunchAgents can be disabled by renaming:
+  - `name.plist` -> `name.plist.mymacclean-disabled`
+- Disabled user LaunchAgents can be enabled by renaming them back.
+- System-wide items are read-only.
+
+## Install on Another Mac
+
+This app is for personal use and is ad-hoc signed, not Apple-notarized. That
+means another Mac may show a Gatekeeper warning such as "damaged and can't be
+opened" or offer to move the app to Trash.
+
+Recommended personal install flow from this repository:
+
+1. Download `MyMacClean-test-build.zip` from the link above, or build it locally:
+
+   ```bash
+   ./scripts/build-app-bundle.sh
+   ```
+
+2. Unzip the package.
+
+3. Open `Install MyMacClean.command` from Finder. If macOS blocks the script,
+   right-click it and choose Open.
+
+4. The installer removes quarantine, copies the app to `/Applications`, verifies
+   the installed app, and opens it.
+
+5. Grant Full Disk Access:
+
+   ```text
+   System Settings -> Privacy & Security -> Full Disk Access -> add MyMacClean.app
+   ```
+
+Full Disk Access is important. Without it, scans can miss files or deletion can
+fail for paths under protected Library locations.
+
+## Build
+
+Build a local app bundle:
 
 ```bash
-xattr -dr com.apple.quarantine /path/to/MyMacClean.app
-open /path/to/MyMacClean.app
-```
-
-예를 들어 다운로드 폴더에서 압축을 풀었다면 다음처럼 실행할 수 있습니다.
-
-```bash
-xattr -dr com.apple.quarantine ~/Downloads/MyMacClean/MyMacClean.app
-open ~/Downloads/MyMacClean/MyMacClean.app
-```
-
-방법 3: 소스에서 직접 실행
-
-```bash
-git clone https://github.com/biglol10/MyVibeCoding.git
-cd MyVibeCoding/MyMacClean
-swift run MyMacCleanApp
-```
-
-## 환경
-
-- macOS 14 이상
-- Xcode Command Line Tools
-- Swift 6 이상
-- 앱 관련 파일, 캐시, 로그 일부를 읽으려면 Full Disk Access 권한이 필요할 수 있음
-
-## 주요 기능
-
-- `/Applications` 기준 설치 앱 목록 스캔
-- 앱 이름, 번들 ID, 실행 파일명을 이용한 관련 파일 후보 탐색
-- 앱 삭제 전 관련 파일 후보와 크기 표시
-- 삭제 영수증 저장 및 Delete History 조회
-- 이미 삭제된 앱의 잔여 파일을 찾는 Orphan Files 스캔
-- 기본 삭제는 휴지통으로 이동하며, 사용자가 명시적으로 선택한 경우에만 영구 삭제
-- 잠긴 파일 force unlock 옵션과 심볼릭 링크 대상 보호
-- 시스템/사용자 핵심 경로와 현재 실행 중인 MyMacClean 앱 번들 보호
-- 향후 확장용 메뉴: Startup Items, System Cleanup, Large Files, Maintenance
-
-## 소스 실행
-
-```bash
-cd MyMacClean
-swift run MyMacCleanApp
-```
-
-## 테스트
-
-```bash
-cd MyMacClean
-swift test
-```
-
-## 앱 번들 빌드
-
-```bash
-cd MyMacClean
 ./scripts/build-app-bundle.sh
-open dist/MyMacClean/MyMacClean.app
 ```
 
-## DMG 만들기
+The package is written to:
+
+```text
+dist/MyMacClean/MyMacClean.app
+dist/MyMacClean-test-build.zip
+```
+
+Build a personal DMG:
 
 ```bash
-cd MyMacClean
 ./scripts/create-dmg.sh
 ```
 
-## 다운로드 zip 다시 만들기
+The DMG is written to:
+
+```text
+dist/MyMacClean-dev.dmg
+```
+
+Refresh the MyVibeCoding download artifact:
 
 ```bash
-cd MyMacClean
 ./scripts/build-app-bundle.sh
 cp dist/MyMacClean-test-build.zip ../downloads/MyMacClean/MyMacClean-test-build.zip
 ```
 
-## 폴더 구조
+## Test
 
-- `Package.swift`: Swift Package 설정
-- `Sources/MyMacCleanApp`: SwiftUI 앱 진입점과 화면
-- `Sources/MyMacCleanAppSupport`: 화면 상태, 내비게이션, ViewModel
-- `Sources/MyMacCleanCore`: 앱 발견, 후보 파일 스캔, 삭제 계획/실행/검증, 권한, 안전 정책
-- `Sources/MyMacCleanApp/Resources`: 앱 번들용 plist와 아이콘
-- `scripts`: 앱 번들/DMG 생성 스크립트
-- `Tests`: Core와 AppSupport 단위 테스트
+Run the full test suite:
+
+```bash
+swift test
+```
+
+The package contains core tests for scanning, deletion planning, execution,
+verification, receipts, protection policy, startup item control, large files,
+developer cache, and app support view models.
+
+## Project Structure
+
+```text
+Sources/MyMacCleanCore        Core scanning, safety, deletion, receipts
+Sources/MyMacCleanAppSupport  View models and app presentation helpers
+Sources/MyMacCleanApp         SwiftUI app and bundled resources
+Tests                         Core and app-support tests
+scripts                       Build and personal DMG scripts
+dist                          Local build artifacts
+docs/superpowers              Design and implementation notes
+```
+
+## Limitations
+
+- Not notarized for public distribution.
+- No privileged helper.
+- No malware scanning.
+- No RAM cleaning.
+- No automatic background cleanup.
+- No one-click broad system cleaner.
+- No system LaunchAgent or LaunchDaemon modification.
+- Startup item changes are reversible rename operations only.

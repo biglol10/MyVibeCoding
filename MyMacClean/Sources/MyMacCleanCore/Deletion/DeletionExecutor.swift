@@ -42,16 +42,42 @@ public enum DeletionMode: Equatable, Sendable {
     case permanent
 }
 
+public struct DeletionProtectionPolicy: Sendable {
+    private let isProtectedHandler: @Sendable (URL) -> Bool
+
+    public init(isProtected: @escaping @Sendable (URL) -> Bool) {
+        self.isProtectedHandler = isProtected
+    }
+
+    public func isProtected(_ url: URL) -> Bool {
+        isProtectedHandler(url)
+    }
+
+    public static func appCleanup(_ protectionPolicy: ProtectionPolicy = ProtectionPolicy()) -> DeletionProtectionPolicy {
+        DeletionProtectionPolicy { url in
+            protectionPolicy.isProtected(url)
+        }
+    }
+}
+
 public struct DeletionExecutor: Sendable {
     private let fileRemover: DeletionFileRemover
-    private let protectionPolicy: ProtectionPolicy
+    private let deletionProtectionPolicy: DeletionProtectionPolicy
 
     public init(
         fileRemover: DeletionFileRemover = .live,
         protectionPolicy: ProtectionPolicy = ProtectionPolicy()
     ) {
         self.fileRemover = fileRemover
-        self.protectionPolicy = protectionPolicy
+        self.deletionProtectionPolicy = .appCleanup(protectionPolicy)
+    }
+
+    public init(
+        fileRemover: DeletionFileRemover = .live,
+        deletionProtectionPolicy: DeletionProtectionPolicy
+    ) {
+        self.fileRemover = fileRemover
+        self.deletionProtectionPolicy = deletionProtectionPolicy
     }
 
     public func requiredConfirmationPhrase(for app: InstalledApp) -> String {
@@ -71,7 +97,7 @@ public struct DeletionExecutor: Sendable {
         }
 
         return plan.candidates.map { candidate in
-            guard !candidate.isProtected, !protectionPolicy.isProtected(candidate.url) else {
+            guard !candidate.isProtected, !deletionProtectionPolicy.isProtected(candidate.url) else {
                 return DeletionItemResult(path: candidate.url.path, success: false, errorMessage: DeletionExecutionErrorMessage.protectedPathSkipped)
             }
 

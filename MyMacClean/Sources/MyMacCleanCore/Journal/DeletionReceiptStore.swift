@@ -3,6 +3,8 @@ import Foundation
 public enum DeletionAction: String, Codable, Equatable, Sendable {
     case uninstall
     case orphanCleanup
+    case largeFileCleanup
+    case developerCacheCleanup
 }
 
 public struct DeletionReceiptCandidate: Codable, Equatable, Sendable {

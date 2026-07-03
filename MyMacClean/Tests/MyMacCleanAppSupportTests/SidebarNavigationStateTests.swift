@@ -19,6 +19,18 @@ final class SidebarNavigationStateTests: XCTestCase {
 
         XCTAssertEqual(state.selectedDestination, .largeFiles)
         XCTAssertEqual(state.activeTitle, "Large Files")
-        XCTAssertEqual(state.activeActionTitle, "Find Large Files")
+        XCTAssertEqual(state.activeActionTitle, "Scan Large Files")
+
+        state.select(.maintenance)
+
+        XCTAssertEqual(state.selectedDestination, .maintenance)
+        XCTAssertEqual(state.activeTitle, "Developer Cache")
+        XCTAssertEqual(state.activeActionTitle, "Scan Developer Caches")
+
+        state.select(.startupItems)
+
+        XCTAssertEqual(state.selectedDestination, .startupItems)
+        XCTAssertEqual(state.activeTitle, "Startup Items")
+        XCTAssertEqual(state.activeActionTitle, "Scan Startup Items")
     }
 }

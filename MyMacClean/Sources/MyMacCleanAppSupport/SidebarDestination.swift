@@ -12,14 +12,14 @@ public enum SidebarDestination: String, CaseIterable, Identifiable, Hashable, Se
     public static let currentRelease: [SidebarDestination] = [
         .applications,
         .orphanFiles,
-        .deleteHistory
+        .deleteHistory,
+        .startupItems,
+        .largeFiles,
+        .maintenance
     ]
 
     public static let roadmap: [SidebarDestination] = [
-        .startupItems,
-        .systemCleanup,
-        .largeFiles,
-        .maintenance
+        .systemCleanup
     ]
 
     public var title: String {
@@ -30,7 +30,7 @@ public enum SidebarDestination: String, CaseIterable, Identifiable, Hashable, Se
         case .startupItems: "Startup Items"
         case .systemCleanup: "System Cleanup"
         case .largeFiles: "Large Files"
-        case .maintenance: "Maintenance"
+        case .maintenance: "Developer Cache"
         }
     }
 
@@ -47,9 +47,9 @@ public enum SidebarDestination: String, CaseIterable, Identifiable, Hashable, Se
         case .systemCleanup:
             "Find removable system junk without touching personal files."
         case .largeFiles:
-            "Locate oversized files that are safe to review manually."
+            "Find oversized files for manual review before moving anything to Trash."
         case .maintenance:
-            "Run routine checks for caches, logs, and stale indexes."
+            "Review build caches that can be regenerated."
         }
     }
 
@@ -70,10 +70,10 @@ public enum SidebarDestination: String, CaseIterable, Identifiable, Hashable, Se
         case .applications: "Scan Selected"
         case .orphanFiles: "Scan Leftovers"
         case .deleteHistory: "Refresh History"
-        case .startupItems: "Scan Login Items"
+        case .startupItems: "Scan Startup Items"
         case .systemCleanup: "Scan System Junk"
-        case .largeFiles: "Find Large Files"
-        case .maintenance: "Run Maintenance Check"
+        case .largeFiles: "Scan Large Files"
+        case .maintenance: "Scan Developer Caches"
         }
     }
 }

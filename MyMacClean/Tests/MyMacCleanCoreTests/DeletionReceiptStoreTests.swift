@@ -96,6 +96,46 @@ final class DeletionReceiptStoreTests: XCTestCase {
         XCTAssertEqual(try DeletionReceiptStore(fileURL: receiptURL).readReceipts().count, 40)
     }
 
+    func testSupportsLargeFileCleanupReceipts() throws {
+        let root = try TestFixtures.temporaryDirectory(named: "receipt-large-files")
+        let store = DeletionReceiptStore(fileURL: root.appendingPathComponent("receipts.jsonl"))
+        let receipt = DeletionReceipt(
+            appName: "Large Files",
+            bundleIdentifier: nil,
+            bundlePath: root.path,
+            action: .largeFileCleanup,
+            completedAt: Date(timeIntervalSince1970: 10),
+            selectedCandidates: [],
+            executionResults: [],
+            verificationResults: [],
+            confirmationMatched: true
+        )
+
+        try store.append(receipt)
+
+        XCTAssertEqual(try store.readReceipts(), [receipt])
+    }
+
+    func testSupportsDeveloperCacheCleanupReceipts() throws {
+        let root = try TestFixtures.temporaryDirectory(named: "receipt-developer-cache")
+        let store = DeletionReceiptStore(fileURL: root.appendingPathComponent("receipts.jsonl"))
+        let receipt = DeletionReceipt(
+            appName: "Developer Cache",
+            bundleIdentifier: nil,
+            bundlePath: root.path,
+            action: .developerCacheCleanup,
+            completedAt: Date(timeIntervalSince1970: 11),
+            selectedCandidates: [],
+            executionResults: [],
+            verificationResults: [],
+            confirmationMatched: true
+        )
+
+        try store.append(receipt)
+
+        XCTAssertEqual(try store.readReceipts(), [receipt])
+    }
+
     private static func receipt(appName: String, completedAt: Date) -> DeletionReceipt {
         DeletionReceipt(
             appName: appName,
