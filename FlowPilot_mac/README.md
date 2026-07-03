@@ -1,6 +1,12 @@
 # FlowPilot_mac
 
-FlowPilot은 활동 추적, 생산성 분류, 리포트 앱입니다. macOS는 SwiftUI 네이티브 앱으로 전환 중이며, 기존 Tauri/React/Rust 앱과 Windows 빌드는 유지합니다. 데스크톱 앱이 로컬에서 활동 데이터를 수집하고, 브라우저 확장은 탭 제목/URL 신호를 보조로 전달합니다.
+FlowPilot은 활동 추적, 생산성 분류, 리포트 앱입니다. macOS는 SwiftUI 네이티브 앱으로 전환 중이며, 기존 Tauri/React/Rust 앱과 Windows 빌드는 유지합니다. 데스크톱 앱이 로컬에서 앱/창 사용량을 수집하고, 브라우저 확장은 탭 제목/URL 신호를 보조로 전달합니다. 수집한 데이터로 일간/주간 생산성 리포트, 차트, 타임라인, 분류 규칙, 제외 규칙, 표시 alias를 로컬에서 관리합니다.
+
+현재 구성:
+
+- Tauri v2 + React + Rust 데스크톱 앱
+- `macos-native/` 아래 SwiftUI 네이티브 macOS 앱
+- `browser-extension/` 아래 Chromium 브라우저 확장
 
 ## 다운로드
 
@@ -70,12 +76,37 @@ npm ci
 npm run tauri -- dev
 ```
 
+## macOS 권한
+
+FlowPilot은 기본 실행 앱 정보는 추가 권한 없이 수집할 수 있지만, 더 정확한 macOS 활동 수집에는 사용자 승인이 필요합니다.
+
+- Accessibility: 앱/창 메타데이터와 focused window title
+- Screen Recording: 화면 이미지 저장 없이 visible window 목록과 제목
+- Automation for Safari: Safari가 전면 앱일 때 active tab URL/title
+
+권한은 실제로 실행하는 `/Applications/FlowPilot.app` 번들에 부여한 뒤 FlowPilot을 재시작하세요. 자세한 개발 메모는 [docs/macos-development.md](docs/macos-development.md)를 참고하세요.
+
+## 브라우저 도메인 추적
+
+Chrome과 Edge는 `browser-extension/`의 unpacked extension을 사용합니다. 확장은 활성 탭 도메인을 로컬 bridge인 `http://127.0.0.1:17321/browser-event`로 보냅니다.
+
+Chrome 개발 중 확장 로드:
+
+1. `chrome://extensions`를 엽니다.
+2. Developer mode를 켭니다.
+3. `browser-extension/` 폴더를 Load unpacked로 추가합니다.
+
+Safari는 권한이 있을 때 네이티브 앱의 macOS Automation으로 처리합니다. active tab URL을 읽을 수 없으면 앱/창 추적으로 fallback합니다.
+
 ## 테스트
 
 ```bash
 npm test
-cd macos-native
-swift test
+npm run build
+npm test --prefix browser-extension
+npm run e2e
+cargo test --manifest-path src-tauri/Cargo.toml
+swift test --package-path macos-native
 ```
 
 브라우저 확장:
@@ -134,6 +165,8 @@ npm run package:macos:release
 npm run package:macos:distribution
 ```
 
+개인용 ad-hoc 빌드는 자신의 Mac 설치 용도입니다. 공개 다운로드나 외부 배포용으로 올리려면 Developer ID 서명과 notarization이 필요합니다. 자세한 배포 메모는 [docs/macos-distribution.md](docs/macos-distribution.md)를 참고하세요.
+
 ## 폴더 구조
 
 - `src`: React UI
@@ -142,3 +175,10 @@ npm run package:macos:distribution
 - `browser-extension`: Chrome 확장
 - `scripts`: 배포 패키징 스크립트
 - `docs`: 설계 문서와 작업 계획
+
+## 안전 메모
+
+- 브라우저 bridge는 loopback에서만 listen합니다.
+- macOS idle time은 지원되는 환경에서 active usage에서 제외합니다.
+- 브라우저/창 관찰 데이터는 무한히 커지지 않도록 pruning합니다.
+- Rule list는 add, edit, disable, delete 흐름을 지원합니다.

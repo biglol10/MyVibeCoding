@@ -95,22 +95,27 @@ CAPTURE_STUDIO_RUN_INTEGRATION=1 swift test
 
 ## Screenshot Editing
 
-After a screenshot is captured, the editor toolbar can annotate, OCR, and redact the screenshot before saving or copying. Save and Copy flatten annotation layers into a PNG, including blur redactions. OCR and Quick Redact run on demand.
+After a screenshot is captured, the editor toolbar can annotate, OCR, and redact the screenshot before saving or copying. Save and Copy flatten annotation layers into a PNG. OCR and Quick Redact run on demand.
 
-## Current Milestone
+## Features
 
-This milestone includes:
+- Native macOS app bundle with a compact Capture / Record first workflow
+- Region screenshot capture with ESC cancel support
+- Region screen recording with countdown delay, duration control, and stop handling
+- Multi-display selection overlay support
+- Persistent Settings window for output, capture, recording, shortcuts, and advanced options
+- Customizable shortcuts with per-action reset and reset-all defaults
+- Configurable output folder, format, clipboard behavior, and automatic/manual save mode
+- Smart filenames using active app/window context when available
+- Screenshot annotation tools: pen, highlighter, arrow, rectangle, ellipse, text, blur/redact, OCR, undo/redo, copy, save, delete
+- Quick Redact for detected sensitive text
+- Recording preview, trim-copy export, and GIF export
+- Capture history with search, open, and delete actions
+- Floating pinned screenshot preview
+- Presets for quickly switching common workflows
+- In-app guide modal for feature explanations
 
-- Minimal main window
-- Settings window
-- Persistent settings
-- Customizable shortcut model with reset defaults
-- Output filename and folder fallback model
-- Smart file naming with optional app/window context
-- Capture history and reusable capture presets
-- Capture coordinator interfaces
-- Rectangle, window, and full-screen selection modes
-- Screenshot capture and screen recording with off-main-thread sample handling
-- Screenshot editing, OCR, quick redaction, floating pins, recording trim, and GIF export
+## Notes
 
-Color picker is a separate implementation milestone.
+- macOS screen recording permission is tied to the installed app bundle and code signature. If permission prompts keep appearing after reinstalling, remove the old `CaptureStudio` entry from System Settings and add `/Applications/CaptureStudio.app` again.
+- Integration tests that touch live screen capture require macOS permissions and are run with `CAPTURE_STUDIO_RUN_INTEGRATION=1`.
