@@ -69,6 +69,17 @@ swift run MyMacStatsApp
 - 보호 프로세스 종료 차단
 - 전체 사이드바 row 클릭 영역 지원
 
+## 신뢰성 점검 항목
+
+시스템 모니터링 앱 특성상 단순 빌드 성공만으로 완료로 보지 않고, 실제 macOS API 의미와 설치 경로를 함께 검증합니다.
+
+- CPU 사용률은 `host_processor_info`의 tick delta로 user/system/idle을 계산합니다.
+- RAM pressure는 `kern.memorystatus_vm_pressure_level` 값을 사용합니다. `vm.memory_pressure`는 표시값 의미가 달라 health 판정에 사용하지 않습니다.
+- CPU/RAM sampler는 `mach_host_self()`로 얻은 send right를 해제합니다.
+- Network 카운터는 `NET_RT_IFLIST2`의 64-bit byte counter를 사용하고, 두 번째 샘플부터는 누적 총량이 아니라 현재 증가량이 있는 인터페이스를 우선 선택합니다.
+- 메뉴바 `Open Dashboard`는 임의의 첫 번째 창이 아니라 `MyMacStats` 대시보드 창을 찾아 앞으로 가져옵니다.
+- 개인 배포 zip은 `scripts/check-distribution.sh`로 압축 해제, quarantine 제거, 설치, codesign 검증까지 확인합니다.
+
 ## UI 구조
 
 ```text
@@ -150,6 +161,8 @@ swift test
 
 현재 테스트 범위:
 
+- CPU/RAM sampler의 실제 커널 API 연동과 pressure level mapping
+- Network 64-bit counter, 인터페이스 변경, 활성 인터페이스 선택
 - HealthEvaluator 상태 판정
 - metric formatter
 - process sorting/grouping
@@ -158,6 +171,8 @@ swift test
 - system metrics snapshot 구성
 - disk space candidate scanner
 - cause summary builder
+- 메뉴바 refresh lifecycle과 dashboard window targeting
+- release/package distribution script behavior
 
 ## 개인용 앱 번들 및 zip 생성
 
