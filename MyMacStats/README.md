@@ -263,7 +263,3 @@ MyMacStats/
 - 알림센터 위젯과 iCloud 동기화는 없습니다.
 - 프로세스별 네트워크 사용량은 아직 표시하지 않습니다.
 - 시스템 API가 값을 제공하지 않거나 권한상 읽을 수 없는 항목은 unavailable로 표시됩니다.
-
-## 설계 문서
-
-상세 기획은 [docs/MyMacStats-design.md](../docs/MyMacStats-design.md)를 참고하세요.
