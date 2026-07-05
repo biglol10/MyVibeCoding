@@ -37,7 +37,7 @@ Current status:
 - Adds a macOS menu bar item with today's quick summary.
 
 Known beta gaps:
-- This build is unsigned and intended for personal local testing.
+- This build is ad-hoc signed and intended for personal local testing.
 - Developer ID signing and notarization are still separate release steps.
 
 Install:
