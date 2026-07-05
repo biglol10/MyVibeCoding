@@ -9,6 +9,8 @@ struct FlowPilotNativeApp: App {
     @StateObject private var reportStore = FlowPilotReportStore()
 
     init() {
+        Self.installDockIcon()
+
         let databaseURL = FlowPilotReportStore.defaultDatabaseURL()
         let reportStore = FlowPilotReportStore(databaseURL: databaseURL)
         _reportStore = StateObject(wrappedValue: reportStore)
@@ -49,5 +51,16 @@ struct FlowPilotNativeApp: App {
                 NSApp.terminate(nil)
             }
         }
+    }
+
+    private static func installDockIcon() {
+        guard
+            let iconURL = Bundle.main.url(forResource: "icon", withExtension: "icns"),
+            let icon = NSImage(contentsOf: iconURL)
+        else {
+            return
+        }
+
+        NSApplication.shared.applicationIconImage = icon
     }
 }

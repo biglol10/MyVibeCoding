@@ -31,3 +31,11 @@ test("native macOS app bundle includes the FlowPilot icon", () => {
   assert.match(script, /CFBundleIconFile/);
   assert.match(script, /<string>icon\.icns<\/string>/);
 });
+
+test("native macOS app sets the running Dock icon from the bundled icon", () => {
+  const app = readFileSync(resolve(root, "macos-native/Sources/FlowPilotNative/FlowPilotNativeApp.swift"), "utf8");
+
+  assert.match(app, /installDockIcon\(\)/);
+  assert.match(app, /Bundle\.main\.url\(forResource: "icon", withExtension: "icns"\)/);
+  assert.match(app, /NSApplication\.shared\.applicationIconImage = icon/);
+});
