@@ -76,6 +76,7 @@ public final class CaptureCoordinator: ObservableObject {
 
     public func startScreenshotCapture() async {
         do {
+            appState.permissionPrompt = nil
             try ensureScreenCaptureAccess()
             let settings = settingsStore.settings
             let didHideCaptureWindows = hideCaptureWindowsIfNeeded(settings: settings)
@@ -119,12 +120,14 @@ public final class CaptureCoordinator: ObservableObject {
                 appState.statusMessage = "Screenshot cancelled."
             } else {
                 appState.statusMessage = "Screenshot failed: \(userMessage(for: error))"
+                presentPermissionPromptIfNeeded(for: error)
             }
         }
     }
 
     public func startScreenRecording() async {
         do {
+            appState.permissionPrompt = nil
             try ensureScreenCaptureAccess()
             let settings = settingsStore.settings
             let didHideCaptureWindows = hideCaptureWindowsIfNeeded(settings: settings)
@@ -161,6 +164,7 @@ public final class CaptureCoordinator: ObservableObject {
                 appState.statusMessage = "Recording stopped."
             } else {
                 appState.statusMessage = "Recording failed: \(userMessage(for: error))"
+                presentPermissionPromptIfNeeded(for: error)
             }
         }
     }
@@ -635,6 +639,14 @@ public final class CaptureCoordinator: ObservableObject {
         }
 
         return error.localizedDescription
+    }
+
+    private func presentPermissionPromptIfNeeded(for error: Error) {
+        guard error is ScreenCapturePermissionError else {
+            return
+        }
+
+        appState.permissionPrompt = .screenRecording
     }
 
     private func isRecordingStoppedByUser(_ error: Error) -> Bool {

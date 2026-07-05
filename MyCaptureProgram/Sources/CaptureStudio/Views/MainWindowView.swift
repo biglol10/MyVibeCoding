@@ -1,6 +1,5 @@
 import AppKit
 import AVKit
-import AppKit
 import SwiftUI
 
 struct MainWindowView: View {
@@ -72,7 +71,27 @@ struct MainWindowView: View {
                 onStartRecord: startRecordFromGuide
             )
         }
+        .alert(item: permissionPromptBinding) { prompt in
+            Alert(
+                title: Text(prompt.title),
+                message: Text(prompt.message),
+                primaryButton: .default(Text(prompt.actionTitle)) {
+                    openSystemSettings(primaryURL: prompt.systemSettingsURLString)
+                    appState.permissionPrompt = nil
+                },
+                secondaryButton: .cancel(Text("OK")) {
+                    appState.permissionPrompt = nil
+                }
+            )
+        }
         .onAppear(perform: presentGuideOnLaunchIfNeeded)
+    }
+
+    private var permissionPromptBinding: Binding<PermissionPrompt?> {
+        Binding(
+            get: { appState.permissionPrompt },
+            set: { appState.permissionPrompt = $0 }
+        )
     }
 
     private var quickBar: some View {
@@ -634,6 +653,20 @@ struct MainWindowView: View {
         }
         guideDontShowAgain = true
         appState.isGuidePresented = true
+    }
+
+    private func openSystemSettings(primaryURL: String) {
+        let candidates: [URL?] = [
+            URL(string: primaryURL),
+            URL(string: "x-apple.systempreferences:com.apple.preference.security"),
+            URL(fileURLWithPath: "/System/Applications/System Settings.app")
+        ]
+
+        for candidate in candidates.compactMap({ $0 }) {
+            if NSWorkspace.shared.open(candidate) {
+                return
+            }
+        }
     }
 
     private func handleGuideDismissed() {

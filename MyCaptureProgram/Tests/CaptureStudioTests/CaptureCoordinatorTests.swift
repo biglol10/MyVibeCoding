@@ -322,6 +322,7 @@ final class CaptureCoordinatorTests: XCTestCase {
             appState.statusMessage,
             "Screenshot failed: Screen access is off. Enable CaptureStudio in System Settings > Privacy & Security."
         )
+        XCTAssertEqual(appState.permissionPrompt, .screenRecording)
     }
 
     @MainActor
@@ -765,6 +766,7 @@ final class CaptureCoordinatorTests: XCTestCase {
             appState.statusMessage,
             "Recording failed: Screen access is off. Enable CaptureStudio in System Settings > Privacy & Security."
         )
+        XCTAssertEqual(appState.permissionPrompt, .screenRecording)
     }
 
     @MainActor
