@@ -22,3 +22,12 @@ test("native macOS app declares Safari automation usage", () => {
   assert.match(script, /NSAppleEventsUsageDescription/);
   assert.match(script, /Safari.*현재 탭.*URL/);
 });
+
+test("native macOS app bundle includes the FlowPilot icon", () => {
+  const script = readFileSync(resolve(root, "macos-native/scripts/build-dev-app.sh"), "utf8");
+
+  assert.match(script, /src-tauri\/icons\/icon\.icns/);
+  assert.match(script, /cp "\$ICON_SOURCE" "\$RESOURCES_DIR\/icon\.icns"/);
+  assert.match(script, /CFBundleIconFile/);
+  assert.match(script, /<string>icon\.icns<\/string>/);
+});
