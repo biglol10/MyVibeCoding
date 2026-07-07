@@ -511,7 +511,7 @@ final class ApplicationListViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.deletionReport?.remainingPaths, [cacheURL.path])
     }
 
-    func testSuccessfulAppDeletionRecordsReceiptWithoutLeavingInspectorReport() async throws {
+    func testSuccessfulAppDeletionRecordsReceiptAndReturnsReportWithoutLeavingInspectorReport() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("MyMacCleanReportTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let appURL = root.appendingPathComponent("Report.app", isDirectory: true)
@@ -545,8 +545,9 @@ final class ApplicationListViewModelTests: XCTestCase {
         viewModel.candidates = [candidate]
         viewModel.selectedCandidateIDs = [candidate.id]
 
-        await viewModel.deleteConfirmedItems(confirmation: "DELETE")
+        let report = await viewModel.deleteConfirmedItems(confirmation: "DELETE")
 
+        XCTAssertEqual(report?.statusTitle, "Deleted and verified")
         XCTAssertNil(viewModel.selectedApp)
         XCTAssertNil(viewModel.deletionReport)
         XCTAssertEqual(try DeletionReceiptStore(fileURL: receiptURL).readReceipts().count, 1)

@@ -140,6 +140,28 @@ Recommended personal install flow from this repository:
 Full Disk Access is important. Without it, scans can miss files or deletion can
 fail for paths under protected Library locations.
 
+## If Deletion Fails
+
+MyMacClean records failed deletion attempts in Delete History. Open the failed
+record and expand `Error Logs` to see the exact path and macOS error.
+
+Common fixes:
+
+1. Quit the app and its helpers first. If the app is still running, macOS may
+   refuse to move its bundle or support folders.
+2. Grant Full Disk Access to `/Applications/MyMacClean.app`, then reopen
+   MyMacClean and retry.
+3. Use `Reveal in Finder` or copy the failed path from the error log, then move
+   that item to Trash manually. Finder may request an administrator password
+   for some paths.
+4. If the file is locked, retry with `Force unlock locked items`. This clears
+   file locks and restores user write permission, but it cannot bypass Full
+   Disk Access, SIP, or administrator-only locations.
+5. For vendor updaters, menu bar helpers, or background agents, disable the
+   startup item first or reboot, then retry cleanup.
+6. Avoid `sudo rm -rf` unless you have verified every path in the failed log.
+   MyMacClean protects broad user folders and system roots on purpose.
+
 ## Build
 
 Build a local app bundle:

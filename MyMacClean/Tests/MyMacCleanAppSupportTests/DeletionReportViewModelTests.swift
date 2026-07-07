@@ -133,6 +133,85 @@ final class DeletionReportViewModelTests: XCTestCase {
         """)
     }
 
+    func testExposesStructuredErrorLogsForHistoryDetails() {
+        let report = DeletionReportViewModel(
+            receipt: DeletionReceipt(
+                appName: "Cursor",
+                bundleIdentifier: "com.todesktop.230313mzl4w4u92",
+                bundlePath: "/Applications/Cursor.app",
+                action: .uninstall,
+                selectedCandidates: [],
+                executionResults: [
+                    DeletionItemResult(path: "/Applications/Cursor.app", success: false, errorMessage: "Operation not permitted")
+                ],
+                verificationResults: [
+                    DeletionVerificationResult(path: "/Applications/Cursor.app", status: .permissionDenied, errorMessage: "Full Disk Access is required")
+                ],
+                confirmationMatched: true
+            )
+        )
+
+        XCTAssertEqual(report.errorLogs, [
+            DeletionErrorLog(path: "/Applications/Cursor.app", message: "Operation not permitted"),
+            DeletionErrorLog(path: "/Applications/Cursor.app", message: "Full Disk Access is required")
+        ])
+        XCTAssertEqual(report.errorLogLines, [
+            "/Applications/Cursor.app - Operation not permitted",
+            "/Applications/Cursor.app - Full Disk Access is required"
+        ])
+    }
+
+    func testBuildsSuccessToastPresentationFromVerifiedDeletion() {
+        let report = DeletionReportViewModel(
+            receipt: DeletionReceipt(
+                appName: "Cursor",
+                bundleIdentifier: "com.todesktop.230313mzl4w4u92",
+                bundlePath: "/Applications/Cursor.app",
+                action: .uninstall,
+                selectedCandidates: [],
+                executionResults: [],
+                verificationResults: [
+                    DeletionVerificationResult(path: "/Applications/Cursor.app", status: .deleted, errorMessage: nil),
+                    DeletionVerificationResult(path: "/Users/me/Library/Caches/com.todesktop.230313mzl4w4u92", status: .deleted, errorMessage: nil)
+                ],
+                confirmationMatched: true
+            )
+        )
+
+        let toast = DeletionToastPresentation(report: report)
+
+        XCTAssertEqual(toast.severity, .success)
+        XCTAssertEqual(toast.title, "Deletion succeeded")
+        XCTAssertEqual(toast.message, "2 deleted, 0 remaining")
+        XCTAssertTrue(toast.detailLines.isEmpty)
+    }
+
+    func testBuildsErrorToastPresentationFromFailedDeletion() {
+        let report = DeletionReportViewModel(
+            receipt: DeletionReceipt(
+                appName: "Cursor",
+                bundleIdentifier: "com.todesktop.230313mzl4w4u92",
+                bundlePath: "/Applications/Cursor.app",
+                action: .uninstall,
+                selectedCandidates: [],
+                executionResults: [
+                    DeletionItemResult(path: "/Applications/Cursor.app", success: false, errorMessage: "Operation not permitted")
+                ],
+                verificationResults: [
+                    DeletionVerificationResult(path: "/Applications/Cursor.app", status: .stillExists, errorMessage: nil)
+                ],
+                confirmationMatched: true
+            )
+        )
+
+        let toast = DeletionToastPresentation(report: report)
+
+        XCTAssertEqual(toast.severity, .error)
+        XCTAssertEqual(toast.title, "Deletion failed")
+        XCTAssertEqual(toast.message, "0 deleted, 1 remaining")
+        XCTAssertEqual(toast.detailLines, ["/Applications/Cursor.app - Operation not permitted"])
+    }
+
     func testSummarizesStartupItemChangeWithoutDeletionLanguage() {
         let report = DeletionReportViewModel(
             receipt: DeletionReceipt(

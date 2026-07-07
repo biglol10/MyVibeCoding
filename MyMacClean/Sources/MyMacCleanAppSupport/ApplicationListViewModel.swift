@@ -165,16 +165,17 @@ public final class ApplicationListViewModel {
         return try planner.makePlan(app: selectedApp, candidates: candidates, selectedIDs: selectedCandidateIDs)
     }
 
+    @discardableResult
     public func deleteConfirmedItems(
         confirmation: String,
         force: Bool = false,
         mode: DeletionMode = .moveToTrash
-    ) async {
-        guard !isDeleting else { return }
+    ) async -> DeletionReportViewModel? {
+        guard !isDeleting else { return nil }
         if let selectedApp, runningApplicationMonitor.isRunning(selectedApp) {
             clearDeletionOutcome()
             errorMessage = "Quit \(selectedApp.displayName) before deleting it."
-            return
+            return nil
         }
 
         isDeleting = true
@@ -196,6 +197,7 @@ public final class ApplicationListViewModel {
                 verificationResults: verificationResults,
                 confirmationMatched: results.allSatisfy { $0.errorMessage != DeletionExecutionErrorMessage.confirmationMismatch }
             )
+            let report = DeletionReportViewModel(receipt: receipt)
             do {
                 try receiptStore.append(receipt)
                 errorMessage = nil
@@ -210,14 +212,16 @@ public final class ApplicationListViewModel {
             )
             if removedSelectedApp {
                 if shouldShowDeletionReport(receipt) {
-                    deletionReport = DeletionReportViewModel(receipt: receipt)
+                    deletionReport = report
                 }
             } else {
-                deletionReport = DeletionReportViewModel(receipt: receipt)
+                deletionReport = report
             }
+            return report
         } catch {
             clearDeletionOutcome()
             errorMessage = error.localizedDescription
+            return nil
         }
     }
 

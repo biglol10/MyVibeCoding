@@ -86,8 +86,9 @@ public final class LargeFilesViewModel {
         }
     }
 
-    public func moveSelectedToTrash(confirmation: String) async {
-        guard !isDeleting else { return }
+    @discardableResult
+    public func moveSelectedToTrash(confirmation: String) async -> DeletionReportViewModel? {
+        guard !isDeleting else { return nil }
         let relatedCandidates = selectedCandidates.map { candidate in
             RelatedFileCandidate(
                 id: candidate.id,
@@ -132,7 +133,8 @@ public final class LargeFilesViewModel {
                 verificationResults: verificationResults,
                 confirmationMatched: results.allSatisfy { $0.errorMessage != DeletionExecutionErrorMessage.confirmationMismatch }
             )
-            deletionReport = DeletionReportViewModel(receipt: receipt)
+            let report = DeletionReportViewModel(receipt: receipt)
+            deletionReport = report
             removeVerifiedDeletedCandidates(from: verificationResults)
             errorMessage = nil
             do {
@@ -140,10 +142,12 @@ public final class LargeFilesViewModel {
             } catch {
                 errorMessage = "Cleanup finished, but deletion history could not be saved: \(error.localizedDescription)"
             }
+            return report
         } catch {
             deletionReport = nil
             errorMessage = error.localizedDescription
             isDeleting = false
+            return nil
         }
     }
 

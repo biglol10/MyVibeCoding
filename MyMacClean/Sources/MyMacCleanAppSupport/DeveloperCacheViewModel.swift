@@ -122,18 +122,19 @@ public final class DeveloperCacheViewModel {
         }
     }
 
-    public func moveSelectedToTrash(confirmation: String) async {
-        guard !isDeleting else { return }
+    @discardableResult
+    public func moveSelectedToTrash(confirmation: String) async -> DeletionReportViewModel? {
+        guard !isDeleting else { return nil }
         let relatedCandidates = selectedRelatedCandidates
         guard !relatedCandidates.isEmpty else {
             deletionReport = nil
             errorMessage = "Select at least one deletable item."
-            return
+            return nil
         }
         guard !selectedCandidates.contains(where: { $0.tool == .xcodeDerivedData }) || !isXcodeRunning() else {
             deletionReport = nil
             errorMessage = "Quit Xcode before deleting DerivedData."
-            return
+            return nil
         }
 
         let app = InstalledApp(
@@ -166,7 +167,8 @@ public final class DeveloperCacheViewModel {
                 verificationResults: verificationResults,
                 confirmationMatched: results.allSatisfy { $0.errorMessage != DeletionExecutionErrorMessage.confirmationMismatch }
             )
-            deletionReport = DeletionReportViewModel(receipt: receipt)
+            let report = DeletionReportViewModel(receipt: receipt)
+            deletionReport = report
             removeVerifiedDeletedCandidates(from: verificationResults)
             errorMessage = nil
             do {
@@ -174,10 +176,12 @@ public final class DeveloperCacheViewModel {
             } catch {
                 errorMessage = "Cleanup finished, but deletion history could not be saved: \(error.localizedDescription)"
             }
+            return report
         } catch {
             deletionReport = nil
             errorMessage = error.localizedDescription
             isDeleting = false
+            return nil
         }
     }
 

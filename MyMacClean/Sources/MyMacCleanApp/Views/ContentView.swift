@@ -23,6 +23,7 @@ struct ContentView: View {
     @State private var pendingStartupAction: StartupItemAction?
     @State private var forceDelete = false
     @State private var permanentDelete = false
+    @State private var deletionToast: DeletionToastPresentation?
 
     private static var deletionProtectionPolicy: ProtectionPolicy {
         ProtectionPolicy(additionalProtectedRoots: currentApplicationProtectedRoots)
@@ -43,6 +44,18 @@ struct ContentView: View {
         .task {
             await viewModel.loadApps()
             orphanFilesViewModel.updateInstalledApps(viewModel.apps)
+        }
+        .overlay(alignment: .topTrailing) {
+            if let deletionToast {
+                DeletionToastView(toast: deletionToast) {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        self.deletionToast = nil
+                    }
+                }
+                .padding(.top, 16)
+                .padding(.trailing, 18)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
         .alert("MyMacClean", isPresented: errorAlertBinding) {
             Button("OK") {
@@ -794,6 +807,7 @@ struct ContentView: View {
 
     private func historyReceiptDetailCard(_ receipt: DeletionReceipt) -> some View {
         let summary = DeletionHistoryReceiptSummary(receipt: receipt)
+        let report = DeletionReportViewModel(receipt: receipt)
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -806,7 +820,7 @@ struct ContentView: View {
                 }
                 Spacer()
                 Button {
-                    copyToPasteboard(DeletionReportViewModel(receipt: receipt).copyableReportText)
+                    copyToPasteboard(report.copyableReportText)
                 } label: {
                     Label("Copy Report", systemImage: "doc.on.doc")
                         .labelStyle(.iconOnly)
@@ -852,6 +866,10 @@ struct ContentView: View {
                         }
                     }
                 }
+            }
+
+            if !report.errorLogs.isEmpty {
+                ErrorLogsDisclosure(report: report)
             }
         }
         .padding(14)
@@ -1296,17 +1314,20 @@ struct ContentView: View {
                 Button(isDeleting ? "Deleting..." : (effectivePermanentDelete ? "Permanently Delete" : "Move to Trash"), role: .destructive) {
                     Task {
                         let deletionMode: DeletionMode = effectivePermanentDelete ? .permanent : .moveToTrash
+                        let report: DeletionReportViewModel?
                         switch mode {
                         case .application:
-                            await viewModel.deleteConfirmedItems(confirmation: confirmationText, force: forceDelete, mode: deletionMode)
+                            report = await viewModel.deleteConfirmedItems(confirmation: confirmationText, force: forceDelete, mode: deletionMode)
                         case .orphanFiles:
-                            await orphanFilesViewModel.deleteSelectedLeftovers(confirmation: confirmationText, force: forceDelete, mode: deletionMode)
+                            report = await orphanFilesViewModel.deleteSelectedLeftovers(confirmation: confirmationText, force: forceDelete, mode: deletionMode)
                         case .largeFiles:
-                            await largeFilesViewModel.moveSelectedToTrash(confirmation: confirmationText)
+                            report = await largeFilesViewModel.moveSelectedToTrash(confirmation: confirmationText)
                         case .developerCache:
-                            await developerCacheViewModel.moveSelectedToTrash(confirmation: confirmationText)
+                            report = await developerCacheViewModel.moveSelectedToTrash(confirmation: confirmationText)
                         }
+                        let errorMessage = consumeDeletionError(for: mode)
                         confirmationMode = nil
+                        presentDeletionToast(report: report, errorMessage: errorMessage)
                     }
                 }
                 .disabled(confirmationText != requiredConfirmation || isDeleting)
@@ -1329,6 +1350,49 @@ struct ContentView: View {
         forceDelete = false
         permanentDelete = false
         confirmationMode = mode
+    }
+
+    private func consumeDeletionError(for mode: DeletionConfirmationMode) -> String? {
+        switch mode {
+        case .application:
+            defer { viewModel.errorMessage = nil }
+            return viewModel.errorMessage
+        case .orphanFiles:
+            defer { orphanFilesViewModel.errorMessage = nil }
+            return orphanFilesViewModel.errorMessage
+        case .largeFiles:
+            defer { largeFilesViewModel.errorMessage = nil }
+            return largeFilesViewModel.errorMessage
+        case .developerCache:
+            defer { developerCacheViewModel.errorMessage = nil }
+            return developerCacheViewModel.errorMessage
+        }
+    }
+
+    private func presentDeletionToast(report: DeletionReportViewModel?, errorMessage: String?) {
+        if let errorMessage, !errorMessage.isEmpty {
+            presentDeletionToast(.error(message: errorMessage, report: report))
+            return
+        }
+        if let report {
+            presentDeletionToast(DeletionToastPresentation(report: report))
+        }
+    }
+
+    private func presentDeletionToast(_ toast: DeletionToastPresentation) {
+        withAnimation(.easeInOut(duration: 0.18)) {
+            deletionToast = toast
+        }
+        guard toast.severity == .success else { return }
+        Task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            await MainActor.run {
+                guard deletionToast?.id == toast.id else { return }
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    deletionToast = nil
+                }
+            }
+        }
     }
 
     private func confirmationSelectedCandidates(for mode: DeletionConfirmationMode) -> [RelatedFileCandidate] {
@@ -1623,6 +1687,9 @@ private struct DeletionReportPanel: View {
                     .help("Copy Path")
                 }
             }
+            if !report.errorLogs.isEmpty {
+                ErrorLogsDisclosure(report: report)
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1632,6 +1699,129 @@ private struct DeletionReportPanel: View {
                 .stroke(Color.primary.opacity(0.07), lineWidth: 1)
         }
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct ErrorLogsDisclosure: View {
+    let report: DeletionReportViewModel
+
+    var body: some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(report.errorLogs.enumerated()), id: \.offset) { _, log in
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(log.path)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                            Text(log.message)
+                                .font(.caption.weight(.semibold))
+                                .textSelection(.enabled)
+                        }
+                        Spacer(minLength: 8)
+                        Button {
+                            copyToPasteboard(log.line)
+                        } label: {
+                            Label("Copy Error", systemImage: "doc.on.doc")
+                                .labelStyle(.iconOnly)
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Copy Error")
+                    }
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.red.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+            }
+            .padding(.top, 6)
+        } label: {
+            Label("Error Logs (\(report.errorLogs.count))", systemImage: "exclamationmark.triangle")
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.red)
+        }
+    }
+}
+
+private struct DeletionToastView: View {
+    let toast: DeletionToastPresentation
+    let dismiss: () -> Void
+
+    private var tint: Color {
+        switch toast.severity {
+        case .success: .green
+        case .error: .red
+        }
+    }
+
+    private var iconName: String {
+        switch toast.severity {
+        case .success: "checkmark.circle.fill"
+        case .error: "xmark.octagon.fill"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: iconName)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(toast.title)
+                        .font(.headline.weight(.semibold))
+                    Text(toast.message)
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
+                Spacer(minLength: 12)
+                Button {
+                    dismiss()
+                } label: {
+                    Label("Dismiss", systemImage: "xmark")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .help("Dismiss")
+            }
+
+            if !toast.detailLines.isEmpty {
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(toast.detailLines.indices, id: \.self) { index in
+                            let line = toast.detailLines[index]
+                            Text(line)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(nil)
+                                .textSelection(.enabled)
+                        }
+                        Button {
+                            copyToPasteboard(toast.detailLines.joined(separator: "\n"))
+                        } label: {
+                            Label("Copy Details", systemImage: "doc.on.doc")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    .padding(.top, 6)
+                } label: {
+                    Text("Details")
+                        .font(.callout.weight(.semibold))
+                }
+            }
+        }
+        .padding(14)
+        .frame(width: 390, alignment: .leading)
+        .background(.regularMaterial)
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(tint.opacity(0.45), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .shadow(color: .black.opacity(0.22), radius: 18, x: 0, y: 10)
     }
 }
 

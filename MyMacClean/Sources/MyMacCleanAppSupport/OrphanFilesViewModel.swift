@@ -73,12 +73,13 @@ public final class OrphanFilesViewModel {
         selectedCandidates.reduce(Int64(0)) { $0 + $1.size }
     }
 
+    @discardableResult
     public func deleteSelectedLeftovers(
         confirmation: String,
         force: Bool = false,
         mode: DeletionMode = .moveToTrash
-    ) async {
-        guard !isDeleting else { return }
+    ) async -> DeletionReportViewModel? {
+        guard !isDeleting else { return nil }
         let app = InstalledApp(
             displayName: "Orphan Files",
             bundleIdentifier: nil,
@@ -99,7 +100,7 @@ public final class OrphanFilesViewModel {
         } catch {
             deletionReport = nil
             errorMessage = error.localizedDescription
-            return
+            return nil
         }
 
         isDeleting = true
@@ -128,8 +129,10 @@ public final class OrphanFilesViewModel {
             errorMessage = "Could not save deletion history: \(error.localizedDescription)"
         }
 
-        deletionReport = DeletionReportViewModel(receipt: receipt)
+        let report = DeletionReportViewModel(receipt: receipt)
+        deletionReport = report
         removeVerifiedDeletedCandidates(from: verificationResults)
+        return report
     }
 
     private func removeVerifiedDeletedCandidates(from verificationResults: [DeletionVerificationResult]) {

@@ -1,6 +1,20 @@
 import Foundation
 import MyMacCleanCore
 
+public struct DeletionErrorLog: Equatable, Sendable {
+    public let path: String
+    public let message: String
+
+    public init(path: String, message: String) {
+        self.path = path
+        self.message = message
+    }
+
+    public var line: String {
+        "\(path) - \(message)"
+    }
+}
+
 public struct DeletionReportViewModel: Equatable, Sendable {
     public let receipt: DeletionReceipt
 
@@ -62,6 +76,33 @@ public struct DeletionReportViewModel: Equatable, Sendable {
         return "\(completedCount) deleted, \(remainingCount) remaining"
     }
 
+    public var isFullySuccessful: Bool {
+        remainingCount == 0 && errorLogs.isEmpty
+    }
+
+    public var errorLogs: [DeletionErrorLog] {
+        let executionErrors = receipt.executionResults.compactMap { result -> DeletionErrorLog? in
+            guard let errorMessage = result.errorMessage, !result.success else { return nil }
+            return DeletionErrorLog(path: result.path, message: errorMessage)
+        }
+
+        let verificationErrors = receipt.verificationResults.compactMap { result -> DeletionErrorLog? in
+            if let errorMessage = result.errorMessage {
+                return DeletionErrorLog(path: result.path, message: errorMessage)
+            }
+            if result.status == .permissionDenied {
+                return DeletionErrorLog(path: result.path, message: "Permission denied")
+            }
+            return nil
+        }
+
+        return executionErrors + verificationErrors
+    }
+
+    public var errorLogLines: [String] {
+        errorLogs.map(\.line)
+    }
+
     public var copyableReportText: String {
         var lines = [
             receipt.action.isStartupItemChange ? "MyMacClean Startup Item Report" : "MyMacClean Deletion Report",
@@ -79,15 +120,10 @@ public struct DeletionReportViewModel: Equatable, Sendable {
             lines.append(contentsOf: remainingPaths)
         }
 
-        let errors = receipt.executionResults.compactMap { result -> String? in
-            guard let errorMessage = result.errorMessage else { return nil }
-            return "\(result.path) - \(errorMessage)"
-        }
-
-        if !errors.isEmpty {
+        if !errorLogLines.isEmpty {
             lines.append("")
             lines.append("Errors:")
-            lines.append(contentsOf: errors)
+            lines.append(contentsOf: errorLogLines)
         }
 
         return lines.joined(separator: "\n")

@@ -123,7 +123,8 @@ final class StartupItemsViewModelTests: XCTestCase {
                 globalLaunchAgentsURL: root.appendingPathComponent("GlobalLaunchAgents", isDirectory: true),
                 globalLaunchDaemonsURL: root.appendingPathComponent("GlobalLaunchDaemons", isDirectory: true)
             ),
-            controller: StartupItemController()
+            controller: StartupItemController(),
+            receiptStore: DeletionReceiptStore(fileURL: root.appendingPathComponent("receipts.jsonl"))
         )
 
         await viewModel.scan()
