@@ -37,15 +37,7 @@ struct RootView: View {
                     }
 
                     if explorerStore.isInspectorVisible {
-                        InspectorView(
-                            selection: explorerStore.activeSelectedEntries,
-                            calculatedFolderSizes: explorerStore.calculatedFolderSizes,
-                            previewByteLimit: explorerStore.previewByteLimit.rawValue,
-                            onCommand: { command in
-                                Task { await explorerStore.perform(command) }
-                            }
-                        )
-                            .frame(minWidth: 260, idealWidth: 300, maxWidth: 360)
+                        inspectorPane
                     }
                 }
             }
@@ -91,6 +83,19 @@ struct RootView: View {
             )
             .frame(width: 0, height: 0)
         )
+    }
+
+    private var inspectorPane: some View {
+        InspectorView(
+            selection: explorerStore.activeSelectedEntries,
+            calculatedFolderSizes: explorerStore.calculatedFolderSizes,
+            previewMode: explorerStore.previewMode,
+            previewByteLimit: explorerStore.previewByteLimit.rawValue,
+            onCommand: { command in
+                Task { await explorerStore.perform(command) }
+            }
+        )
+        .frame(minWidth: 260, idealWidth: 300, maxWidth: 360)
     }
 
     @ViewBuilder

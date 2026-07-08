@@ -3,8 +3,23 @@ import SwiftUI
 struct InspectorView: View {
     let selection: [FileEntry]
     let calculatedFolderSizes: [URL: Int64]
+    let previewMode: FilePreviewMode
     let previewByteLimit: Int
     let onCommand: (ExplorerCommand) -> Void
+
+    init(
+        selection: [FileEntry],
+        calculatedFolderSizes: [URL: Int64],
+        previewMode: FilePreviewMode = .smart,
+        previewByteLimit: Int,
+        onCommand: @escaping (ExplorerCommand) -> Void
+    ) {
+        self.selection = selection
+        self.calculatedFolderSizes = calculatedFolderSizes
+        self.previewMode = previewMode
+        self.previewByteLimit = previewByteLimit
+        self.onCommand = onCommand
+    }
 
     var body: some View {
         ScrollView {
@@ -41,7 +56,7 @@ struct InspectorView: View {
         )
 
         return VStack(alignment: .leading, spacing: 14) {
-            FilePreviewView(entry: entry, byteLimit: previewByteLimit)
+            FilePreviewView(entry: entry, previewMode: previewMode, byteLimit: previewByteLimit)
 
             Text(details.name)
                 .font(.headline)

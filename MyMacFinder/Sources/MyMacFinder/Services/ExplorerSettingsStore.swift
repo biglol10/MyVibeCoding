@@ -5,6 +5,7 @@ public struct ExplorerSettings: Codable, Equatable, Sendable {
     public var isInspectorVisible: Bool
     public var showHiddenFiles: Bool
     public var defaultSort: EntrySortDescriptor
+    public var previewMode: FilePreviewMode
     public var previewByteLimit: FilePreviewByteLimit
 
     public init(
@@ -12,12 +13,14 @@ public struct ExplorerSettings: Codable, Equatable, Sendable {
         isInspectorVisible: Bool = true,
         showHiddenFiles: Bool = false,
         defaultSort: EntrySortDescriptor = EntrySortDescriptor(),
+        previewMode: FilePreviewMode = .smart,
         previewByteLimit: FilePreviewByteLimit = .balanced
     ) {
         self.paneMode = paneMode
         self.isInspectorVisible = isInspectorVisible
         self.showHiddenFiles = showHiddenFiles
         self.defaultSort = defaultSort
+        self.previewMode = previewMode
         self.previewByteLimit = previewByteLimit
     }
 
@@ -26,6 +29,7 @@ public struct ExplorerSettings: Codable, Equatable, Sendable {
         case isInspectorVisible
         case showHiddenFiles
         case defaultSort
+        case previewMode
         case previewByteLimit
     }
 
@@ -35,6 +39,7 @@ public struct ExplorerSettings: Codable, Equatable, Sendable {
         self.isInspectorVisible = try container.decodeIfPresent(Bool.self, forKey: .isInspectorVisible) ?? true
         self.showHiddenFiles = try container.decodeIfPresent(Bool.self, forKey: .showHiddenFiles) ?? false
         self.defaultSort = try container.decodeIfPresent(EntrySortDescriptor.self, forKey: .defaultSort) ?? EntrySortDescriptor()
+        self.previewMode = try container.decodeIfPresent(FilePreviewMode.self, forKey: .previewMode) ?? .smart
         self.previewByteLimit = try container.decodeIfPresent(FilePreviewByteLimit.self, forKey: .previewByteLimit) ?? .balanced
     }
 }

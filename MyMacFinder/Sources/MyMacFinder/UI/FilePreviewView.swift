@@ -5,6 +5,7 @@ struct FilePreviewView: View {
     private static let previewDebounceNanoseconds: UInt64 = 120_000_000
 
     let entry: FileEntry
+    let previewMode: FilePreviewMode
     let byteLimit: Int
     @State private var previewImage: NSImage?
     @State private var previewContent: FilePreviewContent = .visual
@@ -20,7 +21,7 @@ struct FilePreviewView: View {
                 visualPreview(message: message)
             }
         }
-        .task(id: PreviewLoadRequest(entryURL: entry.url.standardizedFileURL, byteLimit: byteLimit)) {
+        .task(id: PreviewLoadRequest(entryURL: entry.url.standardizedFileURL, previewMode: previewMode, byteLimit: byteLimit)) {
             await loadPreview()
         }
     }
@@ -97,6 +98,10 @@ struct FilePreviewView: View {
     private func loadPreview() async {
         previewImage = nil
         previewContent = .visual
+        if let message = FilePreviewPolicy.contentAvailability(mode: previewMode).message {
+            previewContent = .unsupported(message: message)
+            return
+        }
 
         do {
             try await Task.sleep(nanoseconds: Self.previewDebounceNanoseconds)
@@ -117,6 +122,13 @@ struct FilePreviewView: View {
         case .text, .unsupported:
             return
         case .visual:
+            if let message = FilePreviewPolicy.thumbnailAvailability(for: entry, mode: previewMode).message {
+                previewContent = .unsupported(message: message)
+                return
+            }
+            guard !entry.isDirectoryLike else {
+                return
+            }
             let preview = await FilePreviewThumbnailLoader.loadPreviewImage(
                 for: entry.url,
                 scale: NSScreen.main?.backingScaleFactor ?? 2
@@ -131,5 +143,6 @@ struct FilePreviewView: View {
 
 private struct PreviewLoadRequest: Hashable {
     let entryURL: URL
+    let previewMode: FilePreviewMode
     let byteLimit: Int
 }

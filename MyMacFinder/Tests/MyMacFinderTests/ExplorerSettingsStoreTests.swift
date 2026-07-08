@@ -62,5 +62,6 @@ final class ExplorerSettingsStoreTests: XCTestCase {
         let loadedSettings = UserDefaultsExplorerSettingsStore(defaults: defaults, key: key).load()
 
         XCTAssertEqual(loadedSettings.previewByteLimit, .balanced)
+        XCTAssertEqual(loadedSettings.previewMode, .smart)
     }
 }

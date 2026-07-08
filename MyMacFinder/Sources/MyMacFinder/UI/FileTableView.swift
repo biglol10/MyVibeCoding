@@ -1184,6 +1184,9 @@ struct FileTableView: NSViewRepresentable {
             guard row >= 0 else {
                 return menuProvider.emptyMenu()
             }
+            guard isFileContentHit(at: point, row: row) else {
+                return menuProvider.emptyMenu()
+            }
 
             if !selectedRowIndexes.contains(row) {
                 selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
@@ -1191,6 +1194,54 @@ struct FileTableView: NSViewRepresentable {
             }
 
             return menuProvider.itemMenu()
+        }
+
+        private func isFileContentHit(at point: NSPoint, row: Int) -> Bool {
+            let column = column(at: point)
+            guard column >= 0 else {
+                return false
+            }
+
+            guard let cell = view(atColumn: column, row: row, makeIfNecessary: true) as? NSTableCellView else {
+                return true
+            }
+            let columnRect = rect(ofColumn: column)
+            let columnIdentifier = tableColumns[column].identifier.rawValue
+
+            if columnIdentifier == "name" {
+                let iconLeading: CGFloat = 6
+                let iconWidth: CGFloat = 16
+                let iconTrailingSlop: CGFloat = 4
+                if point.x <= columnRect.minX + iconLeading + iconWidth + iconTrailingSlop {
+                    return true
+                }
+
+                return point.x <= textContentMaxX(
+                    textField: cell.textField,
+                    columnRect: columnRect,
+                    leading: iconLeading + iconWidth + 6
+                )
+            }
+
+            return point.x <= textContentMaxX(
+                textField: cell.textField,
+                columnRect: columnRect,
+                leading: 6
+            )
+        }
+
+        private func textContentMaxX(
+            textField: NSTextField?,
+            columnRect: NSRect,
+            leading: CGFloat
+        ) -> CGFloat {
+            guard let textField else {
+                return columnRect.minX + leading
+            }
+
+            let font = textField.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
+            let width = ceil((textField.stringValue as NSString).size(withAttributes: [.font: font]).width)
+            return min(columnRect.maxX, columnRect.minX + leading + width + 8)
         }
 
         private static func command(for action: Selector?) -> ExplorerCommand? {

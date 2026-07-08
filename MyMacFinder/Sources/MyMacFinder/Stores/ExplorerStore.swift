@@ -28,6 +28,7 @@ public final class ExplorerStore: ObservableObject {
     @Published public private(set) var showHiddenFiles: Bool
     @Published public private(set) var paneMode: ExplorerPaneMode
     @Published public private(set) var defaultSort: EntrySortDescriptor
+    @Published public private(set) var previewMode: FilePreviewMode
     @Published public private(set) var previewByteLimit: FilePreviewByteLimit
     @Published public private(set) var calculatedFolderSizes: [URL: Int64]
     @Published public private(set) var searchQuery: String {
@@ -162,6 +163,7 @@ public final class ExplorerStore: ObservableObject {
         self.showHiddenFiles = settings.showHiddenFiles
         self.paneMode = settings.paneMode
         self.defaultSort = settings.defaultSort
+        self.previewMode = settings.previewMode
         self.previewByteLimit = settings.previewByteLimit
         self.calculatedFolderSizes = [:]
         self.searchQuery = ""
@@ -259,6 +261,14 @@ public final class ExplorerStore: ObservableObject {
             return
         }
         previewByteLimit = limit
+        persistSettings()
+    }
+
+    public func setPreviewMode(_ mode: FilePreviewMode) {
+        guard previewMode != mode else {
+            return
+        }
+        previewMode = mode
         persistSettings()
     }
 
@@ -1544,6 +1554,7 @@ public final class ExplorerStore: ObservableObject {
                 isInspectorVisible: isInspectorVisible,
                 showHiddenFiles: showHiddenFiles,
                 defaultSort: defaultSort,
+                previewMode: previewMode,
                 previewByteLimit: previewByteLimit
             )
         )

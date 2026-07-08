@@ -241,6 +241,11 @@ struct MyMacFinderApp: App {
                                 Text(ordering.title).tag(ordering)
                             }
                         }
+                        Picker("Preview", selection: previewModeBinding) {
+                            ForEach(FilePreviewMode.allCases) { mode in
+                                Text(mode.title).tag(mode)
+                            }
+                        }
                         Picker("Text Preview Limit", selection: previewByteLimitBinding) {
                             ForEach(FilePreviewByteLimit.allCases) { limit in
                                 Text(limit.title).tag(limit)
@@ -341,6 +346,17 @@ struct MyMacFinderApp: App {
             },
             set: { limit in
                 explorerStore.setPreviewByteLimit(limit)
+            }
+        )
+    }
+
+    private var previewModeBinding: Binding<FilePreviewMode> {
+        Binding(
+            get: {
+                explorerStore.previewMode
+            },
+            set: { mode in
+                explorerStore.setPreviewMode(mode)
             }
         )
     }

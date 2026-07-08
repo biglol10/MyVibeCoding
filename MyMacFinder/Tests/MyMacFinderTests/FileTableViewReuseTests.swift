@@ -235,6 +235,69 @@ final class FileTableViewReuseTests: XCTestCase {
         XCTAssertEqual(commands, [.openInTerminal])
     }
 
+    func testRightClickingTrailingRowWhitespaceShowsEmptyAreaMenuWithoutChangingSelection() throws {
+        let entries = [
+            makeTableEntry(name: "Alpha"),
+            makeTableEntry(name: "Beta")
+        ]
+        var selections: [Set<URL>] = []
+        let harness = makeTableHarness(
+            entries: entries,
+            selectedRowIndexes: IndexSet(integer: 0),
+            canPaste: true,
+            canUndo: true,
+            onSelectionChange: { selections.append($0) },
+            onCommand: { _ in }
+        )
+        harness.tableView.frame = NSRect(x: 0, y: 0, width: 640, height: 120)
+        harness.tableView.tableColumns[0].width = 220
+        harness.tableView.rowHeight = 24
+        harness.tableView.reloadData()
+        harness.tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        selections.removeAll()
+
+        let trailingPoint = NSPoint(x: 180, y: 12)
+        XCTAssertEqual(harness.tableView.row(at: trailingPoint), 0)
+        XCTAssertEqual(harness.tableView.column(at: trailingPoint), 0)
+
+        let menu = try XCTUnwrap(harness.tableView.menu(for: rightClickEvent(at: trailingPoint)))
+
+        XCTAssertNotNil(menu.item(withTitle: "New Folder"))
+        XCTAssertNotNil(menu.item(withTitle: "Open in Terminal"))
+        XCTAssertNil(menu.item(withTitle: "Open"))
+        XCTAssertEqual(harness.tableView.selectedRowIndexes, IndexSet(integer: 0))
+        XCTAssertTrue(selections.isEmpty)
+    }
+
+    func testRightClickingNameCellContentShowsItemMenuAndSelectsClickedRow() throws {
+        let entries = [
+            makeTableEntry(name: "Alpha"),
+            makeTableEntry(name: "Beta")
+        ]
+        let harness = makeTableHarness(
+            entries: entries,
+            selectedRowIndexes: IndexSet(integer: 0),
+            canPaste: true,
+            canUndo: true,
+            onCommand: { _ in }
+        )
+        harness.tableView.frame = NSRect(x: 0, y: 0, width: 640, height: 120)
+        harness.tableView.tableColumns[0].width = 220
+        harness.tableView.rowHeight = 24
+        harness.tableView.reloadData()
+        harness.tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        harness.tableView.layoutSubtreeIfNeeded()
+
+        let textPoint = NSPoint(x: 42, y: 36)
+        XCTAssertEqual(harness.tableView.row(at: textPoint), 1)
+        XCTAssertEqual(harness.tableView.column(at: textPoint), 0)
+
+        let menu = try XCTUnwrap(harness.tableView.menu(for: rightClickEvent(at: textPoint)))
+
+        XCTAssertNotNil(menu.item(withTitle: "Open"))
+        XCTAssertNil(menu.item(withTitle: "New Folder"))
+    }
+
     func testInlineRenameRequestShowsManagedEditorWithEntryName() throws {
         let entry = makeTableEntry(name: "rename-me.txt")
         let paneID = PaneID()
@@ -1149,6 +1212,21 @@ private final class ReloadRecordingTableView: NSTableView {
         fullReloadCount = 0
         rowReloads = []
     }
+}
+
+@MainActor
+private func rightClickEvent(at point: NSPoint) -> NSEvent {
+    NSEvent.mouseEvent(
+        with: .rightMouseDown,
+        location: point,
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: 0,
+        context: nil,
+        eventNumber: 0,
+        clickCount: 1,
+        pressure: 0
+    )!
 }
 
 @MainActor
