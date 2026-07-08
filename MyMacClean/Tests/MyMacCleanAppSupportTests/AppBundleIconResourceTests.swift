@@ -15,4 +15,20 @@ final class AppBundleIconResourceTests: XCTestCase {
         XCTAssertEqual(plist["CFBundleIconFile"] as? String, "MyMacCleanIcon")
         XCTAssertTrue(FileManager.default.fileExists(atPath: iconURL.path), "MyMacCleanIcon.icns should exist in app resources")
     }
+
+    func testAppInfoPlistExplainsFinderAutomationForTrashFallback() throws {
+        let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let plistURL = root.appendingPathComponent("Sources/MyMacCleanApp/Resources/MyMacCleanInfo.plist")
+
+        let plistData = try Data(contentsOf: plistURL)
+        guard let plist = try PropertyListSerialization.propertyList(from: plistData, format: nil) as? [String: Any] else {
+            XCTFail("MyMacCleanInfo.plist should be a dictionary")
+            return
+        }
+
+        let usage = plist["NSAppleEventsUsageDescription"] as? String
+        XCTAssertNotNil(usage)
+        XCTAssertTrue(usage?.contains("Finder") == true)
+        XCTAssertTrue(usage?.contains("Trash") == true)
+    }
 }

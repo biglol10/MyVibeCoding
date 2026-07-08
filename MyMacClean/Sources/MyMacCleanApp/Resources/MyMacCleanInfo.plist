@@ -20,5 +20,7 @@
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>MyMacClean may ask Finder to move selected applications to Trash when macOS blocks the standard Trash API.</string>
 </dict>
 </plist>

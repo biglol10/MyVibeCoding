@@ -7,7 +7,7 @@
 | 프로그램 | 설명 | 소스 | 다운로드 |
 | --- | --- | --- | --- |
 | MyCaptureProgram | macOS 스크린샷/화면 녹화, 편집, OCR, 빠른 가리기, 히스토리/프리셋 앱 | [MyCaptureProgram](./MyCaptureProgram) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyCaptureProgram/CaptureStudio-personal-mac.zip), [실행 파일 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyCaptureProgram/CaptureStudio-macos-arm64.zip) |
-| MyMacClean | 앱 삭제, 고아 파일, 대용량 파일, 개발 캐시, 시작 항목을 검토 후 정리하는 SwiftUI 유틸리티 | [MyMacClean](./MyMacClean) | [MyMacClean-test-build.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacClean/MyMacClean-test-build.zip) |
+| MyMacClean | 앱 삭제, 고아 파일, 대용량 파일, 개발 캐시, 시작 항목을 권한 안내와 삭제 실패 로그까지 검토 후 정리하는 SwiftUI 유틸리티 | [MyMacClean](./MyMacClean) | [MyMacClean-test-build.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacClean/MyMacClean-test-build.zip) |
 | MyMacFinder | 듀얼 패널, 경로 명령, 강화된 인스펙터 미리보기를 갖춘 SwiftUI/AppKit 로컬 파일 관리자 | [MyMacFinder](./MyMacFinder) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacFinder/MyMacFinder-personal-mac.zip) |
 | MyMacStats | CPU, RAM, Disk I/O, Network, Battery, Processes 상태와 RAM 알림을 보여주는 SwiftUI 시스템 모니터 | [MyMacStats](./MyMacStats) | [MyMacStats-test-build.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacStats/MyMacStats-test-build.zip) |
 | MyMacCalendar | 로컬 우선 일정 관리, 반복 일정, 휴일, 메뉴바/플로팅 위젯을 제공하는 SwiftUI 캘린더 | [MyMacCalendar](./MyMacCalendar) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacCalendar/MyMacCalendar-personal-mac.zip), [test-build 호환 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacCalendar/MyMacCalendar-test-build.zip) |

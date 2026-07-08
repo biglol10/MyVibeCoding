@@ -37,6 +37,15 @@ MyMacClean is intentionally conservative.
   app-related cleanup.
 - Symlink targets are resolved before deletion decisions.
 - Cleanup receipts are recorded for destructive attempts.
+- If Full Disk Access appears to be missing at launch, MyMacClean shows a
+  permission prompt that opens System Settings directly to Full Disk Access.
+- Permission-related deletion failures show a toast action that opens Full Disk
+  Access settings.
+- If macOS rejects the standard Trash API for an app bundle, MyMacClean retries
+  through Finder. macOS may ask for permission to let MyMacClean control Finder;
+  this is used only to move the selected item to Trash.
+- Before a `/Applications` app bundle cleanup can request Finder access,
+  MyMacClean shows its own explanation dialog and lets you cancel.
 - Startup item management does not edit plist contents, does not call
   `launchctl`, and does not modify system-wide LaunchAgents or LaunchDaemons.
 - Disabling a startup item renames the plist only. If the agent is already
@@ -137,6 +146,10 @@ Recommended personal install flow from this repository:
    System Settings -> Privacy & Security -> Full Disk Access -> add MyMacClean.app
    ```
 
+   If MyMacClean detects missing access at launch, it shows an in-app prompt.
+   Choose `Open System Settings`, enable `MyMacClean.app` under Full Disk
+   Access, then restart the app.
+
 Full Disk Access is important. Without it, scans can miss files or deletion can
 fail for paths under protected Library locations.
 
@@ -150,16 +163,22 @@ Common fixes:
 1. Quit the app and its helpers first. If the app is still running, macOS may
    refuse to move its bundle or support folders.
 2. Grant Full Disk Access to `/Applications/MyMacClean.app`, then reopen
-   MyMacClean and retry.
-3. Use `Reveal in Finder` or copy the failed path from the error log, then move
+   MyMacClean and retry. If the failure toast shows `Open Full Disk Access
+   Settings`, use that button to jump to the correct settings page.
+3. If MyMacClean shows `Finder Permission May Be Needed`, choose
+   `Continue and Request Finder Permission` only if you want to proceed with
+   that deletion. macOS may then ask whether MyMacClean can control Finder;
+   allow it. This is a separate Automation permission used as a fallback for
+   app bundles that the standard Trash API refuses.
+4. Use `Reveal in Finder` or copy the failed path from the error log, then move
    that item to Trash manually. Finder may request an administrator password
    for some paths.
-4. If the file is locked, retry with `Force unlock locked items`. This clears
+5. If the file is locked, retry with `Force unlock locked items`. This clears
    file locks and restores user write permission, but it cannot bypass Full
    Disk Access, SIP, or administrator-only locations.
-5. For vendor updaters, menu bar helpers, or background agents, disable the
+6. For vendor updaters, menu bar helpers, or background agents, disable the
    startup item first or reboot, then retry cleanup.
-6. Avoid `sudo rm -rf` unless you have verified every path in the failed log.
+7. Avoid `sudo rm -rf` unless you have verified every path in the failed log.
    MyMacClean protects broad user folders and system roots on purpose.
 
 ## Build

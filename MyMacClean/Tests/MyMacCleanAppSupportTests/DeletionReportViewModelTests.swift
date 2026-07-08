@@ -212,6 +212,46 @@ final class DeletionReportViewModelTests: XCTestCase {
         XCTAssertEqual(toast.detailLines, ["/Applications/Cursor.app - Operation not permitted"])
     }
 
+    func testPermissionFailureToastOffersFullDiskAccessAction() {
+        let report = DeletionReportViewModel(
+            receipt: DeletionReceipt(
+                appName: "Cursor",
+                bundleIdentifier: "com.todesktop.230313mzl4w4u92",
+                bundlePath: "/Applications/Cursor.app",
+                action: .uninstall,
+                selectedCandidates: [],
+                executionResults: [
+                    DeletionItemResult(path: "/Applications/Cursor.app", success: false, errorMessage: "You don’t have permission to access it.")
+                ],
+                verificationResults: [
+                    DeletionVerificationResult(path: "/Applications/Cursor.app", status: .permissionDenied, errorMessage: nil)
+                ],
+                confirmationMatched: true
+            )
+        )
+
+        XCTAssertTrue(report.hasPermissionFailure)
+
+        let toast = DeletionToastPresentation(report: report)
+
+        XCTAssertTrue(toast.showsFullDiskAccessAction)
+        XCTAssertEqual(toast.fullDiskAccessButtonTitle, "Open Full Disk Access Settings")
+    }
+
+    func testPlainFailureToastDoesNotOfferFullDiskAccessAction() {
+        let toast = DeletionToastPresentation.error(message: "Quit Cursor before deleting it.")
+
+        XCTAssertFalse(toast.showsFullDiskAccessAction)
+    }
+
+    func testFinderAutomationFailureToastOffersAutomationSettingsAction() {
+        let toast = DeletionToastPresentation.error(message: "Finder Automation could not move item to Trash: Not authorized to send Apple events to Finder.")
+
+        XCTAssertTrue(toast.showsAutomationSettingsAction)
+        XCTAssertFalse(toast.showsFullDiskAccessAction)
+        XCTAssertEqual(toast.automationSettingsButtonTitle, "Open Automation Settings")
+    }
+
     func testSummarizesStartupItemChangeWithoutDeletionLanguage() {
         let report = DeletionReportViewModel(
             receipt: DeletionReceipt(

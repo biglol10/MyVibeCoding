@@ -56,6 +56,13 @@ All five pillars share these rules:
 - Recheck protection policy at execution time.
 - Record receipts for destructive cleanup attempts.
 - Show path-level failures instead of hiding them behind generic alerts.
+- Show a launch-time Full Disk Access prompt when protected Library probes
+  report permission denial, and provide a settings shortcut from
+  permission-related deletion failures.
+- Retry app-bundle Trash movement through Finder when the standard macOS Trash
+  API fails and the path still exists.
+- Before a `/Applications` app-bundle Trash cleanup can trigger Finder
+  Automation, show an in-app explanation dialog with continue/cancel choices.
 - Prefer reveal/copy actions for uncertain items.
 - For app-related cleanup, keep user documents, desktop, downloads, pictures,
   movies, music, iCloud document roots, system roots, and the running app
@@ -394,6 +401,13 @@ App-support tests:
 - Each view model prevents duplicate operations while already scanning or
   applying changes.
 - Startup item list presentation uses compact badge labels for narrow rows.
+- Full Disk Access prompt presentation probes protected Library locations and
+  opens the macOS Full Disk Access settings pane.
+- Deletion executor treats false-negative Trash errors as success when
+  verification shows the path is gone, and supports a Finder Trash fallback.
+- Finder Automation prompt presentation identifies `/Applications/*.app`
+  Trash cleanup and explains the Finder permission request before deletion
+  starts.
 
 Manual verification:
 
@@ -425,6 +439,13 @@ The feature set is acceptable for personal use when:
 ## Open Risks
 
 - Full Disk Access may be required for complete scans in some user folders.
+  The app prompts on launch when the protected-directory probe detects missing
+  access, but some permission failures can still require manual Finder or
+  administrator action.
+- Finder Trash fallback can require macOS Automation permission. If the user
+  denies it, the failed receipt should expose that error in Delete History.
+  Failed Automation errors should point to Automation settings, not Full Disk
+  Access settings.
 - Large-file scanning can be slow on huge directory trees.
 - Developer cache safety differs by workflow; Xcode Archives and DeviceSupport
   can be valuable, so they remain review-only.

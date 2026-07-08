@@ -8,18 +8,41 @@ public enum DeletionExecutionErrorMessage {
 
 public struct DeletionFileRemover: Sendable {
     private let trashHandler: @Sendable (URL) throws -> Void
+    private let fallbackTrashHandler: (@Sendable (URL) throws -> Void)?
     private let removeHandler: @Sendable (URL) throws -> Void
 
     public init(
         trash: @escaping @Sendable (URL) throws -> Void,
+        fallbackTrash: (@Sendable (URL) throws -> Void)? = nil,
         remove: @escaping @Sendable (URL) throws -> Void
     ) {
         self.trashHandler = trash
+        self.fallbackTrashHandler = fallbackTrash
         self.removeHandler = remove
     }
 
     public func trash(_ url: URL) throws {
-        try trashHandler(url)
+        do {
+            try trashHandler(url)
+        } catch {
+            if !FileManager.default.fileExists(atPath: url.path) {
+                return
+            }
+            guard let fallbackTrashHandler else {
+                throw error
+            }
+            do {
+                try fallbackTrashHandler(url)
+            } catch {
+                if !FileManager.default.fileExists(atPath: url.path) {
+                    return
+                }
+                throw error
+            }
+            if FileManager.default.fileExists(atPath: url.path) {
+                throw error
+            }
+        }
     }
 
     public func remove(_ url: URL) throws {
@@ -31,10 +54,49 @@ public struct DeletionFileRemover: Sendable {
             var resultingURL: NSURL?
             try FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
         },
+        fallbackTrash: { url in
+            try FinderTrashFallback.moveToTrash(url)
+        },
         remove: { url in
             try FileManager.default.removeItem(at: url)
         }
     )
+}
+
+private enum FinderTrashFallback {
+    static func moveToTrash(_ url: URL) throws {
+        let scriptSource = """
+        tell application "Finder"
+            delete (POSIX file \(appleScriptStringLiteral(url.path)) as alias)
+        end tell
+        """
+        guard let script = NSAppleScript(source: scriptSource) else {
+            throw FinderTrashFallbackError(message: "Finder fallback script could not be created.")
+        }
+
+        var errorInfo: NSDictionary?
+        _ = script.executeAndReturnError(&errorInfo)
+        if let errorInfo {
+            let message = errorInfo["NSAppleScriptErrorMessage"] as? String
+                ?? errorInfo.description
+            throw FinderTrashFallbackError(message: "Finder Automation could not move item to Trash: \(message)")
+        }
+    }
+
+    private static func appleScriptStringLiteral(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
+}
+
+private struct FinderTrashFallbackError: LocalizedError {
+    let message: String
+
+    var errorDescription: String? {
+        message
+    }
 }
 
 public enum DeletionMode: Equatable, Sendable {

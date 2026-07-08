@@ -103,6 +103,13 @@ public struct DeletionReportViewModel: Equatable, Sendable {
         errorLogs.map(\.line)
     }
 
+    public var hasPermissionFailure: Bool {
+        receipt.verificationResults.contains { $0.status == .permissionDenied }
+            || errorLogs.contains { log in
+                Self.isPermissionFailureMessage(log.message)
+            }
+    }
+
     public var copyableReportText: String {
         var lines = [
             receipt.action.isStartupItemChange ? "MyMacClean Startup Item Report" : "MyMacClean Deletion Report",
@@ -127,5 +134,13 @@ public struct DeletionReportViewModel: Equatable, Sendable {
         }
 
         return lines.joined(separator: "\n")
+    }
+
+    private static func isPermissionFailureMessage(_ message: String) -> Bool {
+        let normalized = message.lowercased()
+        return normalized.contains("permission")
+            || normalized.contains("operation not permitted")
+            || normalized.contains("full disk access")
+            || normalized.contains("not authorized")
     }
 }

@@ -24,6 +24,9 @@ struct ContentView: View {
     @State private var forceDelete = false
     @State private var permanentDelete = false
     @State private var deletionToast: DeletionToastPresentation?
+    @State private var isFullDiskAccessPromptPresented = false
+    @State private var isFinderAutomationPromptPresented = false
+    @State private var hasAcknowledgedFinderAutomationPrompt = false
 
     private static var deletionProtectionPolicy: ProtectionPolicy {
         ProtectionPolicy(additionalProtectedRoots: currentApplicationProtectedRoots)
@@ -44,10 +47,21 @@ struct ContentView: View {
         .task {
             await viewModel.loadApps()
             orphanFilesViewModel.updateInstalledApps(viewModel.apps)
+            showFullDiskAccessPromptIfNeeded()
         }
         .overlay(alignment: .topTrailing) {
             if let deletionToast {
                 DeletionToastView(toast: deletionToast) {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        self.deletionToast = nil
+                    }
+                } openFullDiskAccessSettings: {
+                    openFullDiskAccessSettings()
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        self.deletionToast = nil
+                    }
+                } openAutomationSettings: {
+                    openAutomationSettings()
                     withAnimation(.easeInOut(duration: 0.18)) {
                         self.deletionToast = nil
                     }
@@ -56,6 +70,14 @@ struct ContentView: View {
                 .padding(.trailing, 18)
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
+        }
+        .alert(FullDiskAccessPromptPresentation().title, isPresented: $isFullDiskAccessPromptPresented) {
+            Button(FullDiskAccessPromptPresentation().primaryButtonTitle) {
+                openFullDiskAccessSettings()
+            }
+            Button("Later", role: .cancel) {}
+        } message: {
+            Text(FullDiskAccessPromptPresentation().message)
         }
         .alert("MyMacClean", isPresented: errorAlertBinding) {
             Button("OK") {
@@ -1312,29 +1334,27 @@ struct ContentView: View {
                     .disabled(isDeleting)
                 Spacer()
                 Button(isDeleting ? "Deleting..." : (effectivePermanentDelete ? "Permanently Delete" : "Move to Trash"), role: .destructive) {
-                    Task {
-                        let deletionMode: DeletionMode = effectivePermanentDelete ? .permanent : .moveToTrash
-                        let report: DeletionReportViewModel?
-                        switch mode {
-                        case .application:
-                            report = await viewModel.deleteConfirmedItems(confirmation: confirmationText, force: forceDelete, mode: deletionMode)
-                        case .orphanFiles:
-                            report = await orphanFilesViewModel.deleteSelectedLeftovers(confirmation: confirmationText, force: forceDelete, mode: deletionMode)
-                        case .largeFiles:
-                            report = await largeFilesViewModel.moveSelectedToTrash(confirmation: confirmationText)
-                        case .developerCache:
-                            report = await developerCacheViewModel.moveSelectedToTrash(confirmation: confirmationText)
-                        }
-                        let errorMessage = consumeDeletionError(for: mode)
-                        confirmationMode = nil
-                        presentDeletionToast(report: report, errorMessage: errorMessage)
-                    }
+                    handleConfirmedDeletionTap(for: mode, effectivePermanentDelete: effectivePermanentDelete)
                 }
                 .disabled(confirmationText != requiredConfirmation || isDeleting)
             }
         }
         .padding()
         .frame(width: 460)
+        .alert(FinderAutomationPromptPresentation().title, isPresented: $isFinderAutomationPromptPresented) {
+            Button(FinderAutomationPromptPresentation().cancelButtonTitle, role: .cancel) {}
+            Button(FinderAutomationPromptPresentation().primaryButtonTitle) {
+                hasAcknowledgedFinderAutomationPrompt = true
+                Task {
+                    await performConfirmedDeletion(
+                        for: mode,
+                        effectivePermanentDelete: confirmationEffectivePermanentDelete(for: mode)
+                    )
+                }
+            }
+        } message: {
+            Text(FinderAutomationPromptPresentation().message)
+        }
     }
 
     private var selectedCandidates: [RelatedFileCandidate] {
@@ -1349,7 +1369,42 @@ struct ContentView: View {
         confirmationText = ""
         forceDelete = false
         permanentDelete = false
+        hasAcknowledgedFinderAutomationPrompt = false
         confirmationMode = mode
+    }
+
+    private func handleConfirmedDeletionTap(for mode: DeletionConfirmationMode, effectivePermanentDelete: Bool) {
+        let deletionMode: DeletionMode = effectivePermanentDelete ? .permanent : .moveToTrash
+        if !hasAcknowledgedFinderAutomationPrompt,
+           FinderAutomationPromptPresentation.requiresPrompt(
+                candidates: confirmationSelectedCandidates(for: mode),
+                mode: deletionMode
+           ) {
+            isFinderAutomationPromptPresented = true
+            return
+        }
+
+        Task {
+            await performConfirmedDeletion(for: mode, effectivePermanentDelete: effectivePermanentDelete)
+        }
+    }
+
+    private func performConfirmedDeletion(for mode: DeletionConfirmationMode, effectivePermanentDelete: Bool) async {
+        let deletionMode: DeletionMode = effectivePermanentDelete ? .permanent : .moveToTrash
+        let report: DeletionReportViewModel?
+        switch mode {
+        case .application:
+            report = await viewModel.deleteConfirmedItems(confirmation: confirmationText, force: forceDelete, mode: deletionMode)
+        case .orphanFiles:
+            report = await orphanFilesViewModel.deleteSelectedLeftovers(confirmation: confirmationText, force: forceDelete, mode: deletionMode)
+        case .largeFiles:
+            report = await largeFilesViewModel.moveSelectedToTrash(confirmation: confirmationText)
+        case .developerCache:
+            report = await developerCacheViewModel.moveSelectedToTrash(confirmation: confirmationText)
+        }
+        let errorMessage = consumeDeletionError(for: mode)
+        confirmationMode = nil
+        presentDeletionToast(report: report, errorMessage: errorMessage)
     }
 
     private func consumeDeletionError(for mode: DeletionConfirmationMode) -> String? {
@@ -1393,6 +1448,19 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    private func showFullDiskAccessPromptIfNeeded() {
+        guard FullDiskAccessProbe().status() == .missing else { return }
+        isFullDiskAccessPromptPresented = true
+    }
+
+    private func openFullDiskAccessSettings() {
+        NSWorkspace.shared.open(FullDiskAccessPromptPresentation().settingsURL)
+    }
+
+    private func openAutomationSettings() {
+        NSWorkspace.shared.open(FinderAutomationPromptPresentation().settingsURL)
     }
 
     private func confirmationSelectedCandidates(for mode: DeletionConfirmationMode) -> [RelatedFileCandidate] {
@@ -1444,6 +1512,15 @@ struct ContentView: View {
 
     private func confirmationIncludesAppBundle(for mode: DeletionConfirmationMode) -> Bool {
         confirmationSelectedCandidates(for: mode).contains { $0.kind == .appBundle }
+    }
+
+    private func confirmationEffectivePermanentDelete(for mode: DeletionConfirmationMode) -> Bool {
+        switch mode {
+        case .largeFiles, .developerCache:
+            return false
+        case .application, .orphanFiles:
+            return permanentDelete
+        }
     }
 
     private func confirmationIsDeleting(for mode: DeletionConfirmationMode) -> Bool {
@@ -1747,6 +1824,8 @@ private struct ErrorLogsDisclosure: View {
 private struct DeletionToastView: View {
     let toast: DeletionToastPresentation
     let dismiss: () -> Void
+    let openFullDiskAccessSettings: () -> Void
+    let openAutomationSettings: () -> Void
 
     private var tint: Color {
         switch toast.severity {
@@ -1811,6 +1890,30 @@ private struct DeletionToastView: View {
                     Text("Details")
                         .font(.callout.weight(.semibold))
                 }
+            }
+
+            if toast.showsFullDiskAccessAction {
+                Button {
+                    openFullDiskAccessSettings()
+                } label: {
+                    Label(toast.fullDiskAccessButtonTitle, systemImage: "gearshape")
+                        .font(.callout.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 34)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+            }
+
+            if toast.showsAutomationSettingsAction {
+                Button {
+                    openAutomationSettings()
+                } label: {
+                    Label(toast.automationSettingsButtonTitle, systemImage: "gearshape.2")
+                        .font(.callout.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 34)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
             }
         }
         .padding(14)
