@@ -85,6 +85,20 @@ final class ExplorerStorePathInputCommandTests: XCTestCase {
     }
 
     @MainActor
+    func testOpenInTerminalCommandUsesCurrentFolderWhenSelectionIsEmpty() async {
+        let launcher = SpyExternalAppLauncher()
+        let store = ExplorerStore(
+            initialURL: tempDirectory,
+            directoryWatcher: nil,
+            externalAppLauncher: launcher
+        )
+
+        await store.perform(.openInTerminal)
+
+        XCTAssertEqual(launcher.terminalDirectories, [tempDirectory.standardizedFileURL])
+    }
+
+    @MainActor
     func testOpenSelectedWithApplicationUsesSelectedURLs() async throws {
         let file = tempDirectory.appendingPathComponent("note.txt")
         try "note".write(to: file, atomically: true, encoding: .utf8)

@@ -10,7 +10,7 @@ MyMacFinder는 macOS Finder를 Windows 파일 탐색기와 ForkLift에 가까운
 - 경로 입력, 뒤로/앞으로/상위 폴더 이동, 경로 입력창 명령(`cmd`, `terminal`, `code .`, `open .`)
 - Sidebar: 기본 Favorites, Recent Folders, Locations, 사용자 추가/삭제/정렬 가능한 Favorites
 - 파일/폴더 목록: 이름, 크기, 수정일, 종류, Finder Tags 열
-- 컨텍스트 메뉴 Open With, 폴더 Open in Terminal / Open in VS Code
+- 컨텍스트 메뉴 Open With, 폴더 Open in Terminal / Open in VS Code, 빈 영역 Open in Terminal
 - 정렬: 이름, 크기, 종류, 확장자, 생성일, 수정일, 접근일, hidden 여부, 폴더/파일 그룹 정렬
 - 숨김 파일 표시 on/off
 - 현재 폴더 검색과 하위 폴더 포함 검색
@@ -60,7 +60,7 @@ MyMacFinder는 macOS Finder를 Windows 파일 탐색기와 ForkLift에 가까운
 - `cmd` / `terminal`은 Terminal 실행 요청 후 MyMacFinder를 유지하고, Terminal completion error를 앱 오류로 표시하지 않음
 - 파일 작업 실패, ZIP 압축/해제 실패, 외부 앱 실행 실패는 단순 read failure로 뭉개지지 않고 작업 종류에 맞는 오류로 표시
 - 경로 입력창에 포커스가 있을 때 `Cmd+A/C/V` 같은 텍스트 편집 단축키는 파일 작업 단축키로 새지 않음
-- 파일 컨텍스트 메뉴 Open With와 폴더 Open in Terminal / Open in VS Code
+- 파일 컨텍스트 메뉴 Open With와 폴더 Open in Terminal / Open in VS Code, 빈 영역 컨텍스트 메뉴의 현재 폴더 Open in Terminal
 - Open in VS Code는 LaunchServices bundle id로 앱을 찾고, 앱 위치를 찾지 못하면 하드코딩된 후보 경로 대신 사용자 셸의 `code` 명령으로 fallback
 - Settings의 기본 정렬 변경은 현재 pane뿐 아니라 열려 있는 비활성 tab에도 적용
 - 폴더 이동 시 table scroll position을 좌상단으로 초기화해서 이전 폴더의 가로/세로 스크롤이 새 폴더에 남지 않음
@@ -183,7 +183,7 @@ GitHub Actions CI도 루트 `.github/workflows/ci.yml`에서 `swift test --enabl
 - root 상위 폴더 이동 비활성화와 path input focus clear
 - Back/Forward target load failure 시 history stack 보존
 - directory watcher 기반 active/visible pane refresh, ZIP host 변경 시 archive pane refresh
-- path input command resolver, Terminal fire-and-forget launch, Open With menu routing, VS Code bundle lookup/user-shell command fallback, external app launcher duplicate-completion guard
+- path input command resolver, Terminal fire-and-forget launch, empty-area Open in Terminal routing, Open With menu routing, VS Code bundle lookup/user-shell command fallback, external app launcher duplicate-completion guard
 - permission guidance, security-scoped bookmark store, persisted grant resolution/access lifecycle
 - AppKit table bridge, inline rename request/edit commit, column sizing, location-change scroll reset, supported-column sort affordance, context menu command availability, responder-chain shortcuts, F5/F6 opposite-pane commands, system pasteboard file copy/paste
 - metadata-based table row icon caching
@@ -251,4 +251,4 @@ git diff --check
 ./scripts/package_personal.sh
 ```
 
-최근 검증 기준으로 `swift test --enable-code-coverage`는 367 tests / 0 failures로 통과했습니다. `swift build`, `git diff --check`, CI YAML parse, `./scripts/build_app.sh`, `./scripts/verify-app-icon.sh`, `./scripts/package_personal.sh`도 통과했고, 개인 설치 zip은 `dist/MyMacFinder-personal-mac.zip`에 생성됩니다. 최근 수동 QA에서는 `build/MyMacFinder.app`을 직접 실행해 기본 파일 탐색 화면과 Settings 창 실행을 확인했습니다.
+최근 검증 기준으로 `swift test --enable-code-coverage`는 372 tests / 0 failures로 통과했습니다. `swift build`, `git diff --check`, CI YAML parse, `./scripts/build_app.sh`, `./scripts/verify-app-icon.sh`, `./scripts/package_personal.sh`, `unzip -t dist/MyMacFinder-personal-mac.zip`, `codesign --verify --deep --strict --verbose=2 build/MyMacFinder.app`도 통과했고, 개인 설치 zip은 `dist/MyMacFinder-personal-mac.zip`에 생성됩니다. 최근 수동 QA에서는 `build/MyMacFinder.app`을 직접 실행해 기본 파일 탐색 화면과 Settings 창 실행을 확인했습니다.

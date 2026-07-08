@@ -442,6 +442,7 @@ struct FileTableView: NSViewRepresentable {
             addMenuItem(to: menu, command: .undo, selectionCount: 0)
             menu.addItem(.separator())
             addMenuItem(to: menu, command: .newFolder)
+            addMenuItem(to: menu, command: .openInTerminal, selectionCount: 0)
             addMenuItem(to: menu, command: .paste, selectionCount: 0)
             menu.addItem(.separator())
             addMenuItem(to: menu, command: .refresh)

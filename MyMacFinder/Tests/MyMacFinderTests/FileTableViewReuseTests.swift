@@ -214,6 +214,27 @@ final class FileTableViewReuseTests: XCTestCase {
         XCTAssertTrue(commands.isEmpty)
     }
 
+    func testEmptyAreaContextMenuIncludesOpenInTerminalAndRoutesCommand() throws {
+        let entry = makeTableEntry(name: "Projects")
+        var commands: [ExplorerCommand] = []
+        let harness = makeTableHarness(
+            entries: [entry],
+            selectedRowIndexes: [],
+            canPaste: true,
+            canUndo: true,
+            onCommand: { commands.append($0) }
+        )
+
+        let menu = harness.coordinator.emptyMenu()
+        let terminalItem = try XCTUnwrap(menu.item(withTitle: "Open in Terminal"))
+
+        XCTAssertTrue(terminalItem.isEnabled)
+
+        _ = (terminalItem.target as AnyObject).perform(terminalItem.action, with: terminalItem)
+
+        XCTAssertEqual(commands, [.openInTerminal])
+    }
+
     func testInlineRenameRequestShowsManagedEditorWithEntryName() throws {
         let entry = makeTableEntry(name: "rename-me.txt")
         let paneID = PaneID()

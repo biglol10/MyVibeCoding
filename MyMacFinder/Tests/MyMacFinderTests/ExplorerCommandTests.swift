@@ -234,6 +234,24 @@ final class ExplorerCommandTests: XCTestCase {
             isReadable: true
         )
 
+        XCTAssertTrue(
+            ExplorerCommand.openInTerminal.isEnabled(
+                selectionCount: 0,
+                canPaste: false,
+                selectedEntries: [],
+                isArchiveLocation: false
+            )
+        )
+
+        XCTAssertFalse(
+            ExplorerCommand.openInTerminal.isEnabled(
+                selectionCount: 0,
+                canPaste: false,
+                selectedEntries: [],
+                isArchiveLocation: true
+            )
+        )
+
         for command in [ExplorerCommand.openInTerminal, .openInVSCode] {
             XCTAssertTrue(
                 command.isEnabled(

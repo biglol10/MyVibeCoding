@@ -178,7 +178,13 @@ public enum ExplorerCommand: String, CaseIterable, Identifiable {
             return canUndo
         case .paste:
             return canPaste
-        case .openInTerminal, .openInVSCode:
+        case .openInTerminal:
+            return selectionCount == 0 || (
+                selectionCount == 1
+                && selectedEntries.first?.isDirectoryLike == true
+                && selectedEntries.first?.isArchiveBacked == false
+            )
+        case .openInVSCode:
             return selectionCount == 1
                 && selectedEntries.first?.isDirectoryLike == true
                 && selectedEntries.first?.isArchiveBacked == false

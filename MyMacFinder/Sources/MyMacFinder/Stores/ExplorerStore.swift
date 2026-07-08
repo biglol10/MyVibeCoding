@@ -969,6 +969,8 @@ public final class ExplorerStore: ObservableObject {
             case .openInTerminal:
                 if let first = activeSelectedEntries.first, first.isDirectoryLike {
                     try await externalAppLauncher.openTerminal(at: first.url)
+                } else if activePane.selectedURLs.isEmpty, let currentURL = activePane.location.fileSystemURL {
+                    try await externalAppLauncher.openTerminal(at: currentURL)
                 }
             case .openInVSCode:
                 if let first = activeSelectedEntries.first, first.isDirectoryLike {
