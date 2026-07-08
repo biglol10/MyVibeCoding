@@ -298,6 +298,64 @@ final class FileTableViewReuseTests: XCTestCase {
         XCTAssertNil(menu.item(withTitle: "New Folder"))
     }
 
+    func testLeftClickingNameCellContentSelectsClickedRow() {
+        let entries = [
+            makeTableEntry(name: "Alpha"),
+            makeTableEntry(name: "Beta")
+        ]
+        var selections: [Set<URL>] = []
+        let harness = makeTableHarness(
+            entries: entries,
+            selectedRowIndexes: [],
+            canPaste: false,
+            canUndo: false,
+            onSelectionChange: { selections.append($0) },
+            onCommand: { _ in }
+        )
+        harness.tableView.frame = NSRect(x: 0, y: 0, width: 640, height: 120)
+        harness.tableView.tableColumns[0].width = 220
+        harness.tableView.rowHeight = 24
+        harness.tableView.reloadData()
+
+        harness.tableView.selectRowForPlainLeftClickIfNeeded(
+            at: NSPoint(x: 42, y: 36),
+            modifierFlags: [],
+            clickCount: 1
+        )
+
+        XCTAssertTrue(harness.tableView.selectedRowIndexes.contains(1))
+        XCTAssertEqual(selections.last, Set([entries[1].url]))
+    }
+
+    func testLeftClickingTrailingRowWhitespaceSelectsClickedRow() {
+        let entries = [
+            makeTableEntry(name: "Alpha"),
+            makeTableEntry(name: "Beta")
+        ]
+        var selections: [Set<URL>] = []
+        let harness = makeTableHarness(
+            entries: entries,
+            selectedRowIndexes: [],
+            canPaste: false,
+            canUndo: false,
+            onSelectionChange: { selections.append($0) },
+            onCommand: { _ in }
+        )
+        harness.tableView.frame = NSRect(x: 0, y: 0, width: 640, height: 120)
+        harness.tableView.tableColumns[0].width = 220
+        harness.tableView.rowHeight = 24
+        harness.tableView.reloadData()
+
+        harness.tableView.selectRowForPlainLeftClickIfNeeded(
+            at: NSPoint(x: 180, y: 12),
+            modifierFlags: [],
+            clickCount: 1
+        )
+
+        XCTAssertTrue(harness.tableView.selectedRowIndexes.contains(0))
+        XCTAssertEqual(selections.last, Set([entries[0].url]))
+    }
+
     func testInlineRenameRequestShowsManagedEditorWithEntryName() throws {
         let entry = makeTableEntry(name: "rename-me.txt")
         let paneID = PaneID()

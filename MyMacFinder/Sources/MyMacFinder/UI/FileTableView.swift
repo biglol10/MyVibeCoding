@@ -1110,6 +1110,8 @@ struct FileTableView: NSViewRepresentable {
         }
 
         override func mouseDown(with event: NSEvent) {
+            window?.makeFirstResponder(self)
+            selectRowForPlainLeftClickIfNeeded(event)
             super.mouseDown(with: event)
             menuProvider?.handleTableFocus()
         }
@@ -1174,12 +1176,51 @@ struct FileTableView: NSViewRepresentable {
             return super.validateUserInterfaceItem(item)
         }
 
+        private func selectRowForPlainLeftClickIfNeeded(_ event: NSEvent) {
+            guard event.type == .leftMouseDown else {
+                return
+            }
+            selectRowForPlainLeftClickIfNeeded(
+                at: tablePoint(for: event),
+                modifierFlags: event.modifierFlags,
+                clickCount: event.clickCount
+            )
+        }
+
+        func selectRowForPlainLeftClickIfNeeded(
+            at point: NSPoint,
+            modifierFlags: NSEvent.ModifierFlags,
+            clickCount: Int
+        ) {
+            guard clickCount == 1 else {
+                return
+            }
+
+            let independentFlags = modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard independentFlags.isDisjoint(with: [.command, .shift]) else {
+                return
+            }
+
+            let row = row(at: point)
+            guard row >= 0 else {
+                return
+            }
+
+            let rowSelection = IndexSet(integer: row)
+            guard selectedRowIndexes != rowSelection else {
+                return
+            }
+
+            selectRowIndexes(rowSelection, byExtendingSelection: false)
+            menuProvider?.publishSelection()
+        }
+
         override func menu(for event: NSEvent) -> NSMenu? {
             guard let menuProvider else {
                 return super.menu(for: event)
             }
 
-            let point = convert(event.locationInWindow, from: nil)
+            let point = tablePoint(for: event)
             let row = row(at: point)
             guard row >= 0 else {
                 return menuProvider.emptyMenu()
@@ -1194,6 +1235,13 @@ struct FileTableView: NSViewRepresentable {
             }
 
             return menuProvider.itemMenu()
+        }
+
+        private func tablePoint(for event: NSEvent) -> NSPoint {
+            guard event.window != nil || window != nil else {
+                return event.locationInWindow
+            }
+            return convert(event.locationInWindow, from: nil)
         }
 
         private func isFileContentHit(at point: NSPoint, row: Int) -> Bool {
