@@ -1003,6 +1003,14 @@ public final class ExplorerStore: ObservableObject {
                     recordUndo(.created(result.createdURLs))
                 }
                 await refresh()
+                if let createdURL = result.createdURLs.first {
+                    updateSelection([createdURL.standardizedFileURL])
+                    requestToolbarFocusClear()
+                    inlineRenameRequest = InlineRenameRequest(
+                        paneID: activePane.id,
+                        url: createdURL
+                    )
+                }
             case .rename:
                 requestInlineRenameForSelection()
             case .duplicate:

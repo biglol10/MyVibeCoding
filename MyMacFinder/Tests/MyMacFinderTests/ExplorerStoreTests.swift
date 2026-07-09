@@ -217,6 +217,19 @@ final class ExplorerStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testCreateFolderCommandRequestsInlineRenameForNewFolder() async {
+        let store = ExplorerStore(initialURL: tempDirectory)
+
+        await store.perform(.newFolder)
+
+        let createdFolder = tempDirectory
+            .appendingPathComponent("Untitled Folder", isDirectory: true)
+            .standardizedFileURL
+        XCTAssertEqual(store.inlineRenameRequest?.paneID, store.panes[store.activePaneIndex].id)
+        XCTAssertEqual(store.inlineRenameRequest?.url, createdFolder)
+    }
+
+    @MainActor
     func testDuplicateCommandDuplicatesSelectedFile() async throws {
         let file = tempDirectory.appendingPathComponent("note.txt")
         try "text".write(to: file, atomically: true, encoding: .utf8)

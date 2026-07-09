@@ -100,6 +100,27 @@ final class FileTableViewReuseTests: XCTestCase {
         XCTAssertEqual(openedApplication, preview)
     }
 
+    func testItemContextMenuLabelsTrashActionAsDeleteAndRoutesCommand() throws {
+        let entry = makeTableEntry(name: "remove-me.txt")
+        var commands: [ExplorerCommand] = []
+        let harness = makeTableHarness(
+            entries: [entry],
+            selectedRowIndexes: IndexSet(integer: 0),
+            canPaste: false,
+            canUndo: false,
+            onCommand: { commands.append($0) }
+        )
+
+        let menu = harness.coordinator.itemMenu()
+        let deleteItem = try XCTUnwrap(menu.item(withTitle: "Delete"))
+
+        XCTAssertNil(menu.item(withTitle: ExplorerCommand.moveToTrash.title))
+        XCTAssertTrue(deleteItem.isEnabled)
+        _ = (deleteItem.target as AnyObject).perform(deleteItem.action, with: deleteItem)
+
+        XCTAssertEqual(commands, [.moveToTrash])
+    }
+
     func testTableFocusCallbackPublishesEvenWhenSelectionDoesNotChange() {
         let entry = makeTableEntry(name: "report.txt")
         var focusCount = 0

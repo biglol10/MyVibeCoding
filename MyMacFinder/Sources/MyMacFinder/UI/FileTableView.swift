@@ -430,7 +430,7 @@ struct FileTableView: NSViewRepresentable {
             addMenuItem(to: menu, command: .paste)
             menu.addItem(.separator())
             addMenuItem(to: menu, command: .copyPath)
-            addMenuItem(to: menu, command: .moveToTrash)
+            addMenuItem(to: menu, command: .moveToTrash, title: "Delete")
             addMenuItem(to: menu, command: .revealInFinder)
             menu.addItem(.separator())
             addMenuItem(to: menu, command: .refresh)

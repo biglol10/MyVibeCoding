@@ -252,4 +252,4 @@ git diff --check
 ./scripts/package_personal.sh
 ```
 
-최근 검증 기준으로 `swift test --enable-code-coverage`는 380 tests / 0 failures로 통과했습니다. `swift build`, `git diff --check`, CI YAML parse, `./scripts/build_app.sh`, `./scripts/verify-app-icon.sh`, `./scripts/package_personal.sh`, `unzip -t dist/MyMacFinder-personal-mac.zip`, `codesign --verify --deep --strict --verbose=2 build/MyMacFinder.app`도 통과했고, 개인 설치 zip은 `dist/MyMacFinder-personal-mac.zip`에 생성됩니다. 최근 수동 QA에서는 `build/MyMacFinder.app`을 직접 실행해 기본 파일 탐색 화면과 Settings 창 실행을 확인했습니다.
+최근 검증 기준으로 `swift test --enable-code-coverage`는 382 tests / 0 failures로 통과했습니다. `swift build`, `git diff --check`, CI YAML parse, `./scripts/build_app.sh`, `./scripts/verify-app-icon.sh`, `./scripts/package_personal.sh`, `unzip -t dist/MyMacFinder-personal-mac.zip`, `codesign --verify --deep --strict --verbose=2 build/MyMacFinder.app`도 통과했고, 개인 설치 zip은 `dist/MyMacFinder-personal-mac.zip`에 생성됩니다. 최근 수동 QA에서는 `build/MyMacFinder.app`을 직접 실행해 기본 파일 탐색 화면과 Settings 창 실행을 확인했습니다.
