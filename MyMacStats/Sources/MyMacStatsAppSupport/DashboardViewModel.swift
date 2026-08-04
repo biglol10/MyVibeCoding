@@ -49,6 +49,7 @@ public final class DashboardViewModel: ObservableObject {
 
     private let service: SystemMetricsService
     private let healthAlertController: HealthAlertController
+    private let applicationTerminator: ApplicationTerminating
     private var terminator: ProcessTerminator
     private var terminationMessageProcessID: Int32?
     private var forceQuitCandidateGroupID: String?
@@ -65,11 +66,13 @@ public final class DashboardViewModel: ObservableObject {
         snapshot: SystemMetricsSnapshot = .empty(),
         service: SystemMetricsService = SystemMetricsService(),
         healthAlertController: HealthAlertController = HealthAlertController(),
-        terminator: ProcessTerminator = ProcessTerminator()
+        terminator: ProcessTerminator = ProcessTerminator(),
+        applicationTerminator: ApplicationTerminating = RunningApplicationTerminator()
     ) {
         self.snapshot = snapshot
         self.service = service
         self.healthAlertController = healthAlertController
+        self.applicationTerminator = applicationTerminator
         self.terminator = terminator
         self.selectedKind = .cpu
         self.searchText = ""
@@ -297,13 +300,63 @@ public final class DashboardViewModel: ObservableObject {
         pendingTerminationMode = .quit
     }
 
-    public func confirmPendingTermination() {
-        guard let process = pendingTerminationProcess else { return }
-        let mode = pendingTerminationMode
-        let targets = pendingTerminationGroup?.processes ?? [process]
-        let targetDescription = pendingTerminationTargetDescription(process: process)
-        let targetGroupID = pendingTerminationGroup?.id ?? terminationGroup(for: process)?.id
+    public func confirmPendingTermination() async {
+        await confirmPendingTermination(
+            process: pendingTerminationProcess,
+            group: pendingTerminationGroup,
+            mode: pendingTerminationMode
+        )
+    }
+
+    public func confirmPendingTermination(
+        process: ProcessMetric?,
+        group: ProcessAppGroup?,
+        mode: ProcessTerminationMode
+    ) async {
+        guard let process else { return }
+        let originalTargets = group?.processes ?? [process]
+        let targetDescription = pendingTerminationTargetDescription(process: process, group: group)
+        let targetGroupID = group?.id ?? terminationGroup(for: process)?.id
+
+        let latestSnapshot = await service.refresh()
+        snapshot = latestSnapshot
+        await healthAlertController.observe(snapshot: latestSnapshot)
+
+        let targetValidation = validatedTerminationTargets(
+            originalTargets,
+            latestProcesses: latestSnapshot.processes
+        )
+        guard case .valid(let targets) = targetValidation else {
+            switch targetValidation {
+            case .allExited:
+                terminationMessage = "The selected process already exited."
+            case .identityChanged:
+                terminationMessage = "The selected process changed before termination. Refresh and try again."
+            case .valid:
+                break
+            }
+            terminationMessageProcessID = process.pid
+            forceQuitCandidateGroupID = nil
+            pendingTerminationProcess = nil
+            pendingTerminationGroup = nil
+            pendingTerminationMode = .quit
+            return
+        }
+
         do {
+            if mode == .quit,
+               group?.isApplicationTarget == true,
+               applicationTerminator.terminateApplicationProcesses(targets, mode: mode) {
+                terminationMessage = "Termination requested for \(targetDescription)."
+                forceQuitCandidateGroupID = targetGroupID
+                terminationMessageProcessID = process.pid
+                pendingTerminationProcess = nil
+                pendingTerminationGroup = nil
+                pendingTerminationMode = .quit
+                schedulePostTerminationRefresh()
+                return
+            }
+
             try terminator.terminate(targets, mode: mode)
             switch mode {
             case .quit:
@@ -317,10 +370,7 @@ public final class DashboardViewModel: ObservableObject {
             pendingTerminationProcess = nil
             pendingTerminationGroup = nil
             pendingTerminationMode = .quit
-            Task { [weak self] in
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                await self?.refreshNow()
-            }
+            schedulePostTerminationRefresh()
         } catch let error as ProcessTerminationError {
             terminationMessage = error.message
             terminationMessageProcessID = process.pid
@@ -336,6 +386,13 @@ public final class DashboardViewModel: ObservableObject {
         }
     }
 
+    private func schedulePostTerminationRefresh() {
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            await self?.refreshNow()
+        }
+    }
+
     private func terminationGroup(for process: ProcessMetric) -> ProcessAppGroup? {
         displayedProcessGroups.first { group in
             group.processes.contains { $0.pid == process.pid }
@@ -347,13 +404,37 @@ public final class DashboardViewModel: ObservableObject {
     }
 
     private func pendingTerminationTargetDescription(process: ProcessMetric) -> String {
-        guard let group = pendingTerminationGroup else {
+        pendingTerminationTargetDescription(process: process, group: pendingTerminationGroup)
+    }
+
+    private func pendingTerminationTargetDescription(process: ProcessMetric, group: ProcessAppGroup?) -> String {
+        guard let group else {
             return process.name
         }
         if group.processes.count > 1 {
             return "\(group.name) (\(group.processes.count) processes)"
         }
         return group.isApplicationTarget ? group.name : process.name
+    }
+
+    private func validatedTerminationTargets(
+        _ originalTargets: [ProcessMetric],
+        latestProcesses: [ProcessMetric]
+    ) -> TerminationTargetValidation {
+        let latestByPID = Dictionary(uniqueKeysWithValues: latestProcesses.map { ($0.pid, $0) })
+        var validatedTargets: [ProcessMetric] = []
+
+        for originalTarget in originalTargets {
+            guard let latest = latestByPID[originalTarget.pid] else {
+                continue
+            }
+            guard originalTarget.matchesTerminationIdentity(of: latest) else {
+                return .identityChanged
+            }
+            validatedTargets.append(latest)
+        }
+
+        return validatedTargets.isEmpty ? .allExited : .valid(validatedTargets)
     }
 
     public func refreshNow() async {
@@ -383,6 +464,27 @@ private extension ProcessAppGroup {
     var isApplicationTarget: Bool {
         id.hasPrefix("app:") || processes.count > 1
     }
+}
+
+private extension ProcessMetric {
+    func matchesTerminationIdentity(of latest: ProcessMetric) -> Bool {
+        guard pid == latest.pid,
+              name == latest.name,
+              path == latest.path
+        else {
+            return false
+        }
+        if let bundleIdentifier, let latestBundleIdentifier = latest.bundleIdentifier {
+            return bundleIdentifier == latestBundleIdentifier
+        }
+        return true
+    }
+}
+
+private enum TerminationTargetValidation {
+    case valid([ProcessMetric])
+    case allExited
+    case identityChanged
 }
 
 private struct ProcessDisplayCacheKey: Equatable {

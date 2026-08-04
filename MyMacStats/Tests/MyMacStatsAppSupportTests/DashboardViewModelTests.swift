@@ -181,10 +181,11 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.displayedCPUHistory, [2, 3])
     }
 
-    func testTerminationAvailabilityAndMessages() {
+    func testTerminationAvailabilityAndMessages() async {
         var sent: [(Int32, Int32)] = []
         let viewModel = DashboardViewModel(
             snapshot: snapshot,
+            service: service(processes: snapshot.processes),
             terminator: ProcessTerminator(
                 currentProcessID: 99,
                 signalSender: { pid, signal in
@@ -201,7 +202,7 @@ final class DashboardViewModelTests: XCTestCase {
         viewModel.requestTermination(for: viewModel.selectedProcess!)
         XCTAssertEqual(viewModel.pendingTerminationProcess?.pid, 20)
 
-        viewModel.confirmPendingTermination()
+        await viewModel.confirmPendingTermination()
 
         XCTAssertNil(viewModel.pendingTerminationProcess)
         XCTAssertEqual(viewModel.terminationMessage, "Termination requested for Safari.")
@@ -212,7 +213,7 @@ final class DashboardViewModelTests: XCTestCase {
         viewModel.requestForceTermination(for: viewModel.selectedProcess!)
         XCTAssertEqual(viewModel.pendingTerminationMode, .forceQuit)
 
-        viewModel.confirmPendingTermination()
+        await viewModel.confirmPendingTermination()
 
         XCTAssertEqual(viewModel.terminationMessage, "Force quit requested for Safari.")
         XCTAssertEqual(sent.last?.1, SIGKILL)
@@ -223,10 +224,11 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.selectedProcessTerminationMessage)
     }
 
-    func testTerminationTargetsEveryProcessInSelectedAppGroup() {
+    func testTerminationTargetsEveryProcessInSelectedAppGroup() async {
         var sent: [(Int32, Int32)] = []
         let viewModel = DashboardViewModel(
             snapshot: groupedSnapshot,
+            service: service(processes: groupedSnapshot.processes),
             terminator: ProcessTerminator(
                 currentProcessID: 99,
                 signalSender: { pid, signal in
@@ -240,11 +242,67 @@ final class DashboardViewModelTests: XCTestCase {
         viewModel.selectProcess(pid: 41)
 
         viewModel.requestTermination(for: viewModel.selectedProcess!)
-        viewModel.confirmPendingTermination()
+        await viewModel.confirmPendingTermination()
 
         XCTAssertEqual(Set(sent.map(\.0)), Set([40, 41]))
         XCTAssertTrue(sent.allSatisfy { $0.1 == SIGTERM })
         XCTAssertEqual(viewModel.terminationMessage, "Termination requested for Visual Studio Code (2 processes).")
+    }
+
+    func testQuitAppUsesApplicationTerminatorBeforeSendingSignals() async {
+        var sent: [(Int32, Int32)] = []
+        let applicationTerminator = RecordingApplicationTerminator(result: true)
+        let viewModel = DashboardViewModel(
+            snapshot: groupedSnapshot,
+            service: service(processes: groupedSnapshot.processes),
+            terminator: ProcessTerminator(
+                currentProcessID: 99,
+                signalSender: { pid, signal in
+                    sent.append((pid, signal))
+                    return 0
+                },
+                errnoProvider: { 0 }
+            ),
+            applicationTerminator: applicationTerminator
+        )
+        viewModel.select(.memory)
+        viewModel.selectProcess(pid: 41)
+
+        viewModel.requestTermination(for: viewModel.selectedProcess!)
+        await viewModel.confirmPendingTermination()
+
+        XCTAssertEqual(applicationTerminator.calls.map { Set($0.pids) }, [Set([40, 41])])
+        XCTAssertEqual(applicationTerminator.calls.map(\.mode), [.quit])
+        XCTAssertTrue(sent.isEmpty)
+        XCTAssertEqual(viewModel.terminationMessage, "Termination requested for Visual Studio Code (2 processes).")
+        XCTAssertTrue(viewModel.selectedProcessCanForceQuit)
+    }
+
+    func testQuitAppFallsBackToSignalWhenApplicationTerminatorCannotHandleTarget() async {
+        var sent: [(Int32, Int32)] = []
+        let applicationTerminator = RecordingApplicationTerminator(result: false)
+        let viewModel = DashboardViewModel(
+            snapshot: groupedSnapshot,
+            service: service(processes: groupedSnapshot.processes),
+            terminator: ProcessTerminator(
+                currentProcessID: 99,
+                signalSender: { pid, signal in
+                    sent.append((pid, signal))
+                    return 0
+                },
+                errnoProvider: { 0 }
+            ),
+            applicationTerminator: applicationTerminator
+        )
+        viewModel.select(.memory)
+        viewModel.selectProcess(pid: 41)
+
+        viewModel.requestTermination(for: viewModel.selectedProcess!)
+        await viewModel.confirmPendingTermination()
+
+        XCTAssertEqual(applicationTerminator.calls.map { Set($0.pids) }, [Set([40, 41])])
+        XCTAssertEqual(Set(sent.map(\.0)), Set([40, 41]))
+        XCTAssertTrue(sent.allSatisfy { $0.1 == SIGTERM })
     }
 
     func testPendingTerminationSummaryDescribesSelectedAppGroup() {
@@ -258,10 +316,11 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.pendingTerminationDetailText, "CPU 33%, Memory 1.3 KB")
     }
 
-    func testForceQuitCandidateSurvivesWhenOriginalSelectedProcessExits() {
+    func testForceQuitCandidateSurvivesWhenOriginalSelectedProcessExits() async {
         var sent: [(Int32, Int32)] = []
         let viewModel = DashboardViewModel(
             snapshot: groupedSnapshot,
+            service: service(processes: groupedSnapshot.processes),
             terminator: ProcessTerminator(
                 currentProcessID: 99,
                 signalSender: { pid, signal in
@@ -275,15 +334,117 @@ final class DashboardViewModelTests: XCTestCase {
         viewModel.selectProcess(pid: 41)
 
         viewModel.requestTermination(for: viewModel.selectedProcess!)
-        viewModel.confirmPendingTermination()
+        await viewModel.confirmPendingTermination()
         viewModel.replaceSnapshot(groupedSnapshotWithoutSelectedCodeHelper)
 
         XCTAssertTrue(viewModel.selectedProcessCanForceQuit)
 
         viewModel.requestForceTermination(for: viewModel.selectedProcess!)
-        viewModel.confirmPendingTermination()
+        await viewModel.confirmPendingTermination()
 
         XCTAssertTrue(sent.contains { $0 == (40, SIGKILL) })
+    }
+
+    func testConfirmPendingTerminationBlocksReusedPIDBeforeSendingSignal() async {
+        var sent: [(Int32, Int32)] = []
+        let original = ProcessMetric(
+            pid: 500,
+            name: "Figma",
+            cpuPercent: 10,
+            memoryBytes: 100,
+            path: "/Applications/Figma.app/Contents/MacOS/Figma",
+            bundleIdentifier: "com.figma.Desktop"
+        )
+        let reusedPID = ProcessMetric(
+            pid: 500,
+            name: "Notes",
+            cpuPercent: 1,
+            memoryBytes: 50,
+            path: "/System/Applications/Notes.app/Contents/MacOS/Notes",
+            bundleIdentifier: "com.apple.Notes"
+        )
+        let viewModel = DashboardViewModel(
+            snapshot: snapshot(processes: [original]),
+            service: service(processes: [reusedPID]),
+            terminator: ProcessTerminator(
+                currentProcessID: 99,
+                signalSender: { pid, signal in
+                    sent.append((pid, signal))
+                    return 0
+                },
+                errnoProvider: { 0 }
+            )
+        )
+
+        viewModel.requestTermination(for: original)
+        await viewModel.confirmPendingTermination()
+
+        XCTAssertTrue(sent.isEmpty)
+        XCTAssertEqual(viewModel.terminationMessage, "The selected process changed before termination. Refresh and try again.")
+        XCTAssertFalse(viewModel.selectedProcessCanForceQuit)
+    }
+
+    func testConfirmPendingTerminationDoesNotSignalProcessesThatAlreadyExited() async {
+        var sent: [(Int32, Int32)] = []
+        let original = ProcessMetric(
+            pid: 500,
+            name: "Figma",
+            cpuPercent: 10,
+            memoryBytes: 100,
+            path: "/Applications/Figma.app/Contents/MacOS/Figma",
+            bundleIdentifier: "com.figma.Desktop"
+        )
+        let viewModel = DashboardViewModel(
+            snapshot: snapshot(processes: [original]),
+            service: service(processes: []),
+            terminator: ProcessTerminator(
+                currentProcessID: 99,
+                signalSender: { pid, signal in
+                    sent.append((pid, signal))
+                    return 0
+                },
+                errnoProvider: { 0 }
+            )
+        )
+
+        viewModel.requestTermination(for: original)
+        await viewModel.confirmPendingTermination()
+
+        XCTAssertTrue(sent.isEmpty)
+        XCTAssertEqual(viewModel.terminationMessage, "The selected process already exited.")
+        XCTAssertFalse(viewModel.selectedProcessCanForceQuit)
+    }
+
+    func testConfirmPendingTerminationCanUseCapturedTargetAfterPendingStateClears() async {
+        var sent: [(Int32, Int32)] = []
+        let viewModel = DashboardViewModel(
+            snapshot: snapshot,
+            service: service(processes: snapshot.processes),
+            terminator: ProcessTerminator(
+                currentProcessID: 99,
+                signalSender: { pid, signal in
+                    sent.append((pid, signal))
+                    return 0
+                },
+                errnoProvider: { 0 }
+            )
+        )
+        viewModel.selectProcess(pid: 20)
+        viewModel.requestTermination(for: viewModel.selectedProcess!)
+        let capturedProcess = viewModel.pendingTerminationProcess
+        let capturedGroup = viewModel.pendingTerminationGroup
+        let capturedMode = viewModel.pendingTerminationMode
+        viewModel.cancelPendingTermination()
+
+        await viewModel.confirmPendingTermination(
+            process: capturedProcess,
+            group: capturedGroup,
+            mode: capturedMode
+        )
+
+        XCTAssertEqual(sent.map(\.0), [20])
+        XCTAssertEqual(sent.map(\.1), [SIGTERM])
+        XCTAssertEqual(viewModel.terminationMessage, "Termination requested for Safari.")
     }
 
     func testProtectedTerminationIsDisabled() {
@@ -371,5 +532,56 @@ final class DashboardViewModelTests: XCTestCase {
             cpuHistory: [40],
             updatedAt: now
         )
+    }
+
+    private func snapshot(processes: [ProcessMetric]) -> SystemMetricsSnapshot {
+        SystemMetricsSnapshot(
+            summaries: [],
+            cpu: nil,
+            memory: nil,
+            disk: nil,
+            network: nil,
+            battery: nil,
+            processes: processes,
+            cpuHistory: [],
+            updatedAt: Date(timeIntervalSince1970: 300)
+        )
+    }
+
+    private func service(processes: [ProcessMetric]) -> SystemMetricsService {
+        SystemMetricsService(
+            sampler: SnapshotSampler(processes: processes),
+            evaluator: HealthEvaluator(debounceSamples: 1)
+        )
+    }
+}
+
+private final class SnapshotSampler: SystemSampler {
+    let processes: [ProcessMetric]
+
+    init(processes: [ProcessMetric]) {
+        self.processes = processes
+    }
+
+    func sampleCPU() async -> CPUSnapshot? { nil }
+    func sampleMemory() async -> MemorySnapshot? { nil }
+    func sampleDisk() async -> DiskSnapshot? { nil }
+    func sampleNetwork() async -> NetworkSnapshot? { nil }
+    func sampleBattery() async -> BatterySnapshot? { nil }
+    func sampleDiskSpaceCandidates() async -> [DiskSpaceCandidate] { [] }
+    func sampleProcesses() async -> [ProcessMetric] { processes }
+}
+
+private final class RecordingApplicationTerminator: ApplicationTerminating {
+    private(set) var calls: [(pids: [Int32], mode: ProcessTerminationMode)] = []
+    private let result: Bool
+
+    init(result: Bool) {
+        self.result = result
+    }
+
+    func terminateApplicationProcesses(_ processes: [ProcessMetric], mode: ProcessTerminationMode) -> Bool {
+        calls.append((processes.map(\.pid), mode))
+        return result
     }
 }

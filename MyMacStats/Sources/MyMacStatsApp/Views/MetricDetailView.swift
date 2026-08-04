@@ -12,7 +12,7 @@ struct MetricDetailView: View {
                 PanelHeader(title: "Settings", subtitle: "Refresh and display preferences")
                 Divider()
                 InfoRow(title: "Refresh Interval", value: viewModel.refreshInterval.title)
-                InfoRow(title: "Menu Bar Metric", value: viewModel.selectedKind.title)
+                InfoRow(title: "Menu Bar Display", value: "CPU + RAM")
                 Spacer(minLength: 0)
             } else {
                 PanelHeader(title: detailTitle, subtitle: viewModel.selectedSummary?.detailText)

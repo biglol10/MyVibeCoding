@@ -11,9 +11,14 @@ public final class ProcessSampler: @unchecked Sendable {
             commandRunner: {
                 try ProcessCommand.run("/bin/ps", arguments: ["-axo", "pid=,pcpu=,rss=,comm="])
             },
-            bundleIdentifierResolver: { path in
-                Bundle(path: path)?.bundleIdentifier
-            }
+            bundleIdentifierResolver: Self.bundleIdentifierFromOwningApplication
+        )
+    }
+
+    convenience init(commandRunner: @escaping () throws -> String) {
+        self.init(
+            commandRunner: commandRunner,
+            bundleIdentifierResolver: Self.bundleIdentifierFromOwningApplication
         )
     }
 
@@ -77,6 +82,32 @@ public final class ProcessSampler: @unchecked Sendable {
         cacheLock.unlock()
 
         return resolved
+    }
+
+    private static func bundleIdentifierFromOwningApplication(path: String) -> String? {
+        guard let appURL = owningApplicationURL(from: path) else { return nil }
+        let infoPlistURL = appURL.appendingPathComponent("Contents/Info.plist")
+        guard let data = try? Data(contentsOf: infoPlistURL),
+              let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
+              let dictionary = plist as? [String: Any],
+              let bundleIdentifier = dictionary["CFBundleIdentifier"] as? String,
+              !bundleIdentifier.isEmpty
+        else {
+            return nil
+        }
+        return bundleIdentifier
+    }
+
+    private static func owningApplicationURL(from path: String) -> URL? {
+        let url = URL(fileURLWithPath: path)
+        var collectedComponents: [String] = []
+        for component in url.pathComponents {
+            collectedComponents.append(component)
+            if component.hasSuffix(".app") {
+                return URL(fileURLWithPath: NSString.path(withComponents: collectedComponents))
+            }
+        }
+        return nil
     }
 }
 

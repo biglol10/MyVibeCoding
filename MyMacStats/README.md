@@ -80,6 +80,9 @@ swift run MyMacStatsApp
 - Network 카운터는 `NET_RT_IFLIST2`의 64-bit byte counter를 사용하고, 두 번째 샘플부터는 누적 총량이 아니라 현재 증가량이 있는 인터페이스를 우선 선택합니다.
 - Disk 읽기/쓰기 속도는 IOKit block storage counter delta로 계산하고, 볼륨명 fallback은 하드코딩된 `Macintosh HD`가 아니라 mount point 이름을 사용합니다.
 - 디스크 공간 후보 스캔의 `du` 호출은 timeout 후 fallback scan으로 전환하며, UI refresh를 막지 않습니다.
+- 기본 자동 디스크 후보 스캔은 넓은 `~/Library/Caches` 전체를 훑지 않습니다. macOS가 media library 등 개인정보 보호 권한 프롬프트를 띄울 수 있어 Xcode DerivedData처럼 범위가 좁은 개발자 캐시만 기본 후보로 둡니다.
+- 프로세스 종료 직전에는 최신 프로세스 목록을 다시 샘플링해 PID, 이름, 실행 경로, 번들 ID가 같은 대상인지 확인합니다. PID가 재사용된 것으로 보이면 signal을 보내지 않습니다.
+- 프로세스 번들 ID는 임의 경로를 `Bundle(path:)`로 여는 대신 `.app/Contents/Info.plist`만 직접 읽어 불필요한 개인정보 권한 프롬프트 가능성을 줄입니다.
 - 메뉴바 `Open Dashboard`는 임의의 첫 번째 창이 아니라 `MyMacStats` 대시보드 창을 찾아 앞으로 가져옵니다.
 - 개인 배포 zip은 `scripts/check-distribution.sh`로 압축 해제, quarantine 제거, 설치, codesign 검증까지 확인합니다.
 
@@ -115,6 +118,7 @@ CPU 상태는 70%/90% 임계값이 10초 이상 유지될 때 warning/critical�
 오른쪽 상세 패널에서 선택된 대상에 대해 `Quit Process` 또는 `Quit App`을 요청할 수 있습니다. 단일 프로세스는 해당 PID만 대상으로 하고, 앱 그룹으로 묶인 항목은 같은 앱의 관련 프로세스들을 함께 대상으로 합니다.
 
 - 일반 Quit은 대상 프로세스들에 `SIGTERM`을 보냅니다.
+- 앱 그룹 Quit은 먼저 macOS 앱 종료 API를 사용해 정상 종료를 요청하고, 처리할 수 없을 때 `SIGTERM` 방식으로 fallback합니다.
 - Quit 후 대상 앱/프로세스가 계속 남아 있으면 `Force Quit` 경로를 사용할 수 있습니다.
 - Force Quit은 대상 프로세스들에 `SIGKILL`을 보냅니다.
 - `launchd`, `WindowServer`, 앱 자신, 시스템 경로 프로세스 등 보호 대상이 포함되면 버튼이 비활성화됩니다.
@@ -125,10 +129,9 @@ Disk 화면은 용량 부족 원인 후보를 보여줍니다.
 
 기본 후보:
 
-- Caches
 - Xcode DerivedData
 
-Downloads, Desktop, Documents, Trash처럼 macOS 개인정보 보호 권한 프롬프트가 생길 수 있는 폴더는 기본 자동 스캔 대상에서 제외합니다.
+Downloads, Desktop, Documents, Trash, `~/Library/Caches` 전체처럼 macOS 개인정보 보호 권한 프롬프트가 생길 수 있는 폴더는 기본 자동 스캔 대상에서 제외합니다.
 
 후보 스캔은 UI를 막지 않도록 백그라운드에서 수행되며, 오래 걸리는 대상은 timeout 후 다음 갱신으로 넘깁니다.
 
@@ -170,7 +173,7 @@ swift test
 - HealthEvaluator 상태 판정
 - metric formatter
 - process sorting/grouping
-- 프로세스/앱 그룹 Quit / Force Quit 대상 및 signal 선택
+- 프로세스/앱 그룹 Quit / Force Quit 대상, 최신 PID identity 재확인, 앱 종료 fallback, signal 선택
 - dashboard view model 선택/정렬/검색/히스토리
 - system metrics snapshot 구성
 - disk space candidate scanner

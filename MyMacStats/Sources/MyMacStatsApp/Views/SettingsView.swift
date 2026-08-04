@@ -27,7 +27,7 @@ struct SettingsView: View {
 
             Divider()
 
-            InfoRow(title: "Menu Bar Metric", value: viewModel.selectedKind.title)
+            InfoRow(title: "Menu Bar Display", value: "CPU + RAM")
             InfoRow(title: "Dock Icon", value: "Always visible in MVP")
             Spacer(minLength: 0)
         }

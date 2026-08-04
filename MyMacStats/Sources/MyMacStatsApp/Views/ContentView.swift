@@ -21,7 +21,12 @@ struct ContentView: View {
                 viewModel.cancelPendingTermination()
             }
             Button(viewModel.pendingTerminationMode == .forceQuit ? "Force Quit" : "Quit", role: .destructive) {
-                viewModel.confirmPendingTermination()
+                let process = viewModel.pendingTerminationProcess
+                let group = viewModel.pendingTerminationGroup
+                let mode = viewModel.pendingTerminationMode
+                Task {
+                    await viewModel.confirmPendingTermination(process: process, group: group, mode: mode)
+                }
             }
         } message: {
             if let displayName = viewModel.pendingTerminationDisplayName {

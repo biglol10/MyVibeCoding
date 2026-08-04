@@ -55,15 +55,15 @@ final class DiskSpaceCandidateScannerTests: XCTestCase {
         XCTAssertGreaterThan(candidates[0].sizeBytes, 0)
     }
 
-    func testDefaultTargetsUseNonTCCLibraryFolders() {
+    func testDefaultTargetsAvoidBroadPrivacySensitiveFolders() {
         let home = URL(fileURLWithPath: "/Users/example", isDirectory: true)
         let targets = DiskSpaceCandidateScanner.defaultTargets(home: home)
 
-        XCTAssertEqual(targets.map(\.title), ["Caches", "Xcode DerivedData"])
+        XCTAssertEqual(targets.map(\.title), ["Xcode DerivedData"])
         XCTAssertEqual(targets.map(\.url.path), [
-            "/Users/example/Library/Caches",
             "/Users/example/Library/Developer/Xcode/DerivedData"
         ])
+        XCTAssertFalse(targets.contains { $0.url.path == "/Users/example/Library/Caches" })
         XCTAssertFalse(targets.contains { $0.url.path.contains("/Downloads") })
         XCTAssertFalse(targets.contains { $0.url.path.contains("/Documents") })
         XCTAssertFalse(targets.contains { $0.url.path.contains("/Desktop") })
