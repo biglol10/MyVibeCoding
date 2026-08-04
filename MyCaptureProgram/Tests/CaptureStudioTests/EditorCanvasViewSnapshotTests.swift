@@ -122,12 +122,75 @@ final class EditorCanvasViewSnapshotTests: XCTestCase {
             line: line
         )
         let geometry = EditorCanvasGeometry(imageSize: CGSize(width: 160, height: 90), viewSize: viewSize)
-        let expectedRect = geometry.viewRect(forImageRect: expectedImageRect)
+        let expectedRenderedRect = renderedBounds(for: layer, fallback: expectedImageRect)
+        let expectedRect = geometry.viewRect(forImageRect: expectedRenderedRect)
         let pixelScaleX = CGFloat(bitmap.pixelsWide) / viewSize.width
         let pixelScaleY = CGFloat(bitmap.pixelsHigh) / viewSize.height
 
         XCTAssertEqual(pixelBounds.minX, expectedRect.minX * pixelScaleX, accuracy: 28, file: file, line: line)
         XCTAssertEqual(pixelBounds.minY, expectedRect.minY * pixelScaleY, accuracy: 28, file: file, line: line)
+    }
+
+    private func renderedBounds(for layer: EditorLayer, fallback: CGRect) -> CGRect {
+        switch layer {
+        case .rectangle(let shape), .ellipse(let shape):
+            return shape.frame.insetBy(dx: -shape.style.lineWidth / 2, dy: -shape.style.lineWidth / 2)
+        case .freehand(let freehand), .highlighter(let freehand):
+            return strokedBounds(
+                segments: Array(zip(freehand.points, freehand.points.dropFirst())),
+                lineWidth: freehand.style.lineWidth,
+                fallback: fallback
+            )
+        case .arrow(let arrow):
+            let angle = atan2(arrow.end.y - arrow.start.y, arrow.end.x - arrow.start.x)
+            let headLength: CGFloat = 12
+            let left = CGPoint(
+                x: arrow.end.x - headLength * cos(angle - .pi / 6),
+                y: arrow.end.y - headLength * sin(angle - .pi / 6)
+            )
+            let right = CGPoint(
+                x: arrow.end.x - headLength * cos(angle + .pi / 6),
+                y: arrow.end.y - headLength * sin(angle + .pi / 6)
+            )
+            return strokedBounds(
+                segments: [(arrow.start, arrow.end), (arrow.end, left), (arrow.end, right)],
+                lineWidth: arrow.style.lineWidth,
+                fallback: fallback
+            )
+        case .redaction, .text:
+            return fallback
+        }
+    }
+
+    private func strokedBounds(
+        segments: [(CGPoint, CGPoint)],
+        lineWidth: CGFloat,
+        fallback: CGRect
+    ) -> CGRect {
+        guard !segments.isEmpty else {
+            return fallback
+        }
+
+        let halfWidth = lineWidth / 2
+        let segmentBounds = segments.map { start, end -> CGRect in
+            let dx = end.x - start.x
+            let dy = end.y - start.y
+            let length = hypot(dx, dy)
+            guard length > 0 else {
+                return CGRect(x: start.x, y: start.y, width: 0, height: 0)
+                    .insetBy(dx: -halfWidth, dy: -halfWidth)
+            }
+
+            let extensionX = abs(dy / length) * halfWidth
+            let extensionY = abs(dx / length) * halfWidth
+            return CGRect(
+                x: min(start.x, end.x) - extensionX,
+                y: min(start.y, end.y) - extensionY,
+                width: abs(dx) + extensionX * 2,
+                height: abs(dy) + extensionY * 2
+            )
+        }
+        return segmentBounds.dropFirst().reduce(segmentBounds[0]) { $0.union($1) }
     }
 }
 

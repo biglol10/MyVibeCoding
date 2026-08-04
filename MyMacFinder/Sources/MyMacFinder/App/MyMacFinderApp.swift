@@ -261,6 +261,7 @@ struct MyMacFinderApp: App {
                 PrivacyAccessSettingsView(
                     sandboxPolicy: explorerStore.sandboxPolicy,
                     grantedFolderSummaries: explorerStore.grantedFolderSummaries,
+                    persistenceErrorMessage: explorerStore.folderAccessPersistenceErrorMessage,
                     onChooseFolder: {
                         Task {
                             await explorerStore.chooseFolderForAccess()

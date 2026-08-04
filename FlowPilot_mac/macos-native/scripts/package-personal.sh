@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export PATH="/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_DIR="$(cd "$ROOT_DIR/.." && pwd)"
@@ -56,7 +55,6 @@ README
 cat > "$PACKAGE_DIR/install-flowpilot-native.command" <<'INSTALL'
 #!/usr/bin/env bash
 set -euo pipefail
-export PATH="/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_SOURCE="$SCRIPT_DIR/FlowPilot.app"

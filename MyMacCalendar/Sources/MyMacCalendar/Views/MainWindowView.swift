@@ -10,6 +10,14 @@ struct MainWindowView: View {
     @State private var displayedMonth = Date()
     @State private var selectedDate = Date()
     @State private var activeSheet: ActiveSheet?
+    @State private var searchQuery = ""
+    @FocusState private var isSearchFocused: Bool
+    @State private var notificationRefreshEpoch = 0
+    private let notificationRefreshTimer = Timer.publish(
+        every: 12 * 60 * 60,
+        on: .main,
+        in: .common
+    ).autoconnect()
     private enum MainWindowTypography {
         static let monthTitleFontSize: CGFloat = 38
         static let toolbarIconSize: CGFloat = 15
@@ -39,18 +47,32 @@ struct MainWindowView: View {
                     .fill(AppTheme.gridLine)
                     .frame(width: 1)
 
-                DayAgendaPanelView(
-                    selectedDate: selectedDate,
-                    events: events,
-                    holidays: holidays,
-                    onCreateEvent: { date in
-                        selectedDate = date
-                        activeSheet = .newEvent(date)
-                    },
-                    onSelectEvent: { event in
-                        activeSheet = .editEvent(event)
+                Group {
+                    if isSearching {
+                        CalendarSearchResultsView(
+                            query: searchQuery,
+                            events: searchResults,
+                            onClear: {
+                                searchQuery = ""
+                                isSearchFocused = false
+                            },
+                            onSelect: selectSearchResult
+                        )
+                    } else {
+                        DayAgendaPanelView(
+                            selectedDate: selectedDate,
+                            events: events,
+                            holidays: holidays,
+                            onCreateEvent: { date in
+                                selectedDate = date
+                                activeSheet = .newEvent(date)
+                            },
+                            onSelectEvent: { event in
+                                activeSheet = .editEvent(event)
+                            }
+                        )
                     }
-                )
+                }
                 .frame(width: 280)
             }
         }
@@ -73,11 +95,26 @@ struct MainWindowView: View {
         .task(id: widgetRefreshToken) {
             WidgetCoordinator.shared.update(events: events, settings: settingsRows.first)
         }
+        .task(id: notificationRefreshToken) {
+            let eventSnapshots = events.map(CalendarEventSnapshot.init(event:))
+            let settings = SettingsValidation.snapshot(settingsRows.first)
+            await AppNotificationCoordinator.shared.refresh(
+                events: eventSnapshots,
+                defaultHour: settings.defaultReminderHour,
+                defaultMinute: settings.defaultReminderMinute
+            )
+        }
+        .onReceive(notificationRefreshTimer) { _ in
+            notificationRefreshEpoch &+= 1
+        }
         .onReceive(NotificationCenter.default.publisher(for: .openQuickAddSheet)) { _ in
             activeSheet = .quickAdd
         }
         .onReceive(NotificationCenter.default.publisher(for: .openSettingsSheet)) { _ in
             activeSheet = .settings
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .focusCalendarSearch)) { _ in
+            isSearchFocused = true
         }
         .onAppear {
             notifyAppSettingsChanged()
@@ -96,6 +133,11 @@ struct MainWindowView: View {
                 .minimumScaleFactor(0.7)
 
             Spacer(minLength: 24)
+
+            CalendarSearchField(
+                query: $searchQuery,
+                isFocused: $isSearchFocused
+            )
 
             Button {
                 displayedMonth = Calendar.current.date(byAdding: .month, value: -1, to: displayedMonth) ?? displayedMonth
@@ -161,8 +203,22 @@ struct MainWindowView: View {
         return formatter.string(from: displayedMonth)
     }
 
+    private var isSearching: Bool {
+        searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
+
+    private var searchResults: [CalendarEvent] {
+        EventService().search(searchQuery, in: events)
+    }
+
+    private func selectSearchResult(_ event: CalendarEvent) {
+        selectedDate = event.startDate
+        displayedMonth = event.startDate
+        activeSheet = .editEvent(event)
+    }
+
     private var calendarDensity: CalendarDensityMode {
-        CalendarDensityMode(rawValue: settingsRows.first?.calendarDensity ?? "comfortable") ?? .comfortable
+        CalendarDensityMode(rawValue: SettingsValidation.snapshot(settingsRows.first).calendarDensity) ?? .comfortable
     }
 
     private var appSettingsRefreshToken: String {
@@ -211,6 +267,23 @@ struct MainWindowView: View {
             .joined(separator: ";")
 
         return settingsToken + "::" + eventsToken
+    }
+
+    private var notificationRefreshToken: String {
+        let settings = SettingsValidation.snapshot(settingsRows.first)
+        let settingsToken = "\(settings.defaultReminderHour):\(settings.defaultReminderMinute)"
+        let eventsToken = events.map { event in
+            [
+                event.id.uuidString,
+                event.title,
+                String(event.startDate.timeIntervalSinceReferenceDate),
+                String(event.endDate.timeIntervalSinceReferenceDate),
+                event.recurrenceRaw,
+                event.notificationOffsetsRaw,
+                String(event.updatedAt.timeIntervalSinceReferenceDate)
+            ].joined(separator: "|")
+        }.joined(separator: ";")
+        return "\(notificationRefreshEpoch)::\(settingsToken)::\(eventsToken)"
     }
 }
 

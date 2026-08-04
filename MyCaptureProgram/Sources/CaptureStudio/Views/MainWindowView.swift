@@ -26,38 +26,41 @@ struct MainWindowView: View {
         VStack(spacing: 0) {
             quickBar
 
-            if appState.isHistoryPresented {
-                Divider()
-                historyPanel
-            }
+            Group {
+                if appState.isHistoryPresented {
+                    Divider()
+                    historyPanel
+                }
 
-            if let document = appState.currentDocument {
-                Divider()
-                recentResultRow(for: document)
-            }
+                if let document = appState.currentDocument {
+                    Divider()
+                    recentResultRow(for: document)
+                }
 
-            if appState.currentDocument != nil {
-                Divider()
-                previewArea
-            }
+                if appState.currentDocument != nil {
+                    Divider()
+                    previewArea
+                }
 
-            if appState.currentDocument?.kind == .recording {
-                Divider()
-                recordingTools
-            }
+                if appState.currentDocument?.kind == .recording {
+                    Divider()
+                    recordingTools
+                }
 
-            if appState.currentDocument?.kind == .screenshot,
-               ToolInspectorPresentation.controls(
-                for: editorViewModel.activeTool,
-                selectedLayer: selectedLayer
-               ).isVisible {
-                Divider()
-                ToolInspectorView(selectedLayer: selectedLayer, editorViewModel: editorViewModel)
-            }
+                if appState.currentDocument?.kind == .screenshot,
+                   ToolInspectorPresentation.controls(
+                    for: editorViewModel.activeTool,
+                    selectedLayer: selectedLayer
+                   ).isVisible {
+                    Divider()
+                    ToolInspectorView(selectedLayer: selectedLayer, editorViewModel: editorViewModel)
+                }
 
-            if let document = appState.currentDocument {
-                editorToolbar(for: document)
+                if let document = appState.currentDocument {
+                    editorToolbar(for: document)
+                }
             }
+            .disabled(appState.isInteractionBlocked)
         }
         .frame(
             minWidth: MainWindowPresentation.mainWindowMinimumWidth,
@@ -106,7 +109,7 @@ struct MainWindowView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .tint(.blue)
-            .disabled(appState.isRecordingInProgress)
+            .disabled(appState.isInteractionBlocked)
             .help("Capture area")
 
             if appState.isRecordingInProgress {
@@ -133,10 +136,11 @@ struct MainWindowView: View {
                 .controlSize(.large)
                 .tint(.red)
                 .help("Record area")
+                .disabled(appState.isInteractionBlocked)
             }
 
             quickOptionsMenu
-                .disabled(appState.isRecordingInProgress)
+                .disabled(appState.isInteractionBlocked)
 
             Button {
                 openSettingsToDefaultTab()
@@ -166,7 +170,7 @@ struct MainWindowView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
-            .disabled(appState.isRecordingInProgress)
+            .disabled(appState.isInteractionBlocked)
             .help("Capture history")
 
             Spacer(minLength: 12)
@@ -425,6 +429,14 @@ struct MainWindowView: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 240)
                 Spacer()
+                Button("Clear History") {
+                    let cleanupSucceeded = historyStore.clear()
+                    appState.statusMessage = cleanupSucceeded
+                        ? "History cleared. Capture files were kept."
+                        : "History cleared, but a thumbnail could not be removed."
+                }
+                .disabled(historyStore.items.isEmpty)
+                .help("Clear history without deleting capture files")
                 Button {
                     appState.isHistoryPresented = false
                 } label: {
@@ -480,7 +492,9 @@ struct MainWindowView: View {
                 .truncationMode(.middle)
             HStack(spacing: 8) {
                 Button {
-                    captureCoordinator.openHistoryItem(item)
+                    Task { @MainActor in
+                        await captureCoordinator.openHistoryItem(item)
+                    }
                 } label: {
                     Image(systemName: "arrow.up.forward.app")
                 }
@@ -587,7 +601,7 @@ struct MainWindowView: View {
                 Task {
                     await captureCoordinator.trimCurrentRecording(
                         startSeconds: Double(trimStartText) ?? 0,
-                        endSeconds: Double(trimEndText) ?? Double(settingsStore.settings.recordingDurationSeconds)
+                        endSeconds: Double(trimEndText)
                     )
                 }
             } label: {
@@ -691,8 +705,9 @@ struct MainWindowView: View {
     }
 
     private func openSettingsToDefaultTab() {
-        SettingsTab.selectDefaultOpenTab()
-        openSettings()
+        AppKitSettingsWindowPresenter.shared.present {
+            openSettings()
+        }
     }
 }
 

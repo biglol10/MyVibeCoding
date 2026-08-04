@@ -1,59 +1,60 @@
 import Foundation
 import SwiftData
 
+enum CalendarStoreError: Error {
+    case applicationSupportDirectoryUnavailable
+}
+
 public enum CalendarStore {
-    public static func makeContainer(inMemory: Bool = false) throws -> ModelContainer {
-        let schema = Schema([
-            CalendarEvent.self,
-            HolidayRecord.self,
-            AppSettings.self
-        ])
-        let configuration: ModelConfiguration
-        if inMemory {
-            configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
-        } else {
-            let storeURL = try persistentStoreURL()
-            configuration = ModelConfiguration(schema: schema, url: storeURL)
-        }
-        return try ModelContainer(for: schema, configurations: [configuration])
+    public static func makeContainer() throws -> ModelContainer {
+        let storeURL = try persistentStoreURL()
+        return try makeContainer(at: storeURL)
     }
 
-    public static func makeInMemoryContainer() throws -> ModelContainer {
-        try makeContainer(inMemory: true)
+    static func makeContainer(at storeURL: URL) throws -> ModelContainer {
+        try prepareWritableDirectory(storeURL.deletingLastPathComponent())
+        let schema = Schema(versionedSchema: CalendarSchemaV3.self)
+        let configuration = ModelConfiguration(schema: schema, url: storeURL)
+        return try ModelContainer(
+            for: schema,
+            migrationPlan: CalendarSchemaMigrationPlan.self,
+            configurations: [configuration]
+        )
+    }
+
+    static func makeInMemoryContainer() throws -> ModelContainer {
+        let schema = Schema(versionedSchema: CalendarSchemaV3.self)
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        return try ModelContainer(
+            for: schema,
+            migrationPlan: CalendarSchemaMigrationPlan.self,
+            configurations: [configuration]
+        )
     }
 
     private static func persistentStoreURL() throws -> URL {
         if let overridePath = ProcessInfo.processInfo.environment["MYMACCALENDAR_STORE_URL"], overridePath.isEmpty == false {
             let overrideURL = URL(fileURLWithPath: overridePath)
             let directory = overrideURL.deletingLastPathComponent()
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try prepareWritableDirectory(directory)
             return overrideURL
         }
 
-        let baseURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let appDirectory = baseURL.appendingPathComponent("MyMacCalendar", isDirectory: true)
-        if try prepareWritableDirectory(appDirectory) {
-            return appDirectory.appendingPathComponent("MyMacCalendar.store")
+        guard let baseURL = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first else {
+            throw CalendarStoreError.applicationSupportDirectoryUnavailable
         }
-
-        let fallbackDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("MyMacCalendar", isDirectory: true)
-        try FileManager.default.createDirectory(at: fallbackDirectory, withIntermediateDirectories: true)
-        return fallbackDirectory.appendingPathComponent("MyMacCalendar.store")
+        let appDirectory = baseURL.appendingPathComponent("MyMacCalendar", isDirectory: true)
+        try prepareWritableDirectory(appDirectory)
+        return appDirectory.appendingPathComponent("MyMacCalendar.store")
     }
 
-    private static func prepareWritableDirectory(_ directory: URL) throws -> Bool {
-        do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let testURL = directory.appendingPathComponent(".write-test")
-            try Data().write(to: testURL, options: [.atomic])
-            try? FileManager.default.removeItem(at: testURL)
-            return true
-        } catch CocoaError.fileWriteNoPermission {
-            return false
-        } catch CocoaError.fileNoSuchFile {
-            return false
-        } catch {
-            throw error
-        }
+    private static func prepareWritableDirectory(_ directory: URL) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let testURL = directory.appendingPathComponent(".write-test-\(UUID().uuidString)")
+        try Data().write(to: testURL, options: [.atomic])
+        try FileManager.default.removeItem(at: testURL)
     }
 }

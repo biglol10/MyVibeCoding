@@ -3,13 +3,16 @@ import SwiftUI
 struct PrivacyAccessSettingsPresentation: Equatable {
     let sandboxPolicy: SandboxPolicySummary
     let folderRows: [PrivacyAccessFolderRowPresentation]
+    let persistenceErrorMessage: String?
 
     init(
         sandboxPolicy: SandboxPolicySummary,
-        grantedFolderSummaries: [FolderAccessGrantSummary]
+        grantedFolderSummaries: [FolderAccessGrantSummary],
+        persistenceErrorMessage: String? = nil
     ) {
         self.sandboxPolicy = sandboxPolicy
         self.folderRows = grantedFolderSummaries.map(PrivacyAccessFolderRowPresentation.init)
+        self.persistenceErrorMessage = persistenceErrorMessage
     }
 
     var folderCountText: String {
@@ -17,7 +20,11 @@ struct PrivacyAccessSettingsPresentation: Equatable {
     }
 
     var showsResetAction: Bool {
-        !folderRows.isEmpty
+        !folderRows.isEmpty || showsPersistenceError
+    }
+
+    var showsPersistenceError: Bool {
+        persistenceErrorMessage?.isEmpty == false
     }
 
     var emptyTitle: String {
@@ -67,6 +74,7 @@ struct PrivacyAccessFolderRowPresentation: Equatable, Identifiable {
 struct PrivacyAccessSettingsView: View {
     let sandboxPolicy: SandboxPolicySummary
     let grantedFolderSummaries: [FolderAccessGrantSummary]
+    let persistenceErrorMessage: String?
     let onChooseFolder: () -> Void
     let onOpenPrivacySettings: () -> Void
     let onRemoveGrant: (FolderAccessGrantSummary.ID) -> Void
@@ -75,7 +83,8 @@ struct PrivacyAccessSettingsView: View {
     private var presentation: PrivacyAccessSettingsPresentation {
         PrivacyAccessSettingsPresentation(
             sandboxPolicy: sandboxPolicy,
-            grantedFolderSummaries: grantedFolderSummaries
+            grantedFolderSummaries: grantedFolderSummaries,
+            persistenceErrorMessage: persistenceErrorMessage
         )
     }
 
@@ -85,6 +94,9 @@ struct PrivacyAccessSettingsView: View {
                 header
                 statusPanel
                 actionsPanel
+                if presentation.showsPersistenceError {
+                    persistenceErrorPanel
+                }
                 foldersPanel
             }
             .padding(.horizontal, 8)
@@ -169,6 +181,31 @@ struct PrivacyAccessSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var persistenceErrorPanel: some View {
+        SettingsPanel {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.orange)
+                    .frame(width: 28)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Saved Access Data Needs Attention")
+                        .font(.headline)
+                    if let message = presentation.persistenceErrorMessage {
+                        Text(message)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text("Reset only if you want to discard the saved access data.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }

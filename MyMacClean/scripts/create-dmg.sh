@@ -1,29 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export PATH="/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
-PACKAGE_DIR="$DIST_DIR/MyMacClean"
-APP_DIR="$PACKAGE_DIR/MyMacClean.app"
-FIRST_RUN_COMMAND="$PACKAGE_DIR/Open MyMacClean.command"
-INSTALLER_COMMAND="$PACKAGE_DIR/Install MyMacClean.command"
-README_PATH="$PACKAGE_DIR/READ ME FIRST.txt"
+APP_DIR="$DIST_DIR/MyMacClean.app"
 DMG_ROOT="$DIST_DIR/dmg-root"
 DMG_PATH="$DIST_DIR/MyMacClean-dev.dmg"
+ZIP_PATH="$DIST_DIR/MyMacClean-dev.zip"
 
 "$ROOT_DIR/scripts/build-app-bundle.sh"
 rm -rf "$DMG_ROOT"
 mkdir -p "$DMG_ROOT"
 cp -R "$APP_DIR" "$DMG_ROOT/MyMacClean.app"
-cp "$FIRST_RUN_COMMAND" "$DMG_ROOT/Open MyMacClean.command"
-cp "$INSTALLER_COMMAND" "$DMG_ROOT/Install MyMacClean.command"
-cp "$README_PATH" "$DMG_ROOT/READ ME FIRST.txt"
-chmod +x "$DMG_ROOT/Open MyMacClean.command"
-chmod +x "$DMG_ROOT/Install MyMacClean.command"
-if command -v xattr >/dev/null 2>&1; then
-    xattr -cr "$DMG_ROOT"
-fi
 rm -f "$DMG_PATH"
-hdiutil create -volname "MyMacClean" -srcfolder "$DMG_ROOT" -ov -format UDZO "$DMG_PATH"
-echo "$DMG_PATH"
+if hdiutil create -volname "MyMacClean" -srcfolder "$DMG_ROOT" -ov -format UDZO "$DMG_PATH"; then
+  echo "$DMG_PATH"
+else
+  echo "hdiutil failed; creating zip fallback at $ZIP_PATH" >&2
+  rm -f "$ZIP_PATH"
+  (cd "$DMG_ROOT" && ditto -c -k --sequesterRsrc --keepParent MyMacClean.app "$ZIP_PATH")
+  echo "$ZIP_PATH"
+fi

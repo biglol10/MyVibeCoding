@@ -104,9 +104,10 @@ final class CaptureCoordinatorPersonalWorkflowTests: XCTestCase {
             )
         )
         let exporter = MockRecordingExportService()
+        let settingsStore = makeSettingsStore("trim")
         let coordinator = CaptureCoordinator(
             appState: appState,
-            settingsStore: makeSettingsStore("trim"),
+            settingsStore: settingsStore,
             screenshotService: MockPersonalScreenshotService(),
             selectionService: MockPersonalSelectionService(),
             recordingExportService: exporter
@@ -118,7 +119,11 @@ final class CaptureCoordinatorPersonalWorkflowTests: XCTestCase {
         XCTAssertEqual(request.sourceURL, sourceURL)
         XCTAssertEqual(request.startSeconds, 1)
         XCTAssertEqual(request.endSeconds, 3)
-        XCTAssertEqual(appState.currentDocument?.fileURL, request.outputURL)
+        let finalURL = try XCTUnwrap(appState.currentDocument?.fileURL)
+        XCTAssertNotEqual(finalURL, request.outputURL)
+        XCTAssertEqual(finalURL.deletingLastPathComponent().path, settingsStore.settings.recordingFolderPath)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: finalURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: request.outputURL.path))
         XCTAssertEqual(appState.currentDocument?.isDirty, false)
         XCTAssertEqual(appState.statusMessage, "Recording trimmed.")
     }
@@ -136,9 +141,10 @@ final class CaptureCoordinatorPersonalWorkflowTests: XCTestCase {
         )
         let exporter = MockRecordingExportService()
         let revealService = MockPersonalFileRevealService()
+        let settingsStore = makeSettingsStore("gif")
         let coordinator = CaptureCoordinator(
             appState: appState,
-            settingsStore: makeSettingsStore("gif"),
+            settingsStore: settingsStore,
             screenshotService: MockPersonalScreenshotService(),
             selectionService: MockPersonalSelectionService(),
             fileRevealService: revealService,
@@ -152,8 +158,107 @@ final class CaptureCoordinatorPersonalWorkflowTests: XCTestCase {
         XCTAssertEqual(request.outputURL.pathExtension, "gif")
         XCTAssertNil(request.maxDurationSeconds)
         XCTAssertEqual(appState.currentDocument?.fileURL, sourceURL)
-        XCTAssertEqual(revealService.revealedURLs, [request.outputURL])
+        let finalURL = try XCTUnwrap(revealService.revealedURLs.first)
+        XCTAssertNotEqual(finalURL, request.outputURL)
+        XCTAssertEqual(finalURL.deletingLastPathComponent().path, settingsStore.settings.recordingFolderPath)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: finalURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: request.outputURL.path))
         XCTAssertEqual(appState.statusMessage, "GIF exported.")
+    }
+
+    @MainActor
+    func testSavingRecordingDoesNotMoveReplacementAtSamePath() async throws {
+        let sourceURL = temporaryFile(name: "manual-save-source.mp4", data: Data("original".utf8))
+        let originalIdentity = try CaptureFileIdentity.existingFile(at: sourceURL)
+        let movedOriginalURL = sourceURL.deletingLastPathComponent().appendingPathComponent("manual-save-original.mp4")
+        let replacementData = Data("replacement".utf8)
+        try FileManager.default.moveItem(at: sourceURL, to: movedOriginalURL)
+        try replacementData.write(to: sourceURL)
+        let settingsStore = makeSettingsStore("recordingSaveReplacement")
+        let appState = AppState(
+            currentDocument: EditorDocument(
+                kind: .recording,
+                fileURL: sourceURL,
+                fileIdentity: originalIdentity,
+                isDirty: true
+            )
+        )
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: settingsStore,
+            screenshotService: MockPersonalScreenshotService(),
+            selectionService: MockPersonalSelectionService()
+        )
+
+        await coordinator.saveCurrentDocument()
+
+        XCTAssertEqual(appState.currentDocument?.fileURL, sourceURL)
+        XCTAssertEqual(appState.currentDocument?.isDirty, true)
+        XCTAssertEqual(try Data(contentsOf: sourceURL), replacementData)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: settingsStore.settings.recordingFolderPath).isEmpty)
+        XCTAssertEqual(appState.statusMessage, "Save stopped because the recording changed on disk.")
+    }
+
+    @MainActor
+    func testTrimDoesNotStartWhenRecordingWasReplacedAtSamePath() async throws {
+        let sourceURL = temporaryFile(name: "trim-replaced-source.mp4", data: Data("original".utf8))
+        let originalIdentity = try CaptureFileIdentity.existingFile(at: sourceURL)
+        let movedOriginalURL = sourceURL.deletingLastPathComponent().appendingPathComponent("trim-replaced-original.mp4")
+        try FileManager.default.moveItem(at: sourceURL, to: movedOriginalURL)
+        try Data("replacement".utf8).write(to: sourceURL)
+        let exporter = MockRecordingExportService()
+        let appState = AppState(
+            currentDocument: EditorDocument(
+                kind: .recording,
+                fileURL: sourceURL,
+                fileIdentity: originalIdentity,
+                isDirty: false
+            )
+        )
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: makeSettingsStore("trimReplacedBeforeStart"),
+            screenshotService: MockPersonalScreenshotService(),
+            selectionService: MockPersonalSelectionService(),
+            recordingExportService: exporter
+        )
+
+        await coordinator.trimCurrentRecording(startSeconds: 0, endSeconds: 1)
+
+        XCTAssertTrue(exporter.trimRequests.isEmpty)
+        XCTAssertEqual(appState.currentDocument?.fileURL, sourceURL)
+        XCTAssertEqual(appState.statusMessage, "Trim stopped because the recording changed on disk.")
+    }
+
+    @MainActor
+    func testGIFExportDoesNotStartWhenRecordingWasReplacedAtSamePath() async throws {
+        let sourceURL = temporaryFile(name: "gif-replaced-source.mp4", data: Data("original".utf8))
+        let originalIdentity = try CaptureFileIdentity.existingFile(at: sourceURL)
+        let movedOriginalURL = sourceURL.deletingLastPathComponent().appendingPathComponent("gif-replaced-original.mp4")
+        try FileManager.default.moveItem(at: sourceURL, to: movedOriginalURL)
+        try Data("replacement".utf8).write(to: sourceURL)
+        let exporter = MockRecordingExportService()
+        let appState = AppState(
+            currentDocument: EditorDocument(
+                kind: .recording,
+                fileURL: sourceURL,
+                fileIdentity: originalIdentity,
+                isDirty: false
+            )
+        )
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: makeSettingsStore("gifReplacedBeforeStart"),
+            screenshotService: MockPersonalScreenshotService(),
+            selectionService: MockPersonalSelectionService(),
+            recordingExportService: exporter
+        )
+
+        await coordinator.exportCurrentRecordingAsGIF()
+
+        XCTAssertTrue(exporter.gifRequests.isEmpty)
+        XCTAssertEqual(appState.currentDocument?.fileURL, sourceURL)
+        XCTAssertEqual(appState.statusMessage, "GIF export stopped because the recording changed on disk.")
     }
 
     @MainActor
@@ -210,6 +315,258 @@ final class CaptureCoordinatorPersonalWorkflowTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: outputURL.path))
         XCTAssertEqual(appState.currentDocument?.fileURL, sourceURL)
         XCTAssertEqual(appState.statusMessage?.hasPrefix("GIF export failed:"), true)
+    }
+
+    @MainActor
+    func testTrimCompletionDoesNotReplaceANewerDocumentOrPublishItsOutput() async throws {
+        let sourceURL = temporaryFile(name: "source-stale-trim.mp4", data: Data([0x00, 0x00, 0x00, 0x18]))
+        let original = EditorDocument(kind: .recording, fileURL: sourceURL, isDirty: false)
+        let replacement = EditorDocument(
+            kind: .recording,
+            fileURL: temporaryFile(name: "replacement.mp4", data: Data([0x01])),
+            isDirty: false
+        )
+        let appState = AppState(currentDocument: original)
+        let exporter = SuspendingRecordingExportService()
+        let settingsStore = makeSettingsStore("staleTrim")
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: settingsStore,
+            screenshotService: MockPersonalScreenshotService(),
+            selectionService: MockPersonalSelectionService(),
+            recordingExportService: exporter
+        )
+
+        let task = Task { @MainActor in
+            await coordinator.trimCurrentRecording(startSeconds: 1, endSeconds: 3)
+        }
+        await exporter.waitUntilTrimStarted()
+        appState.currentDocument = replacement
+        try exporter.finishTrim()
+        await task.value
+
+        XCTAssertEqual(appState.currentDocument?.id, replacement.id)
+        XCTAssertEqual(appState.statusMessage, "Trim cancelled because the document changed.")
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: settingsStore.settings.recordingFolderPath).isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: exporter.trimOutputURL?.path ?? ""))
+    }
+
+    @MainActor
+    func testTrimMarksFileOperationBusyAndBlocksNewCaptureUntilCompletion() async throws {
+        let sourceURL = temporaryFile(name: "source-file-operation-busy.mp4", data: Data("original".utf8))
+        let appState = AppState(
+            currentDocument: EditorDocument(
+                kind: .recording,
+                fileURL: sourceURL,
+                fileIdentity: try CaptureFileIdentity.existingFile(at: sourceURL),
+                isDirty: false
+            )
+        )
+        let exporter = SuspendingRecordingExportService()
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: makeSettingsStore("fileOperationBusy"),
+            screenshotService: MockPersonalScreenshotService(),
+            selectionService: MockPersonalSelectionService(),
+            recordingExportService: exporter
+        )
+
+        let trimTask = Task { @MainActor in
+            await coordinator.trimCurrentRecording(startSeconds: 0, endSeconds: 1)
+        }
+        await exporter.waitUntilTrimStarted()
+        XCTAssertTrue(appState.isFileOperationInProgress)
+
+        await coordinator.startScreenshotCapture()
+        XCTAssertEqual(appState.statusMessage, "A file operation is already in progress.")
+
+        try exporter.finishTrim()
+        await trimTask.value
+        XCTAssertFalse(appState.isFileOperationInProgress)
+    }
+
+    @MainActor
+    func testTrimCompletionDoesNotPublishAfterSourceFileIsReplaced() async throws {
+        let sourceURL = temporaryFile(name: "source-replaced-during-trim.mp4", data: Data("original".utf8))
+        let originalIdentity = try CaptureFileIdentity.existingFile(at: sourceURL)
+        let original = EditorDocument(
+            kind: .recording,
+            fileURL: sourceURL,
+            fileIdentity: originalIdentity,
+            isDirty: false
+        )
+        let appState = AppState(currentDocument: original)
+        let exporter = SuspendingRecordingExportService()
+        let settingsStore = makeSettingsStore("sourceReplacedDuringTrim")
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: settingsStore,
+            screenshotService: MockPersonalScreenshotService(),
+            selectionService: MockPersonalSelectionService(),
+            recordingExportService: exporter
+        )
+
+        let task = Task { @MainActor in
+            await coordinator.trimCurrentRecording(startSeconds: 0, endSeconds: 1)
+        }
+        await exporter.waitUntilTrimStarted()
+        let movedOriginalURL = sourceURL.deletingLastPathComponent().appendingPathComponent("source-before-trim-replacement.mp4")
+        try FileManager.default.moveItem(at: sourceURL, to: movedOriginalURL)
+        try Data("replacement".utf8).write(to: sourceURL)
+        try exporter.finishTrim()
+        await task.value
+
+        XCTAssertEqual(appState.currentDocument?.fileURL, sourceURL)
+        XCTAssertEqual(appState.currentDocument?.fileIdentity, originalIdentity)
+        XCTAssertEqual(appState.statusMessage, "Trim cancelled because the source recording changed.")
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: settingsStore.settings.recordingFolderPath).isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: exporter.trimOutputURL?.path ?? ""))
+    }
+
+    @MainActor
+    func testGIFCompletionDoesNotPublishAfterTheDocumentChanges() async throws {
+        let sourceURL = temporaryFile(name: "source-stale-gif.mp4", data: Data([0x00, 0x00, 0x00, 0x18]))
+        let original = EditorDocument(kind: .recording, fileURL: sourceURL, isDirty: false)
+        let replacement = EditorDocument(
+            kind: .recording,
+            fileURL: temporaryFile(name: "replacement-gif.mp4", data: Data([0x01])),
+            isDirty: false
+        )
+        let appState = AppState(currentDocument: original)
+        let exporter = SuspendingRecordingExportService()
+        let revealService = MockPersonalFileRevealService()
+        let settingsStore = makeSettingsStore("staleGIF")
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: settingsStore,
+            screenshotService: MockPersonalScreenshotService(),
+            selectionService: MockPersonalSelectionService(),
+            fileRevealService: revealService,
+            recordingExportService: exporter
+        )
+
+        let task = Task { @MainActor in
+            await coordinator.exportCurrentRecordingAsGIF()
+        }
+        await exporter.waitUntilGIFStarted()
+        appState.currentDocument = replacement
+        try exporter.finishGIF()
+        await task.value
+
+        XCTAssertEqual(appState.currentDocument?.id, replacement.id)
+        XCTAssertEqual(appState.statusMessage, "GIF export cancelled because the document changed.")
+        XCTAssertTrue(revealService.revealedURLs.isEmpty)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: settingsStore.settings.recordingFolderPath).isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: exporter.gifOutputURL?.path ?? ""))
+    }
+
+    @MainActor
+    func testGIFCompletionDoesNotPublishAfterSourceFileIsReplaced() async throws {
+        let sourceURL = temporaryFile(name: "source-replaced-during-gif.mp4", data: Data("original".utf8))
+        let originalIdentity = try CaptureFileIdentity.existingFile(at: sourceURL)
+        let original = EditorDocument(
+            kind: .recording,
+            fileURL: sourceURL,
+            fileIdentity: originalIdentity,
+            isDirty: false
+        )
+        let appState = AppState(currentDocument: original)
+        let exporter = SuspendingRecordingExportService()
+        let revealService = MockPersonalFileRevealService()
+        let settingsStore = makeSettingsStore("sourceReplacedDuringGIF")
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: settingsStore,
+            screenshotService: MockPersonalScreenshotService(),
+            selectionService: MockPersonalSelectionService(),
+            fileRevealService: revealService,
+            recordingExportService: exporter
+        )
+
+        let task = Task { @MainActor in
+            await coordinator.exportCurrentRecordingAsGIF()
+        }
+        await exporter.waitUntilGIFStarted()
+        let movedOriginalURL = sourceURL.deletingLastPathComponent().appendingPathComponent("source-before-gif-replacement.mp4")
+        try FileManager.default.moveItem(at: sourceURL, to: movedOriginalURL)
+        try Data("replacement".utf8).write(to: sourceURL)
+        try exporter.finishGIF()
+        await task.value
+
+        XCTAssertEqual(appState.currentDocument?.fileURL, sourceURL)
+        XCTAssertEqual(appState.currentDocument?.fileIdentity, originalIdentity)
+        XCTAssertEqual(appState.statusMessage, "GIF export cancelled because the source recording changed.")
+        XCTAssertTrue(revealService.revealedURLs.isEmpty)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: settingsStore.settings.recordingFolderPath).isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: exporter.gifOutputURL?.path ?? ""))
+    }
+
+    @MainActor
+    func testDeletingHistoryDoesNotTrashAReplacementAtTheSamePath() throws {
+        let fileURL = temporaryFile(name: "history-original.png", data: Data("original".utf8))
+        let movedOriginalURL = fileURL.deletingLastPathComponent().appendingPathComponent("moved-original.png")
+        let item = CaptureHistoryItem(
+            kind: .screenshot,
+            createdAt: Date(timeIntervalSince1970: 10),
+            fileURL: fileURL,
+            title: "Original",
+            detail: "Screenshot",
+            fileIdentity: try CaptureFileIdentity.existingFile(at: fileURL)
+        )
+        let historyStore = CaptureHistoryStore(defaults: isolatedDefaults("historyReplacementDelete"))
+        historyStore.add(item)
+        try FileManager.default.moveItem(at: fileURL, to: movedOriginalURL)
+        try Data("replacement".utf8).write(to: fileURL)
+        let trashService = MockPersonalFileTrashService()
+        let appState = AppState()
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: makeSettingsStore("historyReplacementDelete"),
+            screenshotService: MockPersonalScreenshotService(),
+            selectionService: MockPersonalSelectionService(),
+            fileTrashService: trashService,
+            historyStore: historyStore
+        )
+
+        coordinator.deleteHistoryItem(item)
+
+        XCTAssertTrue(trashService.trashedURLs.isEmpty)
+        XCTAssertTrue(historyStore.items.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: fileURL), Data("replacement".utf8))
+        XCTAssertEqual(appState.statusMessage, "History entry removed. The file changed and was not deleted.")
+    }
+
+    @MainActor
+    func testDeletingAnOpenedHistoryDocumentDoesNotTrashAReplacementAtTheSamePath() async throws {
+        let fileURL = temporaryFile(name: "opened-history-original.png", data: Data("original".utf8))
+        let movedOriginalURL = fileURL.deletingLastPathComponent().appendingPathComponent("opened-history-moved.png")
+        let item = CaptureHistoryItem(
+            kind: .screenshot,
+            createdAt: Date(timeIntervalSince1970: 10),
+            fileURL: fileURL,
+            title: "Original",
+            detail: "Screenshot",
+            fileIdentity: try CaptureFileIdentity.existingFile(at: fileURL)
+        )
+        let trashService = MockPersonalFileTrashService()
+        let appState = AppState()
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: makeSettingsStore("openedHistoryReplacementDelete"),
+            screenshotService: MockPersonalScreenshotService(),
+            selectionService: MockPersonalSelectionService(),
+            fileTrashService: trashService
+        )
+        await coordinator.openHistoryItem(item)
+        try FileManager.default.moveItem(at: fileURL, to: movedOriginalURL)
+        try Data("replacement".utf8).write(to: fileURL)
+
+        coordinator.deleteCurrentDocument()
+
+        XCTAssertTrue(trashService.trashedURLs.isEmpty)
+        XCTAssertNotNil(appState.currentDocument)
+        XCTAssertEqual(try Data(contentsOf: fileURL), Data("replacement".utf8))
+        XCTAssertEqual(appState.statusMessage, "Delete stopped because the file changed on disk.")
     }
 
     @MainActor
@@ -295,7 +652,7 @@ private final class MockRecordingExportService: RecordingExportServicing {
     struct TrimRequest: Equatable {
         let sourceURL: URL
         let startSeconds: Double
-        let endSeconds: Double
+        let endSeconds: Double?
         let outputURL: URL
     }
 
@@ -308,20 +665,20 @@ private final class MockRecordingExportService: RecordingExportServicing {
     var trimRequests: [TrimRequest] = []
     var gifRequests: [GIFRequest] = []
 
-    func trimRecording(sourceURL: URL, startSeconds: Double, endSeconds: Double, outputURL: URL) async throws -> URL {
+    func trimRecording(sourceURL: URL, startSeconds: Double, endSeconds: Double?, outputURL: URL) async throws -> RecordingExportResult {
         trimRequests.append(
             TrimRequest(sourceURL: sourceURL, startSeconds: startSeconds, endSeconds: endSeconds, outputURL: outputURL)
         )
         try Data([0x00, 0x00, 0x00, 0x18, 0x54]).write(to: outputURL, options: .atomic)
-        return outputURL
+        return RecordingExportResult(fileURL: outputURL)
     }
 
-    func exportGIF(sourceURL: URL, outputURL: URL, maxDurationSeconds: Double?) async throws -> URL {
+    func exportGIF(sourceURL: URL, outputURL: URL, maxDurationSeconds: Double?) async throws -> RecordingExportResult {
         gifRequests.append(
             GIFRequest(sourceURL: sourceURL, outputURL: outputURL, maxDurationSeconds: maxDurationSeconds)
         )
         try Data("GIF89a".utf8).write(to: outputURL, options: .atomic)
-        return outputURL
+        return RecordingExportResult(fileURL: outputURL)
     }
 }
 
@@ -339,7 +696,7 @@ private final class FailingRecordingExportService: RecordingExportServicing {
         self.operation = operation
     }
 
-    func trimRecording(sourceURL: URL, startSeconds: Double, endSeconds: Double, outputURL: URL) async throws -> URL {
+    func trimRecording(sourceURL: URL, startSeconds: Double, endSeconds: Double?, outputURL: URL) async throws -> RecordingExportResult {
         trimRequests.append(
             MockRecordingExportService.TrimRequest(
                 sourceURL: sourceURL,
@@ -348,11 +705,10 @@ private final class FailingRecordingExportService: RecordingExportServicing {
                 outputURL: outputURL
             )
         )
-        try Data([0x00, 0x00, 0x00, 0x18, 0x54]).write(to: outputURL, options: .atomic)
         throw RecordingExportError.exportFailed("forced trim failure")
     }
 
-    func exportGIF(sourceURL: URL, outputURL: URL, maxDurationSeconds: Double?) async throws -> URL {
+    func exportGIF(sourceURL: URL, outputURL: URL, maxDurationSeconds: Double?) async throws -> RecordingExportResult {
         gifRequests.append(
             MockRecordingExportService.GIFRequest(
                 sourceURL: sourceURL,
@@ -360,7 +716,6 @@ private final class FailingRecordingExportService: RecordingExportServicing {
                 maxDurationSeconds: maxDurationSeconds
             )
         )
-        try Data("GIF89a".utf8).write(to: outputURL, options: .atomic)
         throw RecordingExportError.gifDestinationFailed
     }
 }
@@ -370,5 +725,77 @@ private final class MockPersonalFileRevealService: FileRevealServicing {
 
     func reveal(_ url: URL) {
         revealedURLs.append(url)
+    }
+}
+
+private final class MockPersonalFileTrashService: FileTrashServicing {
+    private(set) var trashedURLs: [URL] = []
+
+    func trash(_ url: URL, expectedIdentity: CaptureFileIdentity?) throws {
+        trashedURLs.append(url)
+    }
+}
+
+@MainActor
+private final class SuspendingRecordingExportService: RecordingExportServicing {
+    private var trimContinuation: CheckedContinuation<RecordingExportResult, Error>?
+    private var gifContinuation: CheckedContinuation<RecordingExportResult, Error>?
+    private var trimWaiters: [CheckedContinuation<Void, Never>] = []
+    private var gifWaiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var trimOutputURL: URL?
+    private(set) var gifOutputURL: URL?
+
+    func trimRecording(sourceURL: URL, startSeconds: Double, endSeconds: Double?, outputURL: URL) async throws -> RecordingExportResult {
+        trimOutputURL = outputURL
+        trimWaiters.forEach { $0.resume() }
+        trimWaiters.removeAll()
+        return try await withCheckedThrowingContinuation { continuation in
+            trimContinuation = continuation
+        }
+    }
+
+    func exportGIF(sourceURL: URL, outputURL: URL, maxDurationSeconds: Double?) async throws -> RecordingExportResult {
+        gifOutputURL = outputURL
+        gifWaiters.forEach { $0.resume() }
+        gifWaiters.removeAll()
+        return try await withCheckedThrowingContinuation { continuation in
+            gifContinuation = continuation
+        }
+    }
+
+    func waitUntilTrimStarted() async {
+        if trimOutputURL != nil {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            trimWaiters.append(continuation)
+        }
+    }
+
+    func waitUntilGIFStarted() async {
+        if gifOutputURL != nil {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            gifWaiters.append(continuation)
+        }
+    }
+
+    func finishTrim() throws {
+        guard let trimOutputURL else {
+            throw RecordingExportError.exportFailed("trim was not started")
+        }
+        try Data([0x00, 0x00, 0x00, 0x18, 0x54]).write(to: trimOutputURL, options: .atomic)
+        trimContinuation?.resume(returning: RecordingExportResult(fileURL: trimOutputURL))
+        trimContinuation = nil
+    }
+
+    func finishGIF() throws {
+        guard let gifOutputURL else {
+            throw RecordingExportError.exportFailed("GIF was not started")
+        }
+        try Data("GIF89a".utf8).write(to: gifOutputURL, options: .atomic)
+        gifContinuation?.resume(returning: RecordingExportResult(fileURL: gifOutputURL))
+        gifContinuation = nil
     }
 }

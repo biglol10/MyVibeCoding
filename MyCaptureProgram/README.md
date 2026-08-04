@@ -22,10 +22,11 @@ Screen recording permission works best with a stable `.app` bundle. Install the 
 scripts/install_app.sh
 ```
 
-If `/Applications` is not writable, rerun the command with permission or pass another destination:
+Run the script as your normal user. If `/Applications` requires administrator permission,
+the script requests it only for the final staged installation. Do not run the whole build
+with `sudo`. You can also install to your user Applications folder:
 
 ```bash
-sudo scripts/install_app.sh /Applications
 scripts/install_app.sh "$HOME/Applications"
 ```
 
@@ -54,7 +55,8 @@ dist/CaptureStudio-personal-mac.zip
 Move that zip to your other Mac, unzip it, and run `Install CaptureStudio.command`.
 If macOS blocks the installer script, right-click it and choose Open. The installer removes
 download quarantine, signs the app locally for that Mac, installs it to `/Applications`,
-and opens it.
+and opens it. Save any current work and close CaptureStudio first; the installer stops
+instead of force-quitting a running app.
 
 Do not upload a zip made from `scripts/install_app.sh` or from `/Applications/CaptureStudio.app`.
 That app is for local development/install only and may be signed with an Apple Development
@@ -77,9 +79,8 @@ dist/CaptureStudio-0.1.0-macOS.zip
 
 Upload only that notarized zip. If the script stops with "No Developer ID Application
 signing identity found", install the Developer ID Application certificate from the
-Apple Developer account first. If it stops with "No notarization credentials provided",
-store a notarytool profile or set `CAPTURE_STUDIO_APPLE_ID`, `CAPTURE_STUDIO_TEAM_ID`,
-and `CAPTURE_STUDIO_APP_SPECIFIC_PASSWORD`.
+Apple Developer account first. If it stops with "No notarization keychain profile provided",
+store a `notarytool` profile and set `CAPTURE_STUDIO_NOTARY_PROFILE` to that profile name.
 
 ## Test
 
@@ -106,17 +107,17 @@ After a screenshot is captured, the editor toolbar can annotate, OCR, and redact
 ## Features
 
 - Native macOS app bundle with a compact Capture / Record first workflow
-- Region screenshot capture with ESC cancel support
-- Region screen recording with countdown delay, duration control, and stop handling
+- Rectangle, window, and full-screen screenshot capture with ESC cancel support
+- Rectangle, window, and full-screen recording with countdown delay, duration control, and stop handling
 - Multi-display selection overlay support
 - Persistent Settings window for output, capture, recording, shortcuts, and advanced options
 - Customizable shortcuts with per-action reset and reset-all defaults
-- Configurable output folder, format, clipboard behavior, and automatic/manual save mode
+- Configurable output folders, clipboard behavior, and automatic/manual save mode
 - Smart filenames using active app/window context when available
-- Screenshot annotation tools: pen, highlighter, arrow, rectangle, ellipse, text, blur/redact, OCR, undo/redo, copy, save, delete
+- Screenshot annotation tools: pen, highlighter, arrow, rectangle, ellipse, text, solid redaction, OCR, undo/redo, copy, save, delete
 - Quick Redact for detected sensitive text
-- Recording preview, trim-copy export, and GIF export
-- Capture history with search, open, and delete actions
+- Recording preview, trim-copy export, and GIF export; a blank trim end uses the media's actual duration
+- Capture history with thumbnails, search, open, per-item delete, and Clear History that keeps capture files
 - Floating pinned screenshot preview
 - Presets for quickly switching common workflows
 - In-app guide modal for feature explanations
@@ -124,4 +125,8 @@ After a screenshot is captured, the editor toolbar can annotate, OCR, and redact
 ## Notes
 
 - macOS screen recording permission is tied to the installed app bundle and code signature. If permission prompts keep appearing after reinstalling, remove the old `CaptureStudio` entry from System Settings and add `/Applications/CaptureStudio.app` again.
+- Starting a new capture or opening a history item while the current screenshot or recording has unsaved changes asks whether to Save, Discard Changes, or Cancel.
+- If a configured output folder is missing or not writable, CaptureStudio does not silently fall back to Desktop. The new result stays open as unsaved so you can choose another folder and save it.
+- Quick Redact adds editable redaction layers. It does not alter an already saved original or the current clipboard; use Save or Copy to create the redacted version.
 - Integration tests that touch live screen capture require macOS permissions and are run with `CAPTURE_STUDIO_RUN_INTEGRATION=1`.
+- The detailed current-source verification matrix is in `docs/qa/2026-08-04-feature-verification-checklist.md`.

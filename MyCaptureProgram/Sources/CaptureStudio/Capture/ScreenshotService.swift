@@ -21,16 +21,29 @@ public struct ScreenCaptureKitScreenshotService: ScreenshotServicing {
     public init() {}
 
     public func captureImage(selection: CaptureSelection) async throws -> ScreenshotResult {
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         guard let display = content.displays.first(where: { $0.displayID == selection.displayID }) ?? content.displays.first else {
             throw ScreenshotError.noDisplayAvailable
         }
 
         let currentProcessID = pid_t(ProcessInfo.processInfo.processIdentifier)
-        let excludedWindows = content.windows.filter { window in
-            window.owningApplication?.processID == currentProcessID
+        let currentBundleIdentifier = Bundle.main.bundleIdentifier
+        let excludedApplications = content.applications.filter { application in
+            ScreenCaptureApplicationMatcher.matches(
+                applicationProcessID: application.processID,
+                applicationBundleIdentifier: application.bundleIdentifier,
+                currentProcessID: currentProcessID,
+                currentBundleIdentifier: currentBundleIdentifier
+            )
         }
-        let filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
+        guard !excludedApplications.isEmpty else {
+            throw ScreenCaptureContentFilterError.currentApplicationUnavailable
+        }
+        let filter = SCContentFilter(
+            display: display,
+            excludingApplications: excludedApplications,
+            exceptingWindows: []
+        )
         let geometry = ScreenCaptureOutputGeometry(selection: selection, pointPixelScale: CGFloat(filter.pointPixelScale))
         let configuration = SCStreamConfiguration()
         configuration.sourceRect = geometry.sourceRectInPoints

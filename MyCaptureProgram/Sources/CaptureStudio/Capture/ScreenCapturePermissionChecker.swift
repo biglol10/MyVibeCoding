@@ -13,6 +13,31 @@ public struct CoreGraphicsScreenCapturePermissionChecker: ScreenCapturePermissio
     }
 }
 
+enum ScreenCaptureApplicationMatcher {
+    static func matches(
+        applicationProcessID: pid_t,
+        applicationBundleIdentifier: String?,
+        currentProcessID: pid_t,
+        currentBundleIdentifier: String?
+    ) -> Bool {
+        if applicationProcessID == currentProcessID {
+            return true
+        }
+        guard let currentBundleIdentifier, !currentBundleIdentifier.isEmpty else {
+            return false
+        }
+        return applicationBundleIdentifier == currentBundleIdentifier
+    }
+}
+
+enum ScreenCaptureContentFilterError: LocalizedError, Equatable {
+    case currentApplicationUnavailable
+
+    var errorDescription: String? {
+        "CaptureStudio could not safely exclude its own windows. Try the capture again."
+    }
+}
+
 public enum ScreenCapturePermissionError: LocalizedError, Equatable {
     case accessDenied
 

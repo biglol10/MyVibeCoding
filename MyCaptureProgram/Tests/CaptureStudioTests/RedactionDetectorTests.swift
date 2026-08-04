@@ -16,7 +16,7 @@ final class RedactionDetectorTests: XCTestCase {
         XCTAssertEqual(Set(candidates.map(\.kind)), [.email, .phone, .url, .longToken, .longNumber])
     }
 
-    func testRedactionCandidateBoundsOnlyMatchedTextWithinObservation() throws {
+    func testRedactionCandidateFallsBackToWholeObservationWhenExactRangeBoxIsUnavailable() throws {
         let observationBox = CGRect(x: 10, y: 20, width: 240, height: 24)
         let result = OCRResult(observations: [
             OCRObservation(text: "Email user@example.com now", confidence: 1, boundingBox: observationBox)
@@ -24,8 +24,27 @@ final class RedactionDetectorTests: XCTestCase {
 
         let candidate = try XCTUnwrap(RedactionDetector().detect(in: result).first { $0.kind == .email })
 
-        XCTAssertGreaterThan(candidate.boundingBox.minX, observationBox.minX)
-        XCTAssertLessThan(candidate.boundingBox.width, observationBox.width)
+        XCTAssertEqual(candidate.boundingBox, observationBox.integral)
         XCTAssertEqual(candidate.text, "user@example.com")
+    }
+
+    func testRedactionCandidateUsesVisionRangeBoundingBoxInsteadOfCharacterRatioEstimate() throws {
+        let text = "WWWWWWWWWW user@example.com iiiiiiiiii"
+        let emailRange = (text as NSString).range(of: "user@example.com")
+        let exactVisionBox = CGRect(x: 180, y: 20, width: 150, height: 24)
+        let observation = OCRObservation(
+            text: text,
+            confidence: 1,
+            boundingBox: CGRect(x: 10, y: 20, width: 400, height: 24),
+            textRangeBoxes: [
+                OCRTextRangeBox(range: emailRange, boundingBox: exactVisionBox)
+            ]
+        )
+
+        let candidate = try XCTUnwrap(
+            RedactionDetector().detect(in: OCRResult(observations: [observation])).first { $0.kind == .email }
+        )
+
+        XCTAssertEqual(candidate.boundingBox, exactVisionBox.integral)
     }
 }

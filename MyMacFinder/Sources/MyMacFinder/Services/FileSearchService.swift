@@ -21,24 +21,44 @@ public struct FileSearchService: FileSearchServicing, Sendable {
         options: DirectoryReadOptions = DirectoryReadOptions()
     ) async throws -> [FileEntry] {
         var matches: [FileEntry] = []
-        var directoriesToVisit = [rootURL.standardizedFileURL]
+        let rootURL = rootURL.standardizedFileURL
+        var directoriesToVisit = [rootURL]
         var visitedDirectories = Set<URL>()
+        var cursor = 0
 
-        while !directoriesToVisit.isEmpty {
+        while cursor < directoriesToVisit.count {
             try Task.checkCancellation()
-            let directoryURL = directoriesToVisit.removeFirst().standardizedFileURL
+            let directoryURL = directoriesToVisit[cursor].standardizedFileURL
+            cursor += 1
             guard visitedDirectories.insert(directoryURL).inserted else {
                 continue
             }
 
-            let entries = try await fileSystemService.contentsOfDirectory(at: directoryURL, options: options)
+            let entries: [FileEntry]
+            do {
+                entries = try await fileSystemService.contentsOfDirectory(at: directoryURL, options: options)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let error as ExplorerError {
+                if directoryURL != rootURL, case .permissionDenied = error {
+                    continue
+                }
+                throw error
+            }
+            try Task.checkCancellation()
             matches.append(contentsOf: FileEntrySearchFilter.filtered(entries, criteria: criteria))
 
             directoriesToVisit.append(contentsOf: entries.compactMap { entry in
-                entry.isDirectoryLike ? entry.url.standardizedFileURL : nil
+                guard entry.isDirectoryLike,
+                      entry.isReadable,
+                      entry.kind != .symlink else {
+                    return nil
+                }
+                return entry.url.standardizedFileURL
             })
         }
 
+        try Task.checkCancellation()
         return SortEngine.sorted(matches, descriptor: EntrySortDescriptor(key: .path))
     }
 }

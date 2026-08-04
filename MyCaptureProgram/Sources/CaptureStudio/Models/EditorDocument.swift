@@ -10,6 +10,7 @@ public struct EditorDocument: Equatable, Identifiable {
     public var kind: Kind
     public var createdAt: Date
     public var fileURL: URL?
+    public var fileIdentity: CaptureFileIdentity?
     public var data: Data?
     public var baseImageData: Data?
     public var renderedImageData: Data?
@@ -27,6 +28,7 @@ public struct EditorDocument: Equatable, Identifiable {
         kind: Kind,
         createdAt: Date = Date(),
         fileURL: URL? = nil,
+        fileIdentity: CaptureFileIdentity? = nil,
         data: Data? = nil,
         baseImageData: Data? = nil,
         renderedImageData: Data? = nil,
@@ -43,6 +45,7 @@ public struct EditorDocument: Equatable, Identifiable {
         self.kind = kind
         self.createdAt = createdAt
         self.fileURL = fileURL
+        self.fileIdentity = fileIdentity
         self.data = data
         self.baseImageData = baseImageData ?? data
         self.renderedImageData = renderedImageData

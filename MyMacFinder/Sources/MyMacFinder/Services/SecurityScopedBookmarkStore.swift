@@ -1,10 +1,21 @@
 import Foundation
 
 public protocol SecurityScopedBookmarkStoring: AnyObject {
-    func load() -> [FolderAccessGrant]
+    func load() throws -> [FolderAccessGrant]
     func save(_ grant: FolderAccessGrant) throws
-    func remove(id: FolderAccessGrantID)
+    func remove(id: FolderAccessGrantID) throws
     func reset()
+}
+
+public enum SecurityScopedBookmarkStoreError: LocalizedError, Equatable, Sendable {
+    case corruptedData
+
+    public var errorDescription: String? {
+        switch self {
+        case .corruptedData:
+            return "Saved folder access data is damaged. It was preserved and was not overwritten."
+        }
+    }
 }
 
 public final class SecurityScopedBookmarkStore: SecurityScopedBookmarkStoring {
@@ -19,15 +30,19 @@ public final class SecurityScopedBookmarkStore: SecurityScopedBookmarkStoring {
         self.key = key
     }
 
-    public func load() -> [FolderAccessGrant] {
+    public func load() throws -> [FolderAccessGrant] {
         guard let data = defaults.data(forKey: key) else {
             return []
         }
-        return (try? JSONDecoder().decode([FolderAccessGrant].self, from: data)) ?? []
+        do {
+            return try JSONDecoder().decode([FolderAccessGrant].self, from: data)
+        } catch {
+            throw SecurityScopedBookmarkStoreError.corruptedData
+        }
     }
 
     public func save(_ grant: FolderAccessGrant) throws {
-        var grants = load()
+        var grants = try load()
         grants.removeAll { existing in
             existing.id == grant.id || existing.url.standardizedFileURL == grant.url.standardizedFileURL
         }
@@ -39,11 +54,9 @@ public final class SecurityScopedBookmarkStore: SecurityScopedBookmarkStoring {
         defaults.set(data, forKey: key)
     }
 
-    public func remove(id: FolderAccessGrantID) {
-        let grants = load().filter { $0.id != id }
-        guard let data = try? JSONEncoder().encode(grants) else {
-            return
-        }
+    public func remove(id: FolderAccessGrantID) throws {
+        let grants = try load().filter { $0.id != id }
+        let data = try JSONEncoder().encode(grants)
         defaults.set(data, forKey: key)
     }
 

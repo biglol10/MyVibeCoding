@@ -21,9 +21,11 @@ final class QuickRedactIntegrationTests: XCTestCase {
 
         XCTAssertEqual(appState.currentDocument?.layers.count, 1)
         let frame = appState.currentDocument?.layers.first?.frame
-        XCTAssertGreaterThan(frame?.minX ?? 0, 10)
-        XCTAssertLessThan(frame?.width ?? 200, 200)
-        XCTAssertEqual(appState.statusMessage, "Redaction added.")
+        XCTAssertEqual(frame, CGRect(x: 10, y: 20, width: 200, height: 24))
+        XCTAssertEqual(
+            appState.statusMessage,
+            "Redaction added. Save or Copy creates a redacted version; the original file and clipboard are unchanged."
+        )
     }
 
     private func isolatedDefaults(_ name: String) -> UserDefaults {

@@ -22,4 +22,21 @@ final class OCRResultTests: XCTestCase {
 
         XCTAssertEqual(result.fullText, "first\nsecond")
     }
+
+    func testLegacyObservationWithoutRangeBoxesStillDecodes() throws {
+        let original = OCRObservation(
+            text: "legacy@example.com",
+            confidence: 0.9,
+            boundingBox: CGRect(x: 1, y: 2, width: 3, height: 4)
+        )
+        let encoded = try JSONEncoder().encode(original)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "textRangeBoxes")
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(OCRObservation.self, from: legacyData)
+
+        XCTAssertEqual(decoded.text, original.text)
+        XCTAssertTrue(decoded.textRangeBoxes.isEmpty)
+    }
 }

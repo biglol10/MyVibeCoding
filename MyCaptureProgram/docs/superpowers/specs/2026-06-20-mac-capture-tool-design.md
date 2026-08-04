@@ -4,7 +4,7 @@ Date: 2026-06-20
 
 ## Status
 
-Historical product spec. The app has moved past the original phased MVP described below: region capture, region recording, screenshot editing, OCR, quick redact, recording preview, recording trim-copy export, GIF export, history, presets, smart filenames, and floating pins are now implemented. Window/full-screen/freeform capture, window-mode recording, scrolling capture, audio device selection, color picker, print/share integrations, and Perfect Screenshot-style automatic region adjustment are still future work unless implemented in source after this note. Use `README.md` and the source code as the source of truth.
+Historical product spec. The app has moved past the original phased MVP described below: rectangle/window/full-screen capture and recording, screenshot editing, OCR, quick redact, recording preview, recording trim-copy export, GIF export, history, presets, smart filenames, and floating pins are now implemented. Freeform and scrolling capture, audio device selection, color picker, print/share integrations, and Perfect Screenshot-style automatic region adjustment remain future work unless implemented in source after this note. Use `README.md`, the current QA checklist, and the source code as the source of truth.
 
 ## Goal
 
@@ -150,7 +150,7 @@ Window-mode recording is part of the final feature set, but it is not required f
 
 Default output location is `~/Desktop`.
 
-Users can change screenshot and recording output folders in Settings. If the configured folder is missing or inaccessible, the app falls back to Desktop and shows a recoverable warning.
+Users can change screenshot and recording output folders in Settings. The current implementation does not silently fall back to Desktop when that folder is missing or inaccessible; it reports the failure and preserves the result as unsaved.
 
 Screenshot filenames:
 
@@ -179,7 +179,7 @@ Implemented editor tools include:
 - Rectangle
 - Ellipse
 - Text labels
-- Blur/redact
+- Solid redaction
 - OCR text extraction
 - Quick redact
 - Undo and redo
@@ -190,6 +190,7 @@ Implemented editor tools include:
 
 Still future or not currently documented as complete:
 
+- Blur redaction UI (the renderer supports it, but no user-facing tool creates blur layers)
 - Emojis or stickers
 - Color picker
 - Crop

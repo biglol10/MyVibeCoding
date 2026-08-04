@@ -190,7 +190,7 @@ public enum CaptureStudioGuidePresentation {
             title: "Capture",
             systemImage: "viewfinder",
             items: [
-                "Capture lets you drag a rectangle and save only that selected area.",
+                "Choose Rectangle, Window, or Full Screen in Options, then Capture the selected target.",
                 "The app hides itself while you select, so it does not cover the target.",
                 "Screenshots can auto-save, stay unsaved until Save, and copy to clipboard.",
                 "History keeps recent captures searchable, and Pin floats a screenshot above other windows."
@@ -201,7 +201,7 @@ public enum CaptureStudioGuidePresentation {
             title: "Record",
             systemImage: "record.circle",
             items: [
-                "Record lets you drag a rectangle and create an MP4 of that area.",
+                "Record creates an MP4 from the Rectangle, Window, or Full Screen target selected in Options.",
                 "Countdown controls the wait before recording starts; duration controls how long it records.",
                 "After recording, the preview area plays the saved video.",
                 "Use Trim Copy or GIF export when you only need the useful part of a recording."
@@ -225,6 +225,7 @@ public enum CaptureStudioGuidePresentation {
                 "Use the toolbar to draw, add arrows, boxes, circles, text, OCR, and redactions.",
                 "Copy exports the edited image to clipboard; Save writes the edited result to disk.",
                 "Quick Redact finds OCR matches and adds redactions for them automatically.",
+                "Quick Redact does not alter the original file or clipboard until you explicitly Save or Copy the redacted version.",
                 "Delete removes the current result from the app and moves saved files to Trash."
             ]
         ),

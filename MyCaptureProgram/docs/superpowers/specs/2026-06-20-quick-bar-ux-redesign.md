@@ -4,7 +4,7 @@ Date: 2026-06-20
 
 ## Status
 
-Implemented and superseded by the current app. This document remains as design rationale for the quick-bar direction. For the current feature list, install flow, packaging flow, and permission notes, use `README.md` and the source code as the source of truth.
+Implemented and superseded by the current app. This document remains as design rationale for the quick-bar direction. For the current feature list, install flow, packaging flow, permission notes, and verification boundaries, use `README.md`, the current QA checklist, and the source code as the source of truth.
 
 ## Goal
 

@@ -13,7 +13,8 @@ final class FileDropValidatorTests: XCTestCase {
 
     override func tearDownWithError() throws {
         if let tempDirectory {
-            try? FileManager.default.removeItem(at: tempDirectory)
+            try FileManager.default.removeItem(at: tempDirectory)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: tempDirectory.path))
         }
     }
 
@@ -52,6 +53,67 @@ final class FileDropValidatorTests: XCTestCase {
         ) { error in
             XCTAssertEqual(error as? ExplorerError, .operationFailed("Cannot copy a folder into itself."))
         }
+    }
+
+    func testRejectsAlternateCaseSourcePathIntoItsDescendant() throws {
+        let supportsCaseSensitiveNames = try tempDirectory.resourceValues(
+            forKeys: [.volumeSupportsCaseSensitiveNamesKey]
+        ).volumeSupportsCaseSensitiveNames
+        XCTAssertEqual(supportsCaseSensitiveNames, false, "This regression requires a case-insensitive test volume.")
+        guard supportsCaseSensitiveNames == false else { return }
+        let folder = tempDirectory.appendingPathComponent("Source", isDirectory: true)
+        let child = folder.appendingPathComponent("Child", isDirectory: true)
+        let alternateCaseSource = tempDirectory.appendingPathComponent("source", isDirectory: true)
+        try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
+
+        XCTAssertThrowsError(
+            try FileDropValidator.validate(
+                urls: [alternateCaseSource],
+                destinationFolder: child,
+                operation: .copy
+            )
+        ) { error in
+            XCTAssertEqual(error as? ExplorerError, .operationFailed("Cannot copy a folder into itself."))
+        }
+    }
+
+    func testRejectsCopyingThroughDestinationSymlinkIntoDescendant() throws {
+        let folder = tempDirectory.appendingPathComponent("Folder", isDirectory: true)
+        let child = folder.appendingPathComponent("Child", isDirectory: true)
+        let destinationAlias = tempDirectory.appendingPathComponent("DestinationAlias", isDirectory: true)
+        try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: destinationAlias, withDestinationURL: child)
+
+        XCTAssertThrowsError(
+            try FileDropValidator.validate(urls: [folder], destinationFolder: destinationAlias, operation: .copy)
+        ) { error in
+            XCTAssertEqual(error as? ExplorerError, .operationFailed("Cannot copy a folder into itself."))
+        }
+    }
+
+    func testRejectsMovingThroughDestinationSymlinkIntoDescendant() throws {
+        let folder = tempDirectory.appendingPathComponent("Folder", isDirectory: true)
+        let child = folder.appendingPathComponent("Child", isDirectory: true)
+        let destinationAlias = tempDirectory.appendingPathComponent("DestinationAlias", isDirectory: true)
+        try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: destinationAlias, withDestinationURL: child)
+
+        XCTAssertThrowsError(
+            try FileDropValidator.validate(urls: [folder], destinationFolder: destinationAlias, operation: .move)
+        ) { error in
+            XCTAssertEqual(error as? ExplorerError, .operationFailed("Cannot move a folder into itself."))
+        }
+    }
+
+    func testAllowsSourceDirectorySymlinkEntryToBeDroppedIntoItsTarget() throws {
+        let target = tempDirectory.appendingPathComponent("Target", isDirectory: true)
+        let sourceLink = tempDirectory.appendingPathComponent("TargetLink", isDirectory: true)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: sourceLink, withDestinationURL: target)
+
+        XCTAssertNoThrow(
+            try FileDropValidator.validate(urls: [sourceLink], destinationFolder: target, operation: .copy)
+        )
     }
 
     func testRejectsNonDirectoryDestination() throws {

@@ -99,12 +99,21 @@ public struct AppSettings: Codable, Equatable, Sendable {
         smartFilenamesEnabled = try container.decodeIfPresent(Bool.self, forKey: .smartFilenamesEnabled) ?? defaults.smartFilenamesEnabled
         hideAppDuringCapture = try container.decodeIfPresent(Bool.self, forKey: .hideAppDuringCapture) ?? defaults.hideAppDuringCapture
         copyCapturedImageToClipboard = try container.decodeIfPresent(Bool.self, forKey: .copyCapturedImageToClipboard) ?? defaults.copyCapturedImageToClipboard
-        defaultDelaySeconds = try container.decodeIfPresent(Int.self, forKey: .defaultDelaySeconds) ?? defaults.defaultDelaySeconds
+        defaultDelaySeconds = Self.clamp(
+            try container.decodeIfPresent(Int.self, forKey: .defaultDelaySeconds) ?? defaults.defaultDelaySeconds,
+            to: 0...10
+        )
         includeSystemAudio = try container.decodeIfPresent(Bool.self, forKey: .includeSystemAudio) ?? defaults.includeSystemAudio
         includeMicrophone = try container.decodeIfPresent(Bool.self, forKey: .includeMicrophone) ?? defaults.includeMicrophone
         showCursorInRecordings = try container.decodeIfPresent(Bool.self, forKey: .showCursorInRecordings) ?? defaults.showCursorInRecordings
-        countdownSeconds = try container.decodeIfPresent(Int.self, forKey: .countdownSeconds) ?? defaults.countdownSeconds
-        recordingDurationSeconds = try container.decodeIfPresent(Int.self, forKey: .recordingDurationSeconds) ?? defaults.recordingDurationSeconds
+        countdownSeconds = Self.clamp(
+            try container.decodeIfPresent(Int.self, forKey: .countdownSeconds) ?? defaults.countdownSeconds,
+            to: 0...10
+        )
+        recordingDurationSeconds = Self.clamp(
+            try container.decodeIfPresent(Int.self, forKey: .recordingDurationSeconds) ?? defaults.recordingDurationSeconds,
+            to: 1...120
+        )
         recordingQuality = try container.decodeIfPresent(RecordingQuality.self, forKey: .recordingQuality) ?? defaults.recordingQuality
     }
 
@@ -112,6 +121,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Desktop", isDirectory: true)
             .path
+    }
+
+    private static func clamp(_ value: Int, to range: ClosedRange<Int>) -> Int {
+        min(max(value, range.lowerBound), range.upperBound)
     }
 
     public static var defaults: AppSettings {

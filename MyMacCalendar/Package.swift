@@ -24,7 +24,10 @@ let package = Package(
         .testTarget(
             name: "MyMacCalendarCoreTests",
             dependencies: ["MyMacCalendarCore"],
-            path: "Tests/MyMacCalendarCoreTests"
+            path: "Tests/MyMacCalendarCoreTests",
+            resources: [
+                .copy("Fixtures/legacy-v1-613d946.store")
+            ]
         )
     ]
 )

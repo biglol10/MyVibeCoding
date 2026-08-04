@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **Status:** Historical implementation plan for the screenshot editor phase. The editor work is implemented, and later work added recording preview, recording trim-copy export, GIF export, capture history, presets, smart filenames, floating pins, and result deletion. Use `README.md` and the source code as the current source of truth.
+> **Status:** Historical implementation plan for the screenshot editor phase. The editor work is implemented, and later work added window/full-screen capture and recording, recording preview, recording trim-copy export, GIF export, capture history, presets, smart filenames, floating pins, and result deletion. Use `README.md`, the current QA checklist, and the source code as the current source of truth.
 
 **Goal:** Add screenshot annotation editing, flattened Save/Copy, OCR text extraction, and quick redaction to Capture Studio.
 
@@ -2464,7 +2464,7 @@ After a screenshot is captured, the editor toolbar can annotate, OCR, and redact
 ## Features
 
 - Native macOS app bundle with a compact Capture / Record first workflow
-- Region screenshot capture and region screen recording
+- Rectangle, window, and full-screen screenshot capture and screen recording
 - Settings, shortcuts, output folders, smart filenames, capture history, presets, and in-app guide
 - Screenshot editing, OCR, quick redaction, save/copy/delete, floating pins
 - Recording preview, trim-copy export, and GIF export

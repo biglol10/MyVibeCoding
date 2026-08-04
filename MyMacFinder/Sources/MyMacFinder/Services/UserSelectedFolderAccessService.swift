@@ -117,14 +117,37 @@ public final class SecurityScopedBookmarkResolver: BookmarkResolving, @unchecked
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
         )
-        let didStart = url.startAccessingSecurityScopedResource()
-        let refreshedBookmarkData = isStale ? try bookmarkData(for: url, sandboxed: true) : nil
-        return ResolvedFolderAccess(
+        return try Self.resolveAccess(
             url: url,
             isStale: isStale,
-            didStartAccessing: didStart,
-            refreshedBookmarkData: refreshedBookmarkData
+            startAccessing: { $0.startAccessingSecurityScopedResource() },
+            refreshBookmarkData: { try self.bookmarkData(for: $0, sandboxed: true) },
+            stopAccessing: { $0.stopAccessingSecurityScopedResource() }
         )
+    }
+
+    static func resolveAccess(
+        url: URL,
+        isStale: Bool,
+        startAccessing: (URL) -> Bool,
+        refreshBookmarkData: (URL) throws -> Data,
+        stopAccessing: (URL) -> Void
+    ) throws -> ResolvedFolderAccess {
+        let didStart = startAccessing(url)
+        do {
+            let refreshedBookmarkData = isStale ? try refreshBookmarkData(url) : nil
+            return ResolvedFolderAccess(
+                url: url,
+                isStale: isStale,
+                didStartAccessing: didStart,
+                refreshedBookmarkData: refreshedBookmarkData
+            )
+        } catch {
+            if didStart {
+                stopAccessing(url)
+            }
+            throw error
+        }
     }
 
     public func startAccessing(_ url: URL, sandboxed: Bool) -> ResolvedFolderAccess {

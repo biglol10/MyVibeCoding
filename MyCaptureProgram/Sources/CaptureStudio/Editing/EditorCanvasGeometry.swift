@@ -23,6 +23,13 @@ public struct EditorCanvasGeometry: Equatable, Sendable {
         return CGRect(x: x, y: y, width: width, height: height)
     }
 
+    public var viewScale: CGFloat {
+        guard imageSize.width > 0 else {
+            return 0
+        }
+        return imageRectInView.width / imageSize.width
+    }
+
     public func imagePoint(forViewPoint point: CGPoint) -> CGPoint {
         let rect = imageRectInView
         guard rect.width > 0, rect.height > 0 else {

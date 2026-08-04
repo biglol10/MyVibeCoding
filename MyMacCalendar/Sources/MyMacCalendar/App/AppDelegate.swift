@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard AppStartupGate.shared.isStoreReady else { return }
         menuBarController.onOpenMainWindow = { [weak self] in
             self?.openMainWindow()
         }
@@ -40,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard AppStartupGate.shared.isStoreReady else { return true }
         openMainWindow()
         return false
     }

@@ -1,12 +1,42 @@
 import Foundation
+import Darwin
 
-public struct FileOutputService {
+public enum FileOutputError: LocalizedError, Equatable {
+    case outputDirectoryUnavailable(String)
+    case outputDirectoryNotWritable(String)
+    case unableToAllocateFilename
+    case sourceFileChanged
+
+    public var errorDescription: String? {
+        switch self {
+        case .outputDirectoryUnavailable(let path):
+            return "The configured output folder is unavailable: \(path)"
+        case .outputDirectoryNotWritable(let path):
+            return "The configured output folder is not writable: \(path)"
+        case .unableToAllocateFilename:
+            return "A unique output filename could not be allocated."
+        case .sourceFileChanged:
+            return "The source file changed on disk."
+        }
+    }
+}
+
+public struct FileOutputService: @unchecked Sendable {
     private let fileManager: FileManager
     private let dateFormatter: DateFormatter
     private let smartDateFormatter: DateFormatter
+    private let operationObserver: (@Sendable () -> Void)?
 
     public init(fileManager: FileManager = .default) {
+        self.init(fileManager: fileManager, operationObserver: nil)
+    }
+
+    init(
+        fileManager: FileManager,
+        operationObserver: (@Sendable () -> Void)?
+    ) {
         self.fileManager = fileManager
+        self.operationObserver = operationObserver
 
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -87,40 +117,43 @@ public struct FileOutputService {
         )
     }
 
-    public func resolvedOutputDirectory(preferredPath: String) -> URL {
+    public func resolvedOutputDirectory(preferredPath: String) throws -> URL {
         let preferredURL = URL(fileURLWithPath: preferredPath, isDirectory: true)
-        if directoryExists(at: preferredURL) {
-            return preferredURL
+        guard !preferredPath.isEmpty, directoryExists(at: preferredURL) else {
+            throw FileOutputError.outputDirectoryUnavailable(preferredPath)
+        }
+        guard fileManager.isWritableFile(atPath: preferredURL.path) else {
+            throw FileOutputError.outputDirectoryNotWritable(preferredPath)
         }
 
-        return fileManager.homeDirectoryForCurrentUser
-            .appendingPathComponent("Desktop", isDirectory: true)
+        return preferredURL
     }
 
-    public func screenshotURL(settings: AppSettings, date: Date = Date(), context: FileNamingContext? = nil) -> URL {
-        resolvedOutputDirectory(preferredPath: settings.screenshotFolderPath)
+    public func screenshotURL(settings: AppSettings, date: Date = Date(), context: FileNamingContext? = nil) throws -> URL {
+        try resolvedOutputDirectory(preferredPath: settings.screenshotFolderPath)
             .appendingPathComponent(screenshotFilename(for: date, settings: settings, context: context))
     }
 
-    public func recordingURL(settings: AppSettings, date: Date = Date(), context: FileNamingContext? = nil) -> URL {
-        resolvedOutputDirectory(preferredPath: settings.recordingFolderPath)
+    public func recordingURL(settings: AppSettings, date: Date = Date(), context: FileNamingContext? = nil) throws -> URL {
+        try resolvedOutputDirectory(preferredPath: settings.recordingFolderPath)
             .appendingPathComponent(recordingFilename(for: date, settings: settings, context: context))
     }
 
-    public func availableRecordingURL(settings: AppSettings, date: Date = Date(), context: FileNamingContext? = nil) -> URL {
-        uniqueFileURL(for: recordingURL(settings: settings, date: date, context: context))
+    public func availableRecordingURL(settings: AppSettings, date: Date = Date(), context: FileNamingContext? = nil) throws -> URL {
+        let preferredURL = try recordingURL(settings: settings, date: date, context: context)
+        return candidateURL(for: preferredURL, suffix: " \(UUID().uuidString.prefix(8))")
     }
 
-    public func trimmedRecordingURL(settings: AppSettings, date: Date = Date(), context: FileNamingContext? = nil) -> URL {
+    public func trimmedRecordingURL(settings: AppSettings, date: Date = Date(), context: FileNamingContext? = nil) throws -> URL {
         uniqueFileURL(
-            for: resolvedOutputDirectory(preferredPath: settings.recordingFolderPath)
+            for: try resolvedOutputDirectory(preferredPath: settings.recordingFolderPath)
                 .appendingPathComponent(trimmedRecordingFilename(for: date, settings: settings, context: context))
         )
     }
 
-    public func gifRecordingURL(settings: AppSettings, date: Date = Date(), context: FileNamingContext? = nil) -> URL {
+    public func gifRecordingURL(settings: AppSettings, date: Date = Date(), context: FileNamingContext? = nil) throws -> URL {
         uniqueFileURL(
-            for: resolvedOutputDirectory(preferredPath: settings.recordingFolderPath)
+            for: try resolvedOutputDirectory(preferredPath: settings.recordingFolderPath)
                 .appendingPathComponent(gifRecordingFilename(for: date, settings: settings, context: context))
         )
     }
@@ -131,15 +164,20 @@ public struct FileOutputService {
             .appendingPathExtension("mp4")
     }
 
+    public func temporaryGIFURL() -> URL {
+        fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("gif")
+    }
+
     public func writeScreenshotData(
         _ data: Data,
         settings: AppSettings,
         date: Date = Date(),
         context: FileNamingContext? = nil
     ) throws -> URL {
-        let outputURL = uniqueFileURL(for: screenshotURL(settings: settings, date: date, context: context))
-        try data.write(to: outputURL, options: .atomic)
-        return outputURL
+        let outputURL = try screenshotURL(settings: settings, date: date, context: context)
+        return try writeWithoutOverwriting(data, preferredURL: outputURL)
     }
 
     public func writeRecordingData(
@@ -148,25 +186,128 @@ public struct FileOutputService {
         date: Date = Date(),
         context: FileNamingContext? = nil
     ) throws -> URL {
-        let outputURL = uniqueFileURL(for: recordingURL(settings: settings, date: date, context: context))
-        try data.write(to: outputURL, options: .atomic)
-        return outputURL
+        let outputURL = try recordingURL(settings: settings, date: date, context: context)
+        return try writeWithoutOverwriting(data, preferredURL: outputURL)
     }
 
     public func moveRecordingFile(
         from sourceURL: URL,
+        expectedSourceIdentity: CaptureFileIdentity? = nil,
         settings: AppSettings,
         date: Date = Date(),
         context: FileNamingContext? = nil
     ) throws -> URL {
-        let preferredOutputURL = recordingURL(settings: settings, date: date, context: context)
+        operationObserver?()
+        let sourceIdentity = try validatedSourceIdentity(
+            at: sourceURL,
+            expected: expectedSourceIdentity
+        )
+        let preferredOutputURL = try recordingURL(settings: settings, date: date, context: context)
         if sourceURL.standardizedFileURL == preferredOutputURL.standardizedFileURL {
             return preferredOutputURL
         }
 
-        let outputURL = uniqueFileURL(for: preferredOutputURL)
-        try fileManager.moveItem(at: sourceURL, to: outputURL)
-        return outputURL
+        return try moveWithoutOverwriting(
+            from: sourceURL,
+            preferredURL: preferredOutputURL,
+            expectedSourceIdentity: sourceIdentity
+        )
+    }
+
+    public func moveTrimmedRecordingFile(
+        from sourceURL: URL,
+        expectedSourceIdentity: CaptureFileIdentity? = nil,
+        settings: AppSettings,
+        date: Date = Date(),
+        context: FileNamingContext? = nil
+    ) throws -> URL {
+        operationObserver?()
+        let sourceIdentity = try validatedSourceIdentity(
+            at: sourceURL,
+            expected: expectedSourceIdentity
+        )
+        let preferredURL = try resolvedOutputDirectory(preferredPath: settings.recordingFolderPath)
+            .appendingPathComponent(trimmedRecordingFilename(for: date, settings: settings, context: context))
+        return try moveWithoutOverwriting(
+            from: sourceURL,
+            preferredURL: preferredURL,
+            expectedSourceIdentity: sourceIdentity
+        )
+    }
+
+    public func moveGIFFile(
+        from sourceURL: URL,
+        expectedSourceIdentity: CaptureFileIdentity? = nil,
+        settings: AppSettings,
+        date: Date = Date(),
+        context: FileNamingContext? = nil
+    ) throws -> URL {
+        operationObserver?()
+        let sourceIdentity = try validatedSourceIdentity(
+            at: sourceURL,
+            expected: expectedSourceIdentity
+        )
+        let preferredURL = try resolvedOutputDirectory(preferredPath: settings.recordingFolderPath)
+            .appendingPathComponent(gifRecordingFilename(for: date, settings: settings, context: context))
+        return try moveWithoutOverwriting(
+            from: sourceURL,
+            preferredURL: preferredURL,
+            expectedSourceIdentity: sourceIdentity
+        )
+    }
+
+    public func moveRecordingFileAsync(
+        from sourceURL: URL,
+        expectedSourceIdentity: CaptureFileIdentity? = nil,
+        settings: AppSettings,
+        date: Date = Date(),
+        context: FileNamingContext? = nil
+    ) async throws -> URL {
+        try await Task.detached(priority: .userInitiated) {
+            try moveRecordingFile(
+                from: sourceURL,
+                expectedSourceIdentity: expectedSourceIdentity,
+                settings: settings,
+                date: date,
+                context: context
+            )
+        }.value
+    }
+
+    public func moveTrimmedRecordingFileAsync(
+        from sourceURL: URL,
+        expectedSourceIdentity: CaptureFileIdentity? = nil,
+        settings: AppSettings,
+        date: Date = Date(),
+        context: FileNamingContext? = nil
+    ) async throws -> URL {
+        try await Task.detached(priority: .userInitiated) {
+            try moveTrimmedRecordingFile(
+                from: sourceURL,
+                expectedSourceIdentity: expectedSourceIdentity,
+                settings: settings,
+                date: date,
+                context: context
+            )
+        }.value
+    }
+
+    public func moveGIFFileAsync(
+        from sourceURL: URL,
+        expectedSourceIdentity: CaptureFileIdentity? = nil,
+        settings: AppSettings,
+        date: Date = Date(),
+        context: FileNamingContext? = nil
+    ) async throws -> URL {
+        try await Task.detached(priority: .userInitiated) {
+            try moveGIFFile(
+                from: sourceURL,
+                expectedSourceIdentity: expectedSourceIdentity,
+                settings: settings,
+                date: date,
+                context: context
+            )
+        }.value
     }
 
     private func directoryExists(at url: URL) -> Bool {
@@ -176,25 +317,181 @@ public struct FileOutputService {
     }
 
     private func uniqueFileURL(for preferredURL: URL) -> URL {
-        guard fileManager.fileExists(atPath: preferredURL.path) else {
-            return preferredURL
-        }
-
-        let directory = preferredURL.deletingLastPathComponent()
-        let baseName = preferredURL.deletingPathExtension().lastPathComponent
-        let fileExtension = preferredURL.pathExtension
-        var suffix = 2
-
-        while true {
-            let candidateName = fileExtension.isEmpty
-                ? "\(baseName) \(suffix)"
-                : "\(baseName) \(suffix).\(fileExtension)"
-            let candidateURL = directory.appendingPathComponent(candidateName)
+        for index in 1...10_000 {
+            let suffix = index == 1 ? "" : " \(index)"
+            let candidateURL = candidateURL(for: preferredURL, suffix: suffix)
             if !fileManager.fileExists(atPath: candidateURL.path) {
                 return candidateURL
             }
-            suffix += 1
         }
+        return candidateURL(for: preferredURL, suffix: " \(UUID().uuidString)")
+    }
+
+    private func writeWithoutOverwriting(_ data: Data, preferredURL: URL) throws -> URL {
+        let temporaryURL = try makeSiblingTemporaryURL(for: preferredURL)
+        var temporaryFileExists = false
+        defer {
+            if temporaryFileExists {
+                try? fileManager.removeItem(at: temporaryURL)
+            }
+        }
+
+        try writeToNewFile(data, at: temporaryURL)
+        temporaryFileExists = true
+
+        for index in 1...10_000 {
+            let suffix = index == 1 ? "" : " \(index)"
+            let candidateURL = candidateURL(for: preferredURL, suffix: suffix)
+            do {
+                try publishExclusively(from: temporaryURL, to: candidateURL)
+                temporaryFileExists = false
+                synchronizeDirectory(containing: candidateURL)
+                return candidateURL
+            } catch where isFileExistsError(error) {
+                continue
+            }
+        }
+        throw FileOutputError.unableToAllocateFilename
+    }
+
+    private func writeToNewFile(_ data: Data, at url: URL) throws {
+        let descriptor = url.withUnsafeFileSystemRepresentation { path -> Int32 in
+            guard let path else {
+                return -1
+            }
+            return Darwin.open(path, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
+        }
+        guard descriptor >= 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+
+        var shouldRemovePartialFile = true
+        defer {
+            Darwin.close(descriptor)
+            if shouldRemovePartialFile {
+                try? fileManager.removeItem(at: url)
+            }
+        }
+
+        try data.withUnsafeBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else {
+                return
+            }
+            var writtenByteCount = 0
+            while writtenByteCount < rawBuffer.count {
+                let result = Darwin.write(
+                    descriptor,
+                    baseAddress.advanced(by: writtenByteCount),
+                    rawBuffer.count - writtenByteCount
+                )
+                if result < 0 {
+                    if errno == EINTR {
+                        continue
+                    }
+                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                }
+                writtenByteCount += result
+            }
+        }
+        guard Darwin.fsync(descriptor) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        shouldRemovePartialFile = false
+    }
+
+    private func moveWithoutOverwriting(
+        from sourceURL: URL,
+        preferredURL: URL,
+        expectedSourceIdentity: CaptureFileIdentity
+    ) throws -> URL {
+        for index in 1...10_000 {
+            let suffix = index == 1 ? "" : " \(index)"
+            let candidateURL = candidateURL(for: preferredURL, suffix: suffix)
+            do {
+                try publishExclusively(
+                    from: sourceURL,
+                    to: candidateURL,
+                    expectedSourceIdentity: expectedSourceIdentity
+                )
+                synchronizeDirectory(containing: candidateURL)
+                return candidateURL
+            } catch where isFileExistsError(error) {
+                continue
+            }
+        }
+        throw FileOutputError.unableToAllocateFilename
+    }
+
+    private func validatedSourceIdentity(
+        at sourceURL: URL,
+        expected expectedIdentity: CaptureFileIdentity?
+    ) throws -> CaptureFileIdentity {
+        let identity = try expectedIdentity ?? CaptureFileIdentity.existingFile(at: sourceURL)
+        guard identity.matchesExistingFile(at: sourceURL) else {
+            throw FileOutputError.sourceFileChanged
+        }
+        return identity
+    }
+
+    private func makeSiblingTemporaryURL(for preferredURL: URL) throws -> URL {
+        let directory = preferredURL.deletingLastPathComponent()
+        for _ in 0..<100 {
+            let candidate = directory.appendingPathComponent(".CaptureStudio-\(UUID().uuidString).tmp")
+            if !fileManager.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+        }
+        throw FileOutputError.unableToAllocateFilename
+    }
+
+    private func publishExclusively(
+        from sourceURL: URL,
+        to destinationURL: URL,
+        expectedSourceIdentity: CaptureFileIdentity? = nil
+    ) throws {
+        try ExclusiveFilePublisher.publish(
+            from: sourceURL,
+            to: destinationURL,
+            expectedSourceIdentity: expectedSourceIdentity
+        )
+    }
+
+    private func synchronizeDirectory(containing url: URL) {
+        let directoryURL = url.deletingLastPathComponent()
+        let descriptor = directoryURL.withUnsafeFileSystemRepresentation { path -> Int32 in
+            guard let path else {
+                return -1
+            }
+            return Darwin.open(path, O_RDONLY)
+        }
+        guard descriptor >= 0 else {
+            return
+        }
+        _ = Darwin.fsync(descriptor)
+        Darwin.close(descriptor)
+    }
+
+    private func candidateURL(for preferredURL: URL, suffix: String) -> URL {
+        let directory = preferredURL.deletingLastPathComponent()
+        let fileExtension = preferredURL.pathExtension
+        let extensionByteCount = fileExtension.isEmpty ? 0 : fileExtension.utf8.count + 1
+        let suffixByteCount = suffix.utf8.count
+        let maximumBaseBytes = max(1, 255 - extensionByteCount - suffixByteCount)
+        let baseName = truncateToUTF8ByteCount(
+            preferredURL.deletingPathExtension().lastPathComponent,
+            maximumBytes: maximumBaseBytes
+        )
+        let candidateName = fileExtension.isEmpty
+            ? "\(baseName)\(suffix)"
+            : "\(baseName)\(suffix).\(fileExtension)"
+        return directory.appendingPathComponent(candidateName)
+    }
+
+    private func isFileExistsError(_ error: Error) -> Bool {
+        let error = error as NSError
+        return (error.domain == NSCocoaErrorDomain
+                && error.code == CocoaError.fileWriteFileExists.rawValue)
+            || (error.domain == NSPOSIXErrorDomain && error.code == EEXIST)
     }
 
     private func smartFilename(
@@ -232,7 +529,8 @@ public struct FileOutputService {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: " - ")
-        return "\(String(baseName.prefix(180))).\(fileExtension)"
+        let maximumBaseBytes = max(1, 255 - fileExtension.utf8.count - 1)
+        return "\(truncateToUTF8ByteCount(baseName, maximumBytes: maximumBaseBytes)).\(fileExtension)"
     }
 
     private func sanitizeFilenameComponent(_ value: String) -> String {
@@ -245,5 +543,20 @@ public struct FileOutputService {
         return replaced
             .split(whereSeparator: { $0.isWhitespace })
             .joined(separator: " ")
+    }
+
+    private func truncateToUTF8ByteCount(_ value: String, maximumBytes: Int) -> String {
+        var result = ""
+        var byteCount = 0
+        for character in value {
+            let characterString = String(character)
+            let characterBytes = characterString.utf8.count
+            guard byteCount + characterBytes <= maximumBytes else {
+                break
+            }
+            result.append(character)
+            byteCount += characterBytes
+        }
+        return result
     }
 }

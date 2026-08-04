@@ -15,6 +15,7 @@ public struct CoreGraphicsCaptureMetadataService: CaptureMetadataServicing {
 
         let currentProcessID = Int(ProcessInfo.processInfo.processIdentifier)
         let selectionRect = selection.rect
+        let mainDisplayBounds = CGDisplayBounds(CGMainDisplayID())
         let rankedWindows = windowList.compactMap { info -> (context: FileNamingContext, score: CGFloat)? in
             guard let ownerName = info[kCGWindowOwnerName as String] as? String,
                   !ownerName.isEmpty,
@@ -34,7 +35,11 @@ public struct CoreGraphicsCaptureMetadataService: CaptureMetadataServicing {
                 return nil
             }
 
-            let intersection = bounds.intersection(selectionRect)
+            let appKitBounds = ScreenCoordinateConverter.appKitRect(
+                fromQuartz: bounds,
+                mainDisplayBounds: mainDisplayBounds
+            )
+            let intersection = appKitBounds.intersection(selectionRect)
             guard !intersection.isNull, intersection.width > 0, intersection.height > 0 else {
                 return nil
             }

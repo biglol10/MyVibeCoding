@@ -1,12 +1,15 @@
 import XCTest
 
 final class AppResilienceSourceTests: XCTestCase {
-    func testAppFallsBackToInMemoryStoreWhenPersistentContainerCreationFails() throws {
+    func testAppBlocksEditingWhenPersistentContainerCreationFails() throws {
         let source = try String(contentsOfFile: sourcePath("Sources/MyMacCalendar/App/MyMacCalendarApp.swift"), encoding: .utf8)
 
-        XCTAssertFalse(source.contains("fatalError(\"Failed to create SwiftData container"))
-        XCTAssertTrue(source.contains("CalendarStore.makeInMemoryContainer()"))
-        XCTAssertTrue(source.contains("NSLog(\"Failed to create SwiftData container"))
+        XCTAssertFalse(source.contains("CalendarStore.makeInMemoryContainer()"))
+        XCTAssertFalse(source.contains("Falling back to in-memory store"))
+        XCTAssertTrue(source.contains("CalendarApplicationState"))
+        XCTAssertTrue(source.contains("case .failed"))
+        XCTAssertTrue(source.contains("StorageFailureView"))
+        XCTAssertFalse(source.contains("error.localizedDescription"))
     }
 
     private func sourcePath(_ relativePath: String) -> String {

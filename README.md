@@ -6,12 +6,12 @@
 
 | 프로그램 | 설명 | 소스 | 다운로드 |
 | --- | --- | --- | --- |
-| MyCaptureProgram | macOS 스크린샷/화면 녹화, 편집, OCR, 빠른 가리기, 히스토리/프리셋 앱 | [MyCaptureProgram](./MyCaptureProgram) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyCaptureProgram/CaptureStudio-personal-mac.zip), [실행 파일 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyCaptureProgram/CaptureStudio-macos-arm64.zip) |
-| MyMacClean | 앱 삭제, 고아 파일, 대용량 파일, 개발 캐시, 시작 항목을 권한 안내와 삭제 실패 로그까지 검토 후 정리하는 SwiftUI 유틸리티 | [MyMacClean](./MyMacClean) | [MyMacClean-test-build.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacClean/MyMacClean-test-build.zip) |
-| MyMacFinder | 듀얼 패널, 경로/빈 영역 Terminal 명령, Smart 프리뷰 모드를 갖춘 SwiftUI/AppKit 로컬 파일 관리자 | [MyMacFinder](./MyMacFinder) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacFinder/MyMacFinder-personal-mac.zip) |
+| MyCaptureProgram | 사각형/윈도우/전체 화면 캡처와 녹화, 편집, OCR, 빠른 가리기, 히스토리/프리셋을 제공하는 macOS 앱 | [MyCaptureProgram](./MyCaptureProgram) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyCaptureProgram/CaptureStudio-personal-mac.zip) |
+| MyMacClean | 앱 삭제, 고아 파일, 대용량 파일, 개발 캐시, 시작 항목을 권한 안내와 삭제 실패 로그까지 검토 후 정리하는 SwiftUI 유틸리티 | [MyMacClean](./MyMacClean) | [개인 설치 DMG](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacClean/MyMacClean-dev.dmg) |
+| MyMacFinder | 듀얼 패널, 경로/빈 영역 Terminal 명령, Smart 프리뷰, 안전한 파일 작업/Undo를 갖춘 SwiftUI/AppKit 로컬 파일 관리자 | [MyMacFinder](./MyMacFinder) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacFinder/MyMacFinder-personal-mac.zip) |
 | MyMacStats | CPU, RAM, Disk I/O, Network, Battery, Processes 상태와 RAM 알림을 보여주는 SwiftUI 시스템 모니터 | [MyMacStats](./MyMacStats) | [MyMacStats-test-build.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacStats/MyMacStats-test-build.zip) |
-| MyMacCalendar | 로컬 우선 일정 관리, 반복 일정, 휴일, 메뉴바/플로팅 위젯을 제공하는 SwiftUI 캘린더 | [MyMacCalendar](./MyMacCalendar) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacCalendar/MyMacCalendar-personal-mac.zip), [test-build 호환 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacCalendar/MyMacCalendar-test-build.zip) |
-| FlowPilot_mac | SwiftUI 네이티브 macOS 활동 추적 앱, 기존 Tauri/Windows 빌드 포함 | [FlowPilot_mac](./FlowPilot_mac) | [Swift Native zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.zip), [Swift Native DMG](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.dmg), [Tauri macOS zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_personal_mac_arm64.zip), [Tauri macOS DMG](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_0.1.0_aarch64.dmg), [Windows setup](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_0.1.0_x64-setup.exe), [Windows portable](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot-0.1.0-portable.zip), [Windows exe](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/flowpilot.exe) |
+| MyMacCalendar | 로컬 우선 일정 관리, 반복 일정, 검색, 알림, 휴일, 메뉴바/플로팅 위젯을 제공하는 SwiftUI 캘린더 | [MyMacCalendar](./MyMacCalendar) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacCalendar/MyMacCalendar-personal-mac.zip) |
+| FlowPilot_mac | SwiftUI 네이티브 macOS 활동 추적 앱, 기존 Tauri/Windows 소스 포함 | [FlowPilot_mac](./FlowPilot_mac) | [Swift Native zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.zip), [Swift Native DMG](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.dmg) |
 
 ## 클론
 
@@ -106,9 +106,8 @@ npm run tauri -- dev
 macOS 앱을 다른 Mac에서 앱 더블클릭만으로 실행할 수 있게 공개 배포하려면 Apple Developer ID 서명과 notarization이 필요합니다. 개인 Mac에 설치하는 용도라면 각 앱 zip에 포함된 설치 스크립트를 사용하세요.
 
 - CaptureStudio 개인용 zip: `MyCaptureProgram/scripts/package_personal.sh`
-- MyMacClean 테스트/개인 설치 zip: `MyMacClean/scripts/build-app-bundle.sh`
+- MyMacClean 개인 설치 DMG: `MyMacClean/scripts/create-dmg.sh`
 - MyMacFinder 개인용 zip: `MyMacFinder/scripts/package_personal.sh`
 - MyMacStats 개인용 zip: `MyMacStats/scripts/build-app-bundle.sh --deploy-personal`
-- MyMacCalendar 개인용 zip: `MyMacCalendar/scripts/package_personal.sh`. 기존 `MyMacCalendar-test-build.zip` 링크는 같은 개인 설치 패키지로 갱신합니다.
+- MyMacCalendar 개인용 zip: `MyMacCalendar/scripts/package_personal.sh`
 - FlowPilot Swift Native 개인용 zip/DMG: `FlowPilot_mac`에서 `npm run package:macos:native`, `npm run package:macos:native:dmg`
-- FlowPilot Tauri legacy 개인용 zip: `FlowPilot_mac`에서 `npm run package:macos:personal`

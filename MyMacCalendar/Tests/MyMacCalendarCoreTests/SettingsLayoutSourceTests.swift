@@ -28,7 +28,7 @@ final class SettingsLayoutSourceTests: XCTestCase {
 
         XCTAssertTrue(source.contains(".frame(width: SettingsLayout.compactSliderWidth)"))
         XCTAssertTrue(source.contains("Text(opacityPercentText)"))
-        XCTAssertTrue(source.contains("Picker(\"\", selection: binding(\\.floatingWidgetVisibleCount))"))
+        XCTAssertTrue(source.contains("Picker(\"\", selection: visibleCountBinding)"))
         XCTAssertTrue(source.contains("Text(\"3개\").tag(3)"))
         XCTAssertTrue(source.contains("Text(\"12개\").tag(12)"))
     }
@@ -39,6 +39,15 @@ final class SettingsLayoutSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("value: floatingWidgetOpacityDraftBinding"))
         XCTAssertTrue(source.contains("onEditingChanged: handleFloatingWidgetOpacityEditingChanged"))
         XCTAssertFalse(source.contains("Slider(value: binding(\\.floatingWidgetOpacity)"))
+    }
+
+    func testSettingsAndWidgetRenderThroughValidatedValues() throws {
+        let settingsSource = try String(contentsOfFile: sourcePath("Sources/MyMacCalendar/Views/SettingsView.swift"), encoding: .utf8)
+        let widgetSource = try String(contentsOfFile: sourcePath("Sources/MyMacCalendar/Controllers/WidgetCoordinator.swift"), encoding: .utf8)
+
+        XCTAssertTrue(settingsSource.contains("SettingsValidation.opacityPercent("))
+        XCTAssertFalse(settingsSource.contains("Int((floatingWidgetOpacityValue * 100).rounded())"))
+        XCTAssertTrue(widgetSource.contains("SettingsValidation.snapshot(settings)"))
     }
 
     func testSettingsSheetHasExplicitDismissAction() throws {

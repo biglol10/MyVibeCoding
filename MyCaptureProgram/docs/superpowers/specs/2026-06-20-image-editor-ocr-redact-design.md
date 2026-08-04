@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented and superseded by the current app. This design is still useful for screenshot editor rationale, but later work also added recording preview, recording trim-copy export, GIF export, capture history, presets, smart filenames, floating pins, and result deletion. Use `README.md` and the source code as the source of truth.
+Implemented and superseded by the current app. This design is still useful for screenshot editor rationale, but later work also added window/full-screen capture and recording, recording preview, recording trim-copy export, GIF export, capture history, presets, smart filenames, floating pins, and result deletion. The current UI exposes solid redaction; blur remains an internal tested renderer path. Use `README.md`, the current QA checklist, and the source code as the source of truth.
 
 ## Goal
 

@@ -155,6 +155,110 @@ final class CaptureHistoryStoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: thumbnailURL.path))
     }
 
+    @MainActor
+    func testClearRemovesAllHistoryMetadataAndThumbnailFiles() throws {
+        let defaults = isolatedDefaults("clear")
+        let thumbnailDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CaptureHistoryStoreTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: thumbnailDirectory) }
+        let store = CaptureHistoryStore(defaults: defaults, thumbnailDirectory: thumbnailDirectory)
+        store.add(
+            CaptureHistoryItem(
+                kind: .screenshot,
+                createdAt: Date(timeIntervalSince1970: 10),
+                fileURL: URL(fileURLWithPath: "/tmp/clear-thumbnail.png"),
+                title: "Clear thumbnail",
+                detail: "Screenshot",
+                thumbnailData: try pngData(width: 800, height: 600)
+            )
+        )
+        store.add(item(title: "record only", date: 20))
+        let thumbnailURL = try XCTUnwrap(store.items.first(where: { $0.thumbnailURL != nil })?.thumbnailURL)
+
+        store.clear()
+
+        XCTAssertTrue(store.items.isEmpty)
+        XCTAssertTrue(CaptureHistoryStore(defaults: defaults, thumbnailDirectory: thumbnailDirectory).items.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: thumbnailURL.path))
+    }
+
+    @MainActor
+    func testFailedThumbnailWriteDoesNotPersistMissingThumbnailURL() throws {
+        let parentDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CaptureHistoryStoreTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: parentDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: parentDirectory) }
+        let nonDirectoryURL = parentDirectory.appendingPathComponent("not-a-directory")
+        try Data("blocking file".utf8).write(to: nonDirectoryURL)
+        let store = CaptureHistoryStore(
+            defaults: isolatedDefaults("thumbnailWriteFailure"),
+            thumbnailDirectory: nonDirectoryURL
+        )
+
+        store.add(
+            CaptureHistoryItem(
+                kind: .screenshot,
+                createdAt: Date(timeIntervalSince1970: 10),
+                fileURL: URL(fileURLWithPath: "/tmp/missing-thumbnail.png"),
+                title: "Missing thumbnail",
+                detail: "Screenshot",
+                thumbnailData: try pngData(width: 800, height: 600)
+            )
+        )
+
+        XCTAssertNil(store.items.first?.thumbnailURL)
+    }
+
+    @MainActor
+    func testRemovingHistoryNeverDeletesThumbnailPathOutsideOwnedDirectory() throws {
+        let defaults = isolatedDefaults("unownedThumbnail")
+        let parentDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CaptureHistoryStoreTests-\(UUID().uuidString)", isDirectory: true)
+        let thumbnailDirectory = parentDirectory.appendingPathComponent("owned", isDirectory: true)
+        let protectedURL = parentDirectory.appendingPathComponent("protected.txt")
+        try FileManager.default.createDirectory(at: thumbnailDirectory, withIntermediateDirectories: true)
+        try Data("keep me".utf8).write(to: protectedURL)
+        defer { try? FileManager.default.removeItem(at: parentDirectory) }
+        let item = CaptureHistoryItem(
+            kind: .screenshot,
+            createdAt: Date(timeIntervalSince1970: 10),
+            fileURL: URL(fileURLWithPath: "/tmp/capture.png"),
+            title: "Capture",
+            detail: "Screenshot",
+            thumbnailURL: protectedURL
+        )
+        defaults.set(try JSONEncoder().encode([item]), forKey: "CaptureStudio.CaptureHistory.v1")
+        let store = CaptureHistoryStore(defaults: defaults, thumbnailDirectory: thumbnailDirectory)
+
+        let cleanupSucceeded = store.remove(id: item.id)
+
+        XCTAssertFalse(cleanupSucceeded)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: protectedURL.path))
+        XCTAssertEqual(try Data(contentsOf: protectedURL), Data("keep me".utf8))
+    }
+
+    @MainActor
+    func testFileIdentityPersistsWithHistoryMetadata() throws {
+        let defaults = isolatedDefaults("fileIdentity")
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CaptureHistoryStoreTests-\(UUID().uuidString).png")
+        try Data("capture".utf8).write(to: fileURL)
+        let identity = try CaptureFileIdentity.existingFile(at: fileURL)
+        let item = CaptureHistoryItem(
+            kind: .screenshot,
+            createdAt: Date(timeIntervalSince1970: 10),
+            fileURL: fileURL,
+            title: "Capture",
+            detail: "Screenshot",
+            fileIdentity: identity
+        )
+        let store = CaptureHistoryStore(defaults: defaults)
+
+        store.add(item)
+
+        XCTAssertEqual(CaptureHistoryStore(defaults: defaults).items.first?.fileIdentity, identity)
+    }
+
     private func item(title: String, date: TimeInterval) -> CaptureHistoryItem {
         CaptureHistoryItem(
             kind: .screenshot,

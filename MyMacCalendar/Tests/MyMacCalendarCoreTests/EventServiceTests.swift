@@ -4,6 +4,17 @@ import XCTest
 final class EventServiceTests: XCTestCase {
     private let calendar = Calendar(identifier: .gregorian)
 
+    func testNonPositiveLimitsReturnEmptyResults() throws {
+        let date = try date(2026, 6, 25)
+        let event = CalendarEvent(title: "Unsafe limit", startDate: date, endDate: date)
+        let service = EventService(calendar: calendar)
+
+        XCTAssertTrue(service.upcomingEvents(from: date, events: [event], limit: 0).isEmpty)
+        XCTAssertTrue(service.upcomingEvents(from: date, events: [event], limit: -1).isEmpty)
+        XCTAssertTrue(service.upcomingOccurrences(from: date, events: [event], limit: 0).isEmpty)
+        XCTAssertTrue(service.upcomingOccurrences(from: date, events: [event], limit: -1).isEmpty)
+    }
+
     func testUpcomingSortsByDateThenTitle() throws {
         let events = [
             CalendarEvent(title: "B", startDate: try date(2026, 6, 27), endDate: try date(2026, 6, 27)),
@@ -36,23 +47,18 @@ final class EventServiceTests: XCTestCase {
         XCTAssertEqual(service.search("gangnam", in: events).map(\.title), ["Doctor"])
     }
 
-    func testDeletePlanContainsEventAndNotificationIdentifiers() throws {
-        let event = CalendarEvent(
-            id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
-            title: "Delete Me",
-            startDate: try date(2026, 6, 30),
-            endDate: try date(2026, 6, 30),
-            notificationOffsetsDays: [7, 1, 0]
-        )
+    func testSearchTrimsQueryAndSortsByDateThenTitle() throws {
+        let events = [
+            CalendarEvent(title: "Later", startDate: try date(2026, 7, 2), endDate: try date(2026, 7, 2), notes: "Roadmap"),
+            CalendarEvent(title: "Zulu", startDate: try date(2026, 6, 30), endDate: try date(2026, 6, 30), notes: "Roadmap"),
+            CalendarEvent(title: "Earlier", startDate: try date(2026, 6, 25), endDate: try date(2026, 6, 25), notes: "Roadmap"),
+            CalendarEvent(title: "Alpha", startDate: try date(2026, 6, 30), endDate: try date(2026, 6, 30), notes: "Roadmap"),
+            CalendarEvent(title: "Unrelated", startDate: try date(2026, 6, 20), endDate: try date(2026, 6, 20))
+        ]
 
-        let plan = EventService(calendar: calendar).deletePlan(for: event)
+        let results = EventService(calendar: calendar).search("  roadmap  ", in: events)
 
-        XCTAssertEqual(plan.eventID, event.id)
-        XCTAssertEqual(plan.notificationIdentifiers.sorted(), [
-            "event-11111111-1111-1111-1111-111111111111-offset-0",
-            "event-11111111-1111-1111-1111-111111111111-offset-1",
-            "event-11111111-1111-1111-1111-111111111111-offset-7"
-        ])
+        XCTAssertEqual(results.map(\.title), ["Earlier", "Alpha", "Zulu", "Later"])
     }
 
     private func date(_ year: Int, _ month: Int, _ day: Int) throws -> Date {

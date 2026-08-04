@@ -48,11 +48,33 @@ public struct VisionOCRService: OCRServicing {
                     return nil
                 }
 
+                let imageSize = CGSize(width: cgImage.width, height: cgImage.height)
+                let textRangeBoxes: [OCRTextRangeBox] = RedactionDetector.textMatches(in: candidate.string).compactMap { match in
+                    guard let stringRange = Range(match.range, in: candidate.string) else {
+                        return nil
+                    }
+                    do {
+                        guard let rangeObservation = try candidate.boundingBox(for: stringRange) else {
+                            return nil
+                        }
+                        return OCRTextRangeBox(
+                            range: match.range,
+                            boundingBox: OCRObservation.imageBoundingBox(
+                                fromVision: rangeObservation.boundingBox,
+                                imageSize: imageSize
+                            )
+                        )
+                    } catch {
+                        return nil
+                    }
+                }
+
                 return OCRObservation.fromVision(
                     text: candidate.string,
                     confidence: candidate.confidence,
                     normalizedBoundingBox: observation.boundingBox,
-                    imageSize: CGSize(width: cgImage.width, height: cgImage.height)
+                    imageSize: imageSize,
+                    textRangeBoxes: textRangeBoxes
                 )
             } ?? []
 

@@ -18,9 +18,9 @@ final class NotificationServiceTests: XCTestCase {
         let plans = planner.plans(for: event, defaultHour: 9, defaultMinute: 0, now: try date(2026, 6, 1, hour: 12))
 
         XCTAssertEqual(plans.map(\.identifier), [
-            "event-22222222-2222-2222-2222-222222222222-offset-7",
-            "event-22222222-2222-2222-2222-222222222222-offset-1",
-            "event-22222222-2222-2222-2222-222222222222-offset-0"
+            "event-22222222-2222-2222-2222-222222222222-occurrence-20260630-offset-7-batch-legacy",
+            "event-22222222-2222-2222-2222-222222222222-occurrence-20260630-offset-1-batch-legacy",
+            "event-22222222-2222-2222-2222-222222222222-occurrence-20260630-offset-0-batch-legacy"
         ])
         XCTAssertEqual(plans.map { calendar.component(.day, from: $0.fireDate) }, [23, 29, 30])
         XCTAssertTrue(plans.allSatisfy { calendar.component(.hour, from: $0.fireDate) == 9 })

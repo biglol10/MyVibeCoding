@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export PATH="/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_DIR="$(cd "$ROOT_DIR/.." && pwd)"
@@ -16,7 +15,9 @@ swift build
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$ROOT_DIR/.build/debug/FlowPilotNative" "$MACOS_DIR/FlowPilotNative"
-cp "$ICON_SOURCE" "$RESOURCES_DIR/icon.icns"
+if [[ -f "$ICON_SOURCE" ]]; then
+  cp "$ICON_SOURCE" "$RESOURCES_DIR/icon.icns"
+fi
 
 cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -29,10 +30,10 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
   <string>FlowPilot</string>
   <key>CFBundleExecutable</key>
   <string>FlowPilotNative</string>
-  <key>CFBundleIconFile</key>
-  <string>icon.icns</string>
   <key>CFBundleIdentifier</key>
   <string>app.flowpilot.native</string>
+  <key>CFBundleIconFile</key>
+  <string>icon.icns</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>

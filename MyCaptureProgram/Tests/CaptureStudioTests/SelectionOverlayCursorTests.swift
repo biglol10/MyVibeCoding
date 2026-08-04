@@ -112,6 +112,27 @@ final class SelectionOverlayCursorTests: XCTestCase {
         )
     }
 
+    func testSelectionOverlayConvertsGlobalCursorPointToLocalOffsetScreenCoordinates() {
+        let screenFrame = CGRect(x: -1440, y: 120, width: 1440, height: 900)
+
+        XCTAssertEqual(
+            SelectionOverlayGeometry.localCursorPoint(
+                globalPoint: CGPoint(x: -1000, y: 720),
+                screenFrame: screenFrame
+            ),
+            CGPoint(x: 440, y: 600)
+        )
+    }
+
+    func testSelectionOverlayRejectsGlobalCursorPointOutsideScreen() {
+        XCTAssertNil(
+            SelectionOverlayGeometry.localCursorPoint(
+                globalPoint: CGPoint(x: 2000, y: 2000),
+                screenFrame: CGRect(x: 0, y: 0, width: 1200, height: 900)
+            )
+        )
+    }
+
     func testWindowSelectionResolverPicksFrontmostExternalWindowAtPoint() {
         let candidates = [
             ScreenWindowCandidate(
@@ -180,5 +201,58 @@ final class SelectionOverlayCursorTests: XCTestCase {
             SelectionOverlayGeometry.overlayWindowFrames(forScreenFrames: screenFrames),
             screenFrames
         )
+    }
+
+    func testQuartzWindowRectConvertsToTopAlignedSecondaryScreenInAppKitCoordinates() {
+        let quartzRect = CGRect(x: -800, y: 0, width: 800, height: 600)
+
+        XCTAssertEqual(
+            ScreenCoordinateConverter.appKitRect(
+                fromQuartz: quartzRect,
+                mainDisplayBounds: CGRect(x: 0, y: 0, width: 1200, height: 1000)
+            ),
+            CGRect(x: -800, y: 400, width: 800, height: 600)
+        )
+    }
+
+    func testQuartzWindowRectConvertsAcrossDisplaysAboveAndBelowMainScreen() {
+        let mainDisplayBounds = CGRect(x: 0, y: 0, width: 1200, height: 1000)
+
+        XCTAssertEqual(
+            ScreenCoordinateConverter.appKitRect(
+                fromQuartz: CGRect(x: 0, y: -600, width: 800, height: 600),
+                mainDisplayBounds: mainDisplayBounds
+            ),
+            CGRect(x: 0, y: 1000, width: 800, height: 600)
+        )
+        XCTAssertEqual(
+            ScreenCoordinateConverter.appKitRect(
+                fromQuartz: CGRect(x: 0, y: 1000, width: 800, height: 600),
+                mainDisplayBounds: mainDisplayBounds
+            ),
+            CGRect(x: 0, y: -600, width: 800, height: 600)
+        )
+    }
+
+    func testConvertedQuartzWindowCanBeResolvedAtAppKitMousePoint() {
+        let mainDisplayBounds = CGRect(x: 0, y: 0, width: 1200, height: 1000)
+        let candidate = ScreenWindowCandidate(
+            bounds: ScreenCoordinateConverter.appKitRect(
+                fromQuartz: CGRect(x: -800, y: 0, width: 800, height: 600),
+                mainDisplayBounds: mainDisplayBounds
+            ),
+            ownerProcessID: 100,
+            layer: 0,
+            alpha: 1
+        )
+
+        let selection = ScreenWindowSelectionResolver.selectionRect(
+            at: CGPoint(x: -400, y: 700),
+            on: CGRect(x: -800, y: 400, width: 800, height: 600),
+            candidates: [candidate],
+            currentProcessID: 999
+        )
+
+        XCTAssertEqual(selection, CGRect(x: -800, y: 400, width: 800, height: 600))
     }
 }

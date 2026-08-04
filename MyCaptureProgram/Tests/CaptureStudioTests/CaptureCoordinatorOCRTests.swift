@@ -67,6 +67,112 @@ final class CaptureCoordinatorOCRTests: XCTestCase {
         XCTAssertNil(appState.statusMessage)
     }
 
+    func testOCRCompletionDoesNotReplaceANewerDocument() async {
+        let original = EditorDocument(kind: .screenshot, data: Data([0x89, 0x50, 0x4E, 0x47]))
+        let replacement = EditorDocument(kind: .screenshot, data: Data([0x89, 0x50, 0x4E, 0x47, 0x01]))
+        let appState = AppState(currentDocument: original)
+        let service = SuspendingOCRService()
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: SettingsStore(defaults: isolatedDefaults("ocrReplacement")),
+            screenshotService: OCRMockScreenshotService(),
+            ocrService: service
+        )
+
+        let task = Task { @MainActor in
+            await coordinator.runOCR()
+        }
+        await service.waitUntilStarted()
+        appState.currentDocument = replacement
+        service.finish(with: OCRResult(observations: [
+            OCRObservation(text: "old", confidence: 1, boundingBox: CGRect(x: 1, y: 1, width: 4, height: 4))
+        ]))
+        await task.value
+
+        XCTAssertEqual(appState.currentDocument?.id, replacement.id)
+        XCTAssertNil(appState.currentDocument?.ocrResult)
+        XCTAssertEqual(appState.statusMessage, "OCR cancelled because the document changed.")
+    }
+
+    func testOCRCompletionDoesNotAttachAStaleResultAfterTheSameDocumentWasEdited() async {
+        let appState = AppState(
+            currentDocument: EditorDocument(kind: .screenshot, data: Data([0x89, 0x50, 0x4E, 0x47]))
+        )
+        let service = SuspendingOCRService()
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: SettingsStore(defaults: isolatedDefaults("ocrConcurrentEdit")),
+            screenshotService: OCRMockScreenshotService(),
+            ocrService: service
+        )
+        let concurrentLayer = EditorLayer.rectangle(
+            ShapeLayer(
+                frame: CGRect(x: 4, y: 4, width: 8, height: 8),
+                style: LayerStyle(strokeColor: .blue, fillColor: .clear, lineWidth: 2)
+            )
+        )
+
+        let task = Task { @MainActor in
+            await coordinator.runOCR()
+        }
+        await service.waitUntilStarted()
+        appState.currentDocument?.layers.append(concurrentLayer)
+        appState.currentDocument?.isDirty = true
+        service.finish(with: OCRResult(observations: [
+            OCRObservation(text: "stale", confidence: 1, boundingBox: CGRect(x: 1, y: 1, width: 4, height: 4))
+        ]))
+        await task.value
+
+        XCTAssertEqual(appState.currentDocument?.layers, [concurrentLayer])
+        XCTAssertNil(appState.currentDocument?.ocrResult)
+        XCTAssertEqual(appState.statusMessage, "OCR cancelled because the document changed.")
+    }
+
+    func testQuickRedactCancelsWhenEditsAreAddedWhileOCRIsRunning() async {
+        let appState = AppState(
+            currentDocument: EditorDocument(kind: .screenshot, data: Data([0x89, 0x50, 0x4E, 0x47]))
+        )
+        let service = SuspendingOCRService()
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: SettingsStore(defaults: isolatedDefaults("redactConcurrentEdit")),
+            screenshotService: OCRMockScreenshotService(),
+            ocrService: service
+        )
+        let concurrentLayer = EditorLayer.rectangle(
+            ShapeLayer(
+                frame: CGRect(x: 20, y: 20, width: 8, height: 8),
+                style: LayerStyle(strokeColor: .blue, fillColor: .clear, lineWidth: 2)
+            )
+        )
+
+        let task = Task { @MainActor in
+            await coordinator.quickRedact()
+        }
+        await service.waitUntilStarted()
+        appState.currentDocument?.layers.append(concurrentLayer)
+        appState.currentDocument?.isDirty = true
+        service.finish(with: OCRResult(observations: [
+            OCRObservation(
+                text: "person@example.com",
+                confidence: 1,
+                boundingBox: CGRect(x: 1, y: 1, width: 16, height: 5)
+            )
+        ]))
+        await task.value
+
+        XCTAssertTrue(appState.currentDocument?.layers.contains(concurrentLayer) ?? false)
+        XCTAssertEqual(
+            appState.currentDocument?.layers.filter {
+                if case .redaction = $0 { return true }
+                return false
+            }.count,
+            0
+        )
+        XCTAssertNil(appState.currentDocument?.ocrResult)
+        XCTAssertEqual(appState.statusMessage, "Redaction cancelled because the document changed.")
+    }
+
     private func isolatedDefaults(_ name: String) -> UserDefaults {
         let suiteName = "CaptureCoordinatorOCRTests.\(name)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -80,6 +186,36 @@ private struct MockOCRService: OCRServicing {
 
     func recognizeText(in imageData: Data) async throws -> OCRResult {
         result
+    }
+}
+
+@MainActor
+private final class SuspendingOCRService: OCRServicing {
+    private var continuation: CheckedContinuation<OCRResult, Error>?
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var didStart = false
+
+    func recognizeText(in imageData: Data) async throws -> OCRResult {
+        didStart = true
+        startWaiters.forEach { $0.resume() }
+        startWaiters.removeAll()
+        return try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func waitUntilStarted() async {
+        if didStart {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            startWaiters.append(continuation)
+        }
+    }
+
+    func finish(with result: OCRResult) {
+        continuation?.resume(returning: result)
+        continuation = nil
     }
 }
 

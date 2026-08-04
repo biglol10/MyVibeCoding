@@ -938,23 +938,66 @@ struct ContentView: View {
                     LazyVStack(alignment: .leading, spacing: 14) {
                         ForEach(orphanFilesViewModel.groups) { group in
                             VStack(alignment: .leading, spacing: 10) {
-                                HStack {
-                                    Text(group.inferredIdentifier)
-                                        .font(.headline.weight(.semibold))
+                                HStack(alignment: .center, spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(group.inferredIdentifier)
+                                            .font(.headline.weight(.semibold))
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                        Text(orphanFilesViewModel.groupSelectionSummary(for: group))
+                                            .font(.caption.weight(.medium))
+                                            .foregroundStyle(.secondary)
+                                    }
                                     Spacer()
                                     SizeText(bytes: group.totalSize)
                                         .font(.callout.weight(.semibold))
                                         .foregroundStyle(.secondary)
+                                    Button {
+                                        orphanFilesViewModel.setGroupSelection(
+                                            group.id,
+                                            isSelected: !orphanFilesViewModel.isGroupFullySelected(group)
+                                        )
+                                    } label: {
+                                        Label(
+                                            orphanFilesViewModel.isGroupFullySelected(group) ? "Clear Group" : "Select Group",
+                                            systemImage: orphanFilesViewModel.isGroupFullySelected(group) ? "minus.square" : "checkmark.square"
+                                        )
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                    .disabled(group.candidates.allSatisfy(\.isProtected))
                                 }
 
                                 ForEach(group.candidates) { candidate in
-                                    RelatedFileRow(
-                                        candidate: candidate,
-                                        isSelected: orphanFilesViewModel.selectedCandidateIDs.contains(candidate.id),
-                                        toggle: {
-                                            toggleOrphanCandidate(candidate.id)
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        RelatedFileRow(
+                                            candidate: candidate,
+                                            isSelected: orphanFilesViewModel.selectedCandidateIDs.contains(candidate.id),
+                                            toggle: {
+                                                toggleOrphanCandidate(candidate.id)
+                                            }
+                                        )
+                                        HStack(spacing: 10) {
+                                            Spacer()
+                                            Button {
+                                                revealInFinder(candidate.url)
+                                            } label: {
+                                                Label("Reveal", systemImage: "folder")
+                                            }
+                                            .buttonStyle(.borderless)
+                                            .help("Reveal in Finder")
+
+                                            Button {
+                                                copyToPasteboard(candidate.url.path)
+                                            } label: {
+                                                Label("Copy Path", systemImage: "doc.on.doc")
+                                            }
+                                            .buttonStyle(.borderless)
+                                            .help("Copy Path")
                                         }
-                                    )
+                                        .font(.caption.weight(.semibold))
+                                        .padding(.horizontal, 14)
+                                    }
                                 }
                             }
                             .padding(14)

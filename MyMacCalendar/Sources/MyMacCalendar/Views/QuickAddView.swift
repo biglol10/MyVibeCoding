@@ -104,7 +104,7 @@ struct QuickAddView: View {
         let result = parsed ?? QuickAddParser().parse(trimmed)
         modelContext.insert(CalendarEvent(title: result.title, startDate: result.startDate, endDate: result.endDate))
         do {
-            try modelContext.save()
+            try PersistenceTransaction.save(context: modelContext)
         } catch {
             errorMessage = error.localizedDescription
             return

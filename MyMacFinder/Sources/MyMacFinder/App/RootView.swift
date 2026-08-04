@@ -115,6 +115,7 @@ struct RootView: View {
                 currentLocation: pane.location,
                 currentSort: pane.sort,
                 showsPathColumn: explorerStore.isShowingRecursiveSearchResults,
+                paneID: pane.id,
                 inlineRenameRequest: inlineRenameRequest(for: pane),
                 requestsInitialFocus: index == explorerStore.activePaneIndex,
                 onFocus: {
@@ -130,9 +131,11 @@ struct RootView: View {
                     explorerStore.activatePane(at: index)
                     Task { await explorerStore.open(url) }
                 },
-                onRename: { newName in
-                    explorerStore.activatePane(at: index)
-                    Task { await explorerStore.renameSelected(to: newName) }
+                onRename: { paneID, url, newName in
+                    Task { await explorerStore.rename(url, to: newName, inPane: paneID) }
+                },
+                onInlineRenameEnd: { requestID in
+                    explorerStore.clearInlineRenameRequest(matching: requestID)
                 },
                 onCommand: { command in
                     explorerStore.activatePane(at: index)
@@ -171,7 +174,8 @@ struct RootView: View {
     }
 
     private func inlineRenameRequest(for pane: PaneState) -> InlineRenameRequest? {
-        guard explorerStore.inlineRenameRequest?.paneID == pane.id else {
+        guard explorerStore.activePane.id == pane.id,
+              explorerStore.inlineRenameRequest?.paneID == pane.id else {
             return nil
         }
         return explorerStore.inlineRenameRequest

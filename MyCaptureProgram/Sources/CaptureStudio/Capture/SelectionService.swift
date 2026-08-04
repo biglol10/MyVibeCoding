@@ -207,6 +207,17 @@ enum SelectionOverlayGeometry {
     static func globalPoint(localPoint: CGPoint, screenFrame: CGRect) -> CGPoint {
         CGPoint(x: localPoint.x + screenFrame.minX, y: localPoint.y + screenFrame.minY)
     }
+
+    static func localCursorPoint(globalPoint: CGPoint, screenFrame: CGRect) -> CGPoint? {
+        guard screenFrame.contains(globalPoint) else {
+            return nil
+        }
+
+        return CGPoint(
+            x: globalPoint.x - screenFrame.minX,
+            y: globalPoint.y - screenFrame.minY
+        )
+    }
 }
 
 private final class SelectionOverlayWindow: NSWindow {
@@ -396,7 +407,11 @@ private final class SelectionOverlayView: NSView {
         window.invalidateCursorRects(for: self)
         SelectionOverlayCursor.pushSelectionCursor()
         SelectionOverlayCursor.hideNativeCursorForSelection()
-        updateCursorPoint(from: window.mouseLocationOutsideOfEventStream)
+        cursorPoint = SelectionOverlayGeometry.localCursorPoint(
+            globalPoint: NSEvent.mouseLocation,
+            screenFrame: screen.frame
+        )
+        needsDisplay = true
         startCursorReassertionTimer()
     }
 
@@ -593,6 +608,7 @@ struct ScreenWindowCandidate: Equatable {
             return []
         }
 
+        let mainDisplayBounds = CGDisplayBounds(CGMainDisplayID())
         return windowInfos.compactMap { info in
             guard let boundsDictionary = info[kCGWindowBounds as String] as? NSDictionary,
                   let bounds = CGRect(dictionaryRepresentation: boundsDictionary),
@@ -605,7 +621,10 @@ struct ScreenWindowCandidate: Equatable {
             let alpha = (info[kCGWindowAlpha as String] as? CGFloat)
                 ?? CGFloat(info[kCGWindowAlpha as String] as? Double ?? 1)
             return ScreenWindowCandidate(
-                bounds: bounds,
+                bounds: ScreenCoordinateConverter.appKitRect(
+                    fromQuartz: bounds,
+                    mainDisplayBounds: mainDisplayBounds
+                ),
                 ownerProcessID: ownerProcessID,
                 layer: layer,
                 alpha: alpha

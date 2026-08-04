@@ -59,8 +59,9 @@ public struct AppKitImageRenderService: ImageRenderServicing {
         NSRect(x: 0, y: 0, width: width, height: height).fill()
         NSGraphicsContext.current?.cgContext.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
 
+        let canvasHeight = CGFloat(height)
         for layer in layers {
-            draw(layer, baseImage: cgImage)
+            draw(layer, baseImage: cgImage, canvasHeight: canvasHeight)
         }
 
         NSGraphicsContext.restoreGraphicsState()
@@ -72,22 +73,22 @@ public struct AppKitImageRenderService: ImageRenderServicing {
         return data
     }
 
-    private func draw(_ layer: EditorLayer, baseImage: CGImage) {
+    private func draw(_ layer: EditorLayer, baseImage: CGImage, canvasHeight: CGFloat) {
         switch layer {
         case .rectangle(let shape):
-            drawShape(shape.frame, style: shape.style, oval: false)
+            drawShape(appKitRect(shape.frame, canvasHeight: canvasHeight), style: shape.style, oval: false)
         case .ellipse(let shape):
-            drawShape(shape.frame, style: shape.style, oval: true)
+            drawShape(appKitRect(shape.frame, canvasHeight: canvasHeight), style: shape.style, oval: true)
         case .freehand(let freehand):
-            drawPolyline(freehand.points, style: freehand.style, alpha: 1)
+            drawPolyline(appKitPoints(freehand.points, canvasHeight: canvasHeight), style: freehand.style, alpha: 1)
         case .highlighter(let highlighter):
-            drawPolyline(highlighter.points, style: highlighter.style, alpha: 0.35)
+            drawPolyline(appKitPoints(highlighter.points, canvasHeight: canvasHeight), style: highlighter.style, alpha: 0.35)
         case .arrow(let arrow):
-            drawArrow(arrow)
+            drawArrow(arrow, canvasHeight: canvasHeight)
         case .text(let text):
-            drawText(text)
+            drawText(text, canvasHeight: canvasHeight)
         case .redaction(let redaction):
-            drawRedaction(redaction, baseImage: baseImage)
+            drawRedaction(redaction, baseImage: baseImage, canvasHeight: canvasHeight)
         }
     }
 
@@ -115,32 +116,51 @@ public struct AppKitImageRenderService: ImageRenderServicing {
         path.stroke()
     }
 
-    private func drawArrow(_ arrow: ArrowLayer) {
+    private func drawArrow(_ arrow: ArrowLayer, canvasHeight: CGFloat) {
+        let start = appKitPoint(arrow.start, canvasHeight: canvasHeight)
+        let end = appKitPoint(arrow.end, canvasHeight: canvasHeight)
         arrow.style.strokeColor.nsColor.setStroke()
         let path = NSBezierPath()
-        path.move(to: arrow.start)
-        path.line(to: arrow.end)
+        path.move(to: start)
+        path.line(to: end)
+
+        let angle = atan2(end.y - start.y, end.x - start.x)
+        let headLength: CGFloat = 12
+        let left = CGPoint(
+            x: end.x - headLength * cos(angle - .pi / 6),
+            y: end.y - headLength * sin(angle - .pi / 6)
+        )
+        let right = CGPoint(
+            x: end.x - headLength * cos(angle + .pi / 6),
+            y: end.y - headLength * sin(angle + .pi / 6)
+        )
+        path.move(to: end)
+        path.line(to: left)
+        path.move(to: end)
+        path.line(to: right)
         path.lineWidth = arrow.style.lineWidth
         path.stroke()
     }
 
-    private func drawText(_ text: TextLayer) {
+    private func drawText(_ text: TextLayer, canvasHeight: CGFloat) {
+        let frame = appKitRect(text.frame, canvasHeight: canvasHeight)
         text.style.fillColor.nsColor.setFill()
-        text.frame.fill()
+        frame.fill()
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: text.fontSize),
             .foregroundColor: text.style.strokeColor.nsColor
         ]
-        text.text.draw(in: text.frame.insetBy(dx: 6, dy: 4), withAttributes: attributes)
+        text.text.draw(in: frame.insetBy(dx: 6, dy: 4), withAttributes: attributes)
     }
 
-    private func drawRedaction(_ redaction: RedactionLayer, baseImage: CGImage) {
+    private func drawRedaction(_ redaction: RedactionLayer, baseImage: CGImage, canvasHeight: CGFloat) {
+        let frame = appKitRect(redaction.frame, canvasHeight: canvasHeight)
         switch redaction.mode {
         case .solid:
             LayerColor.black.nsColor.setFill()
-            redaction.frame.fill()
+            frame.fill()
         case .blur(let radius):
-            drawBlurredRegion(redaction.frame, radius: radius, baseImage: baseImage)
+            drawBlurredRegion(frame, radius: radius, baseImage: baseImage)
         }
     }
 
@@ -151,12 +171,7 @@ public struct AppKitImageRenderService: ImageRenderServicing {
             return
         }
 
-        let coreImageFrame = CGRect(
-            x: targetFrame.minX,
-            y: CGFloat(baseImage.height) - targetFrame.maxY,
-            width: targetFrame.width,
-            height: targetFrame.height
-        )
+        let coreImageFrame = targetFrame
         let inputImage = CIImage(cgImage: baseImage)
             .clampedToExtent()
             .cropped(to: coreImageFrame)
@@ -170,6 +185,23 @@ public struct AppKitImageRenderService: ImageRenderServicing {
         }
 
         NSGraphicsContext.current?.cgContext.draw(blurredCGImage, in: targetFrame)
+    }
+
+    private func appKitPoint(_ point: CGPoint, canvasHeight: CGFloat) -> CGPoint {
+        CGPoint(x: point.x, y: canvasHeight - point.y)
+    }
+
+    private func appKitPoints(_ points: [CGPoint], canvasHeight: CGFloat) -> [CGPoint] {
+        points.map { appKitPoint($0, canvasHeight: canvasHeight) }
+    }
+
+    private func appKitRect(_ frame: CGRect, canvasHeight: CGFloat) -> CGRect {
+        CGRect(
+            x: frame.minX,
+            y: canvasHeight - frame.maxY,
+            width: frame.width,
+            height: frame.height
+        ).standardized
     }
 }
 

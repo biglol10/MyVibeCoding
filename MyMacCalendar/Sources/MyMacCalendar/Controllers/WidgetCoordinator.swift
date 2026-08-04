@@ -65,7 +65,7 @@ private struct WidgetSettingsSnapshot {
     var visibleCount = 5
 
     init(settings: AppSettings? = nil) {
-        guard let settings else { return }
+        let settings = SettingsValidation.snapshot(settings)
         isEnabled = settings.floatingWidgetEnabled
         alwaysOnTop = settings.floatingWidgetAlwaysOnTop
         opacity = settings.floatingWidgetOpacity

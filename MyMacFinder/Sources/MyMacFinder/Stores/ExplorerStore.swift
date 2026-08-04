@@ -14,6 +14,53 @@ public final class ExplorerStore: ObservableObject {
         var title: String
     }
 
+    private struct SearchContext: Sendable {
+        var generation: UInt64
+        var tabID: ExplorerTabID
+        var paneID: PaneID
+        var rootURL: URL
+        var scope: SearchScope
+        var criteria: FileEntrySearchCriteria
+        var showHiddenFiles: Bool
+    }
+
+    private struct FinderTagPopulationContext: Sendable {
+        var tabID: ExplorerTabID
+        var paneID: PaneID
+        var rootURL: URL
+        var scope: SearchScope
+        var ordinaryQuery: String
+        var explicitTagQuery: String
+    }
+
+    private struct OwnedUndoSource: Sendable {
+        var url: URL
+        var expectedIdentity: FileSystemPathIdentity.FileSystemEntryIdentity?
+    }
+
+    private struct UndoOwnershipSnapshot: Sendable {
+        var identities: [String: FileSystemPathIdentity.FileSystemEntryIdentity]
+    }
+
+    private enum UndoStep: Sendable {
+        case trash([OwnedUndoSource])
+        case move(source: OwnedUndoSource, destination: URL)
+    }
+
+    private enum UndoJournalEntry: Sendable {
+        case trashed(FileTrashRecord, expectedIdentity: FileSystemPathIdentity.FileSystemEntryIdentity)
+        case moved(
+            source: URL,
+            destination: URL,
+            expectedIdentity: FileSystemPathIdentity.FileSystemEntryIdentity
+        )
+    }
+
+    private enum SimulatedUndoEntry {
+        case missing
+        case present(FileSystemPathIdentity.FileSystemEntryIdentity)
+    }
+
     @Published public private(set) var panes: [PaneState] {
         didSet {
             syncActiveTabState()
@@ -65,6 +112,7 @@ public final class ExplorerStore: ObservableObject {
     @Published public private(set) var activeOperationProgress: FileOperationProgressSnapshot?
     @Published public private(set) var isToolbarTextInputFocused: Bool
     @Published public private(set) var grantedFolderSummaries: [FolderAccessGrantSummary]
+    @Published public private(set) var folderAccessPersistenceErrorMessage: String?
     @Published public private(set) var pendingPermissionRecoveryPath: String?
     @Published private var fileClipboard: FileClipboard?
     public let sandboxPolicy: SandboxPolicySummary
@@ -98,11 +146,14 @@ public final class ExplorerStore: ObservableObject {
     private var watchedDirectoryURLs: Set<URL>
     private var isApplyingTabState: Bool
     private var searchTask: Task<Void, Never>?
+    private var searchGeneration: UInt64
+    private var paneLoadGenerations: [PaneID: UInt64]
     private var finderTagPopulationTask: Task<Void, Never>?
     private var finderTagPopulationToken: UUID
     private var activeOperationReporter: FileOperationProgressReporter?
     private var activeFolderAccesses: [FolderAccessGrantID: ResolvedFolderAccess]
     private var unavailableFolderGrantIDs: Set<FolderAccessGrantID>
+    private var undoOwnershipStack: [UndoOwnershipSnapshot]
     private var sidebarState: SidebarState
     private var missingFavoriteURLs: Set<URL>
     private static let maxRecentFolders = 5
@@ -173,6 +224,7 @@ public final class ExplorerStore: ObservableObject {
         self.requestedFocus = nil
         self.inlineRenameRequest = nil
         self.undoStack = []
+        self.undoOwnershipStack = []
         self.isInspectorVisible = settings.isInspectorVisible
         self.activePaneIndex = initialActivePaneIndex
         self.tabs = [
@@ -190,6 +242,7 @@ public final class ExplorerStore: ObservableObject {
         self.activeOperationProgress = nil
         self.isToolbarTextInputFocused = false
         self.grantedFolderSummaries = []
+        self.folderAccessPersistenceErrorMessage = nil
         self.pendingPermissionRecoveryPath = nil
         self.sandboxPolicy = sandboxPolicy
         self.fileSystemService = fileSystemService
@@ -222,6 +275,8 @@ public final class ExplorerStore: ObservableObject {
         self.watchedDirectoryURLs = []
         self.isApplyingTabState = false
         self.searchTask = nil
+        self.searchGeneration = 0
+        self.paneLoadGenerations = [:]
         self.finderTagPopulationTask = nil
         self.finderTagPopulationToken = UUID()
         self.activeOperationReporter = nil
@@ -709,16 +764,20 @@ public final class ExplorerStore: ObservableObject {
         guard let target = activePane.backStack.last else {
             return
         }
+        let paneID = activePane.id
         let previousLocation = activePane.location
         let previousBackStack = activePane.backStack
         let previousForwardStack = activePane.forwardStack
 
         do {
-            try await loadLocation(target, pushHistory: false)
-            var pane = activePane
+            guard let commit = try await loadLocationCommit(target, pushHistory: false, paneID: paneID),
+                  let paneIndex = currentPaneIndex(for: commit) else {
+                return
+            }
+            var pane = panes[paneIndex]
             pane.backStack = Array(previousBackStack.dropLast())
             pane.forwardStack = previousForwardStack + [previousLocation]
-            panes[activePaneIndex] = pane
+            panes[paneIndex] = pane
         } catch let error as ExplorerError {
             present(error)
         } catch {
@@ -730,16 +789,20 @@ public final class ExplorerStore: ObservableObject {
         guard let target = activePane.forwardStack.last else {
             return
         }
+        let paneID = activePane.id
         let previousLocation = activePane.location
         let previousBackStack = activePane.backStack
         let previousForwardStack = activePane.forwardStack
 
         do {
-            try await loadLocation(target, pushHistory: false)
-            var pane = activePane
+            guard let commit = try await loadLocationCommit(target, pushHistory: false, paneID: paneID),
+                  let paneIndex = currentPaneIndex(for: commit) else {
+                return
+            }
+            var pane = panes[paneIndex]
             pane.forwardStack = Array(previousForwardStack.dropLast())
             pane.backStack = previousBackStack + [previousLocation]
-            panes[activePaneIndex] = pane
+            panes[paneIndex] = pane
         } catch let error as ExplorerError {
             present(error)
         } catch {
@@ -752,7 +815,13 @@ public final class ExplorerStore: ObservableObject {
         guard let parent = parentLocation(from: activePane.location) else {
             let canonicalLocation = canonicalized(activePane.location)
             if canonicalLocation != activePane.location {
-                try? await loadLocation(canonicalLocation, pushHistory: false)
+                do {
+                    try await loadLocation(canonicalLocation, pushHistory: false)
+                } catch let error as ExplorerError {
+                    present(error)
+                } catch {
+                    visibleError = .readFailed(error.localizedDescription)
+                }
             } else {
                 pathInput = canonicalLocation.displayPath
             }
@@ -771,19 +840,22 @@ public final class ExplorerStore: ObservableObject {
     }
 
     public func activatePane(at index: Int) {
-        guard panes.indices.contains(index) else {
+        guard panes.indices.contains(index), index != activePaneIndex else {
             return
         }
 
         activePaneIndex = index
         pathInput = activePane.location.displayPath
+        recursiveSearchResults = nil
         trimSelectionToVisibleEntries()
         scheduleFinderTagPopulationIfNeeded()
+        scheduleSearchIfNeeded()
         startWatchingVisibleDirectories()
     }
 
     public func setSearchQuery(_ query: String) {
         searchQuery = query
+        scheduleFinderTagPopulationIfNeeded()
         scheduleSearchIfNeeded()
         trimSelectionToVisibleEntries()
     }
@@ -872,12 +944,12 @@ public final class ExplorerStore: ObservableObject {
                 return
             }
 
-            let newPaneIndex = panes.count
             let newPaneLocation = activePane.location
             panes.append(PaneState(location: newPaneLocation, sort: defaultSort))
+            let newPaneID = panes[panes.count - 1].id
 
             do {
-                try await loadLocation(newPaneLocation, pushHistory: false, paneIndex: newPaneIndex)
+                try await loadLocation(newPaneLocation, pushHistory: false, paneID: newPaneID)
             } catch let error as ExplorerError {
                 present(error)
             } catch {
@@ -900,6 +972,9 @@ public final class ExplorerStore: ObservableObject {
     public func setDefaultSort(_ descriptor: EntrySortDescriptor) {
         defaultSort = descriptor
         applySort(descriptor, to: &panes)
+        if let recursiveSearchResults {
+            self.recursiveSearchResults = SortEngine.sorted(recursiveSearchResults, descriptor: activePane.sort)
+        }
         for index in tabs.indices {
             if index == activeTabIndex {
                 tabs[index].panes = panes
@@ -928,19 +1003,45 @@ public final class ExplorerStore: ObservableObject {
 
         panes[activePaneIndex].sort = descriptor
         panes[activePaneIndex].entries = SortEngine.sorted(activePane.entries, descriptor: descriptor)
+        if let recursiveSearchResults {
+            self.recursiveSearchResults = SortEngine.sorted(recursiveSearchResults, descriptor: descriptor)
+        }
     }
 
     public func renameSelected(to newName: String) async {
+        guard activePane.selectedURLs.count == 1, let url = selectedURLs.first else {
+            return
+        }
+        await rename(url, to: newName, inPane: activePane.id)
+    }
+
+    public func rename(_ url: URL, to newName: String, inPane paneID: PaneID) async {
         do {
-            guard activePane.selectedURLs.count == 1, let url = selectedURLs.first else {
+            let sourceURL = url.standardizedFileURL
+            guard let paneIndex = panes.firstIndex(where: { $0.id == paneID }),
+                  panes[paneIndex].entries.contains(where: {
+                      $0.url.standardizedFileURL == sourceURL && !$0.isArchiveBacked
+                  }) else {
                 return
             }
+            let location = panes[paneIndex].location
 
-            let result = try await fileOperationService.rename(url, to: newName)
-            await refresh()
+            let result = try await fileOperationService.rename(sourceURL, to: newName)
             if let renamedURL = result.renamedItem?.destination {
-                recordUndo(undoAction(.renamed(FileMoveRecord(source: url, destination: renamedURL)), from: result))
-                updateSelection([renamedURL.standardizedFileURL])
+                recordUndo(
+                    undoAction(
+                        .renamed(FileMoveRecord(source: sourceURL, destination: renamedURL)),
+                        from: result
+                    ),
+                    ownership: result.undoSourceIdentities
+                )
+                let reloadCommit = try await reloadCapturedPaneCommit(
+                    PaneReloadTarget(paneID: paneID, location: location)
+                )
+                if let reloadCommit,
+                   let currentPaneIndex = currentPaneIndex(for: reloadCommit) {
+                    panes[currentPaneIndex].selectedURLs = [renamedURL.standardizedFileURL]
+                }
             }
         } catch is FileOperationCancellation {
             return
@@ -949,6 +1050,13 @@ public final class ExplorerStore: ObservableObject {
         } catch {
             visibleError = .operationFailed(error.localizedDescription)
         }
+    }
+
+    public func clearInlineRenameRequest(matching requestID: UUID) {
+        guard inlineRenameRequest?.id == requestID else {
+            return
+        }
+        inlineRenameRequest = nil
     }
 
     public func requestInlineRenameForSelection() {
@@ -995,19 +1103,24 @@ public final class ExplorerStore: ObservableObject {
             case .copyPath:
                 copySelectedPaths()
             case .newFolder:
-                guard let currentURL = activePane.location.fileSystemURL else {
+                let target = PaneReloadTarget(paneID: activePane.id, location: activePane.location)
+                guard let currentURL = target.location.fileSystemURL else {
                     throw ExplorerError.operationFailed("Cannot create folders inside ZIP archives.")
                 }
                 let result = try await fileOperationService.createFolder(in: currentURL)
                 if !result.createdURLs.isEmpty {
-                    recordUndo(.created(result.createdURLs))
+                    recordUndo(.created(result.createdURLs), ownership: result.undoSourceIdentities)
                 }
-                await refresh()
-                if let createdURL = result.createdURLs.first {
-                    updateSelection([createdURL.standardizedFileURL])
-                    requestToolbarFocusClear()
+                let reloadCommit = try await reloadCapturedPaneCommit(target)
+                if let reloadCommit,
+                   let createdURL = result.createdURLs.first,
+                   let targetPaneIndex = currentPaneIndex(for: reloadCommit) {
+                    panes[targetPaneIndex].selectedURLs = [createdURL.standardizedFileURL]
+                    if activePane.id == target.paneID {
+                        requestToolbarFocusClear()
+                    }
                     inlineRenameRequest = InlineRenameRequest(
-                        paneID: activePane.id,
+                        paneID: target.paneID,
                         url: createdURL
                     )
                 }
@@ -1021,6 +1134,7 @@ public final class ExplorerStore: ObservableObject {
                 )
                 var createdURLs: [URL] = []
                 var replacedItems: [FileTrashRecord] = []
+                var undoSourceIdentities: [URL: FileSystemPathIdentity.FileSystemEntryIdentity] = [:]
                 for (index, url) in urls.enumerated() {
                     try await reporter.checkCancellation()
                     await reporter.update(
@@ -1032,6 +1146,7 @@ public final class ExplorerStore: ObservableObject {
                     let result = try await fileOperationService.duplicate(url)
                     createdURLs.append(contentsOf: result.createdURLs)
                     replacedItems.append(contentsOf: result.replacedItems)
+                    undoSourceIdentities.merge(result.undoSourceIdentities) { recorded, _ in recorded }
                     await reporter.update(
                         phase: .running,
                         currentItemName: url.lastPathComponent,
@@ -1040,7 +1155,10 @@ public final class ExplorerStore: ObservableObject {
                     )
                 }
                 if !createdURLs.isEmpty {
-                    recordUndo(undoAction(.copied(createdURLs), replacedItems: replacedItems))
+                    recordUndo(
+                        undoAction(.copied(createdURLs), replacedItems: replacedItems),
+                        ownership: undoSourceIdentities
+                    )
                 }
                 await refresh()
                 await reporter.complete()
@@ -1069,11 +1187,17 @@ public final class ExplorerStore: ObservableObject {
                     switch pasteResult.mode {
                     case .copy:
                         if !pasteResult.result.createdURLs.isEmpty {
-                            recordUndo(undoAction(.copied(pasteResult.result.createdURLs), from: pasteResult.result))
+                            recordUndo(
+                                undoAction(.copied(pasteResult.result.createdURLs), from: pasteResult.result),
+                                ownership: pasteResult.result.undoSourceIdentities
+                            )
                         }
                     case .move:
                         if !pasteResult.result.movedItems.isEmpty {
-                            recordUndo(undoAction(.moved(pasteResult.result.movedItems), from: pasteResult.result))
+                            recordUndo(
+                                undoAction(.moved(pasteResult.result.movedItems), from: pasteResult.result),
+                                ownership: pasteResult.result.undoSourceIdentities
+                            )
                         }
                     }
                 }
@@ -1091,7 +1215,7 @@ public final class ExplorerStore: ObservableObject {
                 )
                 let result = try await fileOperationService.moveToTrash(urls, progress: reporter)
                 if !result.trashedItems.isEmpty {
-                    recordUndo(.trashed(result.trashedItems))
+                    recordUndo(.trashed(result.trashedItems), ownership: result.undoSourceIdentities)
                 }
                 await refresh()
                 await reporter.complete()
@@ -1160,7 +1284,10 @@ public final class ExplorerStore: ObservableObject {
                 let reporter = makeOperationReporter(kind: .copy, title: operationTitle("Copying", count: urls.count))
                 let result = try await fileOperationService.copyItems(urls, to: destinationFolder, progress: reporter)
                 if !result.createdURLs.isEmpty {
-                    recordUndo(undoAction(.copied(result.createdURLs), from: result))
+                    recordUndo(
+                        undoAction(.copied(result.createdURLs), from: result),
+                        ownership: result.undoSourceIdentities
+                    )
                 }
                 await refresh()
                 await reporter.complete()
@@ -1168,7 +1295,10 @@ public final class ExplorerStore: ObservableObject {
                 let reporter = makeOperationReporter(kind: .move, title: operationTitle("Moving", count: urls.count))
                 let result = try await fileOperationService.moveItems(urls, to: destinationFolder, progress: reporter)
                 if !result.movedItems.isEmpty {
-                    recordUndo(undoAction(.moved(result.movedItems), from: result))
+                    recordUndo(
+                        undoAction(.moved(result.movedItems), from: result),
+                        ownership: result.undoSourceIdentities
+                    )
                 }
                 await refresh()
                 await reporter.complete()
@@ -1235,42 +1365,62 @@ public final class ExplorerStore: ObservableObject {
     }
 
     public func chooseFolderForAccess(startingAt startURL: URL?, retryingPermissionPath: String?) async {
+        let result: FolderAccessSelectionResult
         do {
-            let result = try await folderAccessService.chooseFolder(
+            result = try await folderAccessService.chooseFolder(
                 startingAt: startURL,
                 sandboxed: sandboxPolicy.isSandboxed
             )
-            guard case .granted(let grant, let access) = result else {
-                return
-            }
-
-            stopSupersededFolderAccesses(for: grant)
-            try bookmarkStore.save(grant)
-            activeFolderAccesses[grant.id] = access
-            unavailableFolderGrantIDs.remove(grant.id)
-            refreshGrantedFolderSummaries()
-            await retryPermissionRecoveryIfSafe(path: retryingPermissionPath)
         } catch let error as ExplorerError {
             present(error)
+            return
         } catch {
             visibleError = .operationFailed(error.localizedDescription)
+            return
+        }
+
+        guard case .granted(let grant, let access) = result else {
+            return
+        }
+
+        do {
+            let storedGrants = try bookmarkStore.load()
+            try bookmarkStore.save(grant)
+            stopSupersededFolderAccesses(for: grant, storedGrants: storedGrants)
+            activeFolderAccesses[grant.id] = access
+            unavailableFolderGrantIDs.remove(grant.id)
+            refreshGrantedFolderSummaries(using: grantsReplacing(grant, in: storedGrants))
+            clearFolderAccessPersistenceError()
+            await retryPermissionRecoveryIfSafe(path: retryingPermissionPath)
+        } catch {
+            folderAccessService.stopAccessing(access)
+            recordFolderAccessPersistenceError(error)
         }
     }
 
     public func removeGrantedFolder(id: FolderAccessGrantID) async {
-        if let access = activeFolderAccesses.removeValue(forKey: id) {
-            folderAccessService.stopAccessing(access)
+        do {
+            let storedGrants = try bookmarkStore.load()
+            try bookmarkStore.remove(id: id)
+            if let access = activeFolderAccesses.removeValue(forKey: id) {
+                folderAccessService.stopAccessing(access)
+            }
+            unavailableFolderGrantIDs.remove(id)
+            refreshGrantedFolderSummaries(using: storedGrants.filter { $0.id != id })
+            clearFolderAccessPersistenceError()
+            await refreshVisiblePanesAfterAccessChange()
+        } catch {
+            recordFolderAccessPersistenceError(error)
         }
-        bookmarkStore.remove(id: id)
-        refreshGrantedFolderSummaries()
-        await refreshVisiblePanesAfterAccessChange()
     }
 
     public func resetGrantedFolders() async {
+        bookmarkStore.reset()
         activeFolderAccesses.values.forEach(folderAccessService.stopAccessing)
         activeFolderAccesses.removeAll()
-        bookmarkStore.reset()
-        refreshGrantedFolderSummaries()
+        unavailableFolderGrantIDs.removeAll()
+        grantedFolderSummaries = []
+        clearFolderAccessPersistenceError()
         await refreshVisiblePanesAfterAccessChange()
     }
 
@@ -1287,16 +1437,16 @@ public final class ExplorerStore: ObservableObject {
         return paneIndex == 0 ? 1 : 0
     }
 
-    private func oppositePaneDestination(for paneIndex: Int) -> (index: Int, url: URL)? {
+    private func oppositePaneDestination(for paneIndex: Int) -> (paneID: PaneID, url: URL)? {
         guard let index = oppositePaneIndex(for: paneIndex),
               panes.indices.contains(index),
               let url = panes[index].location.fileSystemURL?.standardizedFileURL else {
             return nil
         }
-        return (index, url)
+        return (panes[index].id, url)
     }
 
-    private func oppositePaneDestination() -> (index: Int, url: URL)? {
+    private func oppositePaneDestination() -> (paneID: PaneID, url: URL)? {
         oppositePaneDestination(for: activePaneIndex)
     }
 
@@ -1319,8 +1469,8 @@ public final class ExplorerStore: ObservableObject {
         }
     }
 
-    private func refreshGrantedFolderSummaries() {
-        grantedFolderSummaries = bookmarkStore.load().map { grant in
+    private func refreshGrantedFolderSummaries(using grants: [FolderAccessGrant]) {
+        grantedFolderSummaries = grants.map { grant in
             if let access = activeFolderAccesses[grant.id] {
                 return FolderAccessGrantSummary(
                     grant: grant,
@@ -1339,7 +1489,15 @@ public final class ExplorerStore: ObservableObject {
     }
 
     private func loadPersistedFolderGrants() {
-        let grants = bookmarkStore.load()
+        let grants: [FolderAccessGrant]
+        do {
+            grants = try bookmarkStore.load()
+        } catch {
+            grantedFolderSummaries = []
+            recordFolderAccessPersistenceError(error)
+            return
+        }
+
         guard sandboxPolicy.isSandboxed else {
             grantedFolderSummaries = grants.map { FolderAccessGrantSummary(grant: $0) }
             return
@@ -1348,8 +1506,6 @@ public final class ExplorerStore: ObservableObject {
         grantedFolderSummaries = grants.map { grant in
             do {
                 let access = try folderAccessService.resolve(grant)
-                activeFolderAccesses[grant.id] = access
-                unavailableFolderGrantIDs.remove(grant.id)
 
                 var resolvedGrant = grant
                 resolvedGrant.url = access.url
@@ -1357,7 +1513,20 @@ public final class ExplorerStore: ObservableObject {
                     resolvedGrant.bookmarkData = refreshedBookmarkData
                 }
                 resolvedGrant.lastResolvedAt = Date()
-                try? bookmarkStore.save(resolvedGrant)
+                do {
+                    try bookmarkStore.save(resolvedGrant)
+                } catch {
+                    folderAccessService.stopAccessing(access)
+                    unavailableFolderGrantIDs.insert(grant.id)
+                    recordFolderAccessPersistenceError(error)
+                    return FolderAccessGrantSummary(
+                        grant: grant,
+                        availability: .unavailable
+                    )
+                }
+
+                activeFolderAccesses[grant.id] = access
+                unavailableFolderGrantIDs.remove(grant.id)
 
                 return FolderAccessGrantSummary(
                     grant: resolvedGrant,
@@ -1374,10 +1543,13 @@ public final class ExplorerStore: ObservableObject {
         }
     }
 
-    private func stopSupersededFolderAccesses(for grant: FolderAccessGrant) {
+    private func stopSupersededFolderAccesses(
+        for grant: FolderAccessGrant,
+        storedGrants: [FolderAccessGrant]
+    ) {
         let standardizedURL = grant.url.standardizedFileURL
         let supersededIDs = Set(
-            bookmarkStore.load()
+            storedGrants
                 .filter { existing in
                     existing.id == grant.id || existing.url.standardizedFileURL == standardizedURL
                 }
@@ -1396,6 +1568,34 @@ public final class ExplorerStore: ObservableObject {
             }
             unavailableFolderGrantIDs.remove(id)
         }
+    }
+
+    private func grantsReplacing(
+        _ grant: FolderAccessGrant,
+        in storedGrants: [FolderAccessGrant]
+    ) -> [FolderAccessGrant] {
+        var updatedGrants = storedGrants.filter { existing in
+            existing.id != grant.id
+                && existing.url.standardizedFileURL != grant.url.standardizedFileURL
+        }
+        updatedGrants.append(grant)
+        return updatedGrants.sorted { lhs, rhs in
+            lhs.displayPath.localizedStandardCompare(rhs.displayPath) == .orderedAscending
+        }
+    }
+
+    private func recordFolderAccessPersistenceError(_ error: Error) {
+        let message = error.localizedDescription
+        folderAccessPersistenceErrorMessage = message
+        visibleError = .operationFailed(message)
+    }
+
+    private func clearFolderAccessPersistenceError() {
+        if let message = folderAccessPersistenceErrorMessage,
+           visibleError == .operationFailed(message) {
+            visibleError = nil
+        }
+        folderAccessPersistenceErrorMessage = nil
     }
 
     private func addFavorite(url: URL, title: String) {
@@ -1542,8 +1742,10 @@ public final class ExplorerStore: ObservableObject {
         let targetURL = URL(fileURLWithPath: path, isDirectory: true)
             .standardizedFileURL
         do {
-            try await loadLocation(.fileSystem(targetURL), pushHistory: true)
-            clearError()
+            let didLoad = try await loadLocation(.fileSystem(targetURL), pushHistory: true)
+            if didLoad {
+                clearError()
+            }
         } catch let error as ExplorerError {
             present(error)
         } catch {
@@ -1686,6 +1888,8 @@ public final class ExplorerStore: ObservableObject {
     }
 
     private func scheduleSearchIfNeeded() {
+        searchGeneration &+= 1
+        let generation = searchGeneration
         searchTask?.cancel()
         searchTask = nil
 
@@ -1697,25 +1901,39 @@ public final class ExplorerStore: ObservableObject {
 
         let service = fileSearchService
         let criteria = activeSearchCriteria
+        let standardizedRootURL = rootURL.standardizedFileURL
+        let context = SearchContext(
+            generation: generation,
+            tabID: activeTab.id,
+            paneID: activePane.id,
+            rootURL: standardizedRootURL,
+            scope: searchOptions.scope,
+            criteria: criteria,
+            showHiddenFiles: showHiddenFiles
+        )
         let options = DirectoryReadOptions(
             showHiddenFiles: showHiddenFiles,
-            includeFinderTags: !criteria.finderTagQuery.isEmpty
+            includeFinderTags: Self.searchRequiresFinderTags(criteria)
         )
-        let sort = activePane.sort
+        recursiveSearchResults = nil
         isSearching = true
 
         searchTask = Task { [weak self] in
             do {
-                let results = try await service.search(in: rootURL, criteria: criteria, options: options)
+                let results = try await service.search(
+                    in: standardizedRootURL,
+                    criteria: criteria,
+                    options: options
+                )
                 guard !Task.isCancelled else {
                     return
                 }
 
                 await MainActor.run { [weak self] in
-                    guard let self, self.searchQuery == criteria.query, self.searchOptions.scope == .recursive else {
+                    guard let self, self.isCurrentSearchContext(context) else {
                         return
                     }
-                    self.recursiveSearchResults = SortEngine.sorted(results, descriptor: sort)
+                    self.recursiveSearchResults = SortEngine.sorted(results, descriptor: self.activePane.sort)
                     self.isSearching = false
                     self.trimSelectionToVisibleEntries()
                 }
@@ -1723,20 +1941,40 @@ public final class ExplorerStore: ObservableObject {
                 return
             } catch let error as ExplorerError {
                 await MainActor.run { [weak self] in
-                    guard let self else { return }
+                    guard let self, self.isCurrentSearchContext(context) else { return }
                     self.recursiveSearchResults = []
                     self.isSearching = false
                     self.present(error)
                 }
             } catch {
                 await MainActor.run { [weak self] in
-                    guard let self else { return }
+                    guard let self, self.isCurrentSearchContext(context) else { return }
                     self.recursiveSearchResults = []
                     self.isSearching = false
                     self.visibleError = .readFailed(error.localizedDescription)
                 }
             }
         }
+    }
+
+    private static func searchRequiresFinderTags(_ criteria: FileEntrySearchCriteria) -> Bool {
+        !criteria.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !criteria.finderTagQuery.isEmpty
+    }
+
+    private func isCurrentSearchContext(_ context: SearchContext) -> Bool {
+        guard searchGeneration == context.generation,
+              tabs.indices.contains(activeTabIndex),
+              tabs[activeTabIndex].id == context.tabID,
+              panes.indices.contains(activePaneIndex),
+              panes[activePaneIndex].id == context.paneID,
+              panes[activePaneIndex].location.fileSystemURL?.standardizedFileURL == context.rootURL,
+              searchOptions.scope == context.scope,
+              activeSearchCriteria == context.criteria,
+              showHiddenFiles == context.showHiddenFiles else {
+            return false
+        }
+        return true
     }
 
     private func pasteSourceClipboard() -> FileClipboard {
@@ -1768,7 +2006,7 @@ public final class ExplorerStore: ObservableObject {
     }
 
     private func transferSelectedItemsToOppositePane(mode: FileClipboardMode) async throws {
-        let sourcePaneIndex = activePaneIndex
+        let sourcePaneID = activePane.id
         let urls = selectedURLs
         guard !urls.isEmpty else {
             return
@@ -1788,30 +2026,52 @@ public final class ExplorerStore: ObservableObject {
         case .copy:
             let result = try await fileOperationService.copyItems(urls, to: destination.url, progress: reporter)
             if !result.createdURLs.isEmpty {
-                recordUndo(undoAction(.copied(result.createdURLs), from: result))
+                recordUndo(
+                    undoAction(.copied(result.createdURLs), from: result),
+                    ownership: result.undoSourceIdentities
+                )
             }
         case .move:
             let result = try await fileOperationService.moveItems(urls, to: destination.url, progress: reporter)
             if !result.movedItems.isEmpty {
-                recordUndo(undoAction(.moved(result.movedItems), from: result))
+                recordUndo(
+                    undoAction(.moved(result.movedItems), from: result),
+                    ownership: result.undoSourceIdentities
+                )
             }
         }
 
-        try await reloadPanes(at: Set([sourcePaneIndex, destination.index]))
+        try await reloadPanes(ids: Set([sourcePaneID, destination.paneID]))
         await reporter.complete()
     }
 
-    private func reloadPanes(at indexes: Set<Int>) async throws {
-        for index in indexes.sorted() where panes.indices.contains(index) {
-            try await loadLocation(panes[index].location, pushHistory: false, paneIndex: index)
+    private func reloadPanes(ids: Set<PaneID>) async throws {
+        let targets = panes.compactMap { pane -> PaneReloadTarget? in
+            guard ids.contains(pane.id) else { return nil }
+            return PaneReloadTarget(paneID: pane.id, location: pane.location)
+        }
+        for target in targets {
+            try await reloadCapturedPane(target)
         }
     }
 
-    private func recordUndo(_ action: FileUndoAction?) {
+    private func recordUndo(
+        _ action: FileUndoAction?,
+        ownership: [URL: FileSystemPathIdentity.FileSystemEntryIdentity]
+    ) {
         guard let action else {
             return
         }
+        var snapshot = UndoOwnershipSnapshot(identities: [:])
+        for (url, identity) in ownership {
+            snapshot.identities[undoOwnershipKey(for: url)] = identity
+        }
+        undoOwnershipStack.append(snapshot)
         undoStack.append(action)
+    }
+
+    private func undoOwnershipKey(for url: URL) -> String {
+        FileSystemPathIdentity.canonicalPathPreservingLeaf(url).path
     }
 
     private func undoAction(_ action: FileUndoAction, from result: FileOperationResult) -> FileUndoAction {
@@ -1835,48 +2095,245 @@ public final class ExplorerStore: ObservableObject {
         guard let action = undoStack.popLast() else {
             return
         }
+        let ownership = undoOwnershipStack.popLast() ?? UndoOwnershipSnapshot(identities: [:])
 
         do {
-            try await undo(action)
+            try await undo(action, ownership: ownership)
         } catch {
+            undoOwnershipStack.append(ownership)
             undoStack.append(action)
             throw error
         }
     }
 
-    private func undo(_ action: FileUndoAction) async throws {
+    private func undo(_ action: FileUndoAction, ownership: UndoOwnershipSnapshot) async throws {
+        let steps = undoSteps(for: action, ownership: ownership)
+        try preflightUndo(steps)
+
+        var journal: [UndoJournalEntry] = []
+        do {
+            for step in steps {
+                try Task.checkCancellation()
+                switch step {
+                case .trash(let sources):
+                    let expectedIdentities = try Dictionary(
+                        uniqueKeysWithValues: sources.map { source in
+                            guard let expectedIdentity = source.expectedIdentity else {
+                                throw missingUndoOwnershipError(source.url)
+                            }
+                            return (source.url.standardizedFileURL, expectedIdentity)
+                        }
+                    )
+                    let result = try await fileOperationService.moveToTrash(
+                        sources.map(\.url),
+                        expectedIdentities: expectedIdentities
+                    )
+                    guard result.trashedItems.count == sources.count else {
+                        throw ExplorerError.operationFailed("Undo Trash returned an incomplete transaction result.")
+                    }
+                    for (record, source) in zip(result.trashedItems, sources) {
+                        guard let expectedIdentity = source.expectedIdentity else {
+                            throw missingUndoOwnershipError(source.url)
+                        }
+                        journal.append(.trashed(record, expectedIdentity: expectedIdentity))
+                    }
+                case .move(let source, let destination):
+                    guard let expectedIdentity = source.expectedIdentity else {
+                        throw missingUndoOwnershipError(source.url)
+                    }
+                    try restoreItem(
+                        from: source.url,
+                        to: destination,
+                        expectedIdentity: expectedIdentity
+                    )
+                    journal.append(
+                        .moved(
+                            source: source.url,
+                            destination: destination,
+                            expectedIdentity: expectedIdentity
+                        )
+                    )
+                }
+            }
+        } catch {
+            let rollbackFailures = rollbackUndoJournal(journal)
+            guard rollbackFailures.isEmpty else {
+                throw ExplorerError.operationFailed(
+                    "Undo failed (\(error.localizedDescription)) and rollback was incomplete: "
+                        + rollbackFailures.joined(separator: "; ")
+                )
+            }
+            throw error
+        }
+    }
+
+    private func undoSteps(
+        for action: FileUndoAction,
+        ownership: UndoOwnershipSnapshot
+    ) -> [UndoStep] {
+        func owned(_ url: URL) -> OwnedUndoSource {
+            OwnedUndoSource(
+                url: url,
+                expectedIdentity: ownership.identities[undoOwnershipKey(for: url)]
+            )
+        }
+
         switch action {
         case .created(let urls), .copied(let urls), .extracted(let urls), .compressed(let urls):
-            _ = try await fileOperationService.moveToTrash(urls)
+            return [.trash(urls.map(owned))]
         case .moved(let records):
-            for record in records.reversed() {
-                try restoreItem(from: record.destination, to: record.source)
+            return records.reversed().map {
+                .move(source: owned($0.destination), destination: $0.source)
             }
         case .renamed(let record):
-            try restoreItem(from: record.destination, to: record.source)
+            return [.move(source: owned(record.destination), destination: record.source)]
         case .trashed(let records), .restoreReplacements(let records):
-            for record in records {
-                try restoreItem(from: record.trashed, to: record.original)
-            }
+            return records.map { .move(source: owned($0.trashed), destination: $0.original) }
         case .compound(_, let actions):
-            for action in actions {
-                try await undo(action)
+            return actions.flatMap { undoSteps(for: $0, ownership: ownership) }
+        }
+    }
+
+    private func preflightUndo(_ steps: [UndoStep]) throws {
+        var simulatedEntries: [String: SimulatedUndoEntry] = [:]
+
+        func key(for url: URL) -> String {
+            undoOwnershipKey(for: url)
+        }
+
+        func identity(_ url: URL) -> FileSystemPathIdentity.FileSystemEntryIdentity? {
+            if let entry = simulatedEntries[key(for: url)] {
+                switch entry {
+                case .missing:
+                    return nil
+                case .present(let identity):
+                    return identity
+                }
+            }
+            return FileSystemPathIdentity.entryIdentity(url)
+        }
+
+        func requireOwnedIdentity(_ source: OwnedUndoSource) throws -> FileSystemPathIdentity.FileSystemEntryIdentity {
+            guard let expectedIdentity = source.expectedIdentity else {
+                throw missingUndoOwnershipError(source.url)
+            }
+            guard let currentIdentity = identity(source.url) else {
+                throw missingUndoSourceError(source.url)
+            }
+            guard currentIdentity == expectedIdentity else {
+                throw changedUndoSourceError(source.url)
+            }
+            return expectedIdentity
+        }
+
+        for step in steps {
+            switch step {
+            case .trash(let sources):
+                for source in sources {
+                    _ = try requireOwnedIdentity(source)
+                    simulatedEntries[key(for: source.url)] = .missing
+                }
+            case .move(let source, let destination):
+                let expectedIdentity = try requireOwnedIdentity(source)
+                if identity(destination) != nil,
+                   !isAllowedCaseOnlyUndo(source: source.url, destination: destination) {
+                    throw undoDestinationExistsError(destination)
+                }
+                simulatedEntries[key(for: source.url)] = .missing
+                simulatedEntries[key(for: destination)] = .present(expectedIdentity)
             }
         }
     }
 
-    private func restoreItem(from source: URL, to destination: URL) throws {
-        guard FileManager.default.fileExists(atPath: source.path) else {
-            throw ExplorerError.operationFailed("Cannot undo because the item is missing: \(source.path)")
+    private func rollbackUndoJournal(_ journal: [UndoJournalEntry]) -> [String] {
+        var failures: [String] = []
+        for entry in journal.reversed() {
+            let source: URL
+            let destination: URL
+            let expectedIdentity: FileSystemPathIdentity.FileSystemEntryIdentity
+            switch entry {
+            case .trashed(let record, let identity):
+                source = record.trashed
+                destination = record.original
+                expectedIdentity = identity
+            case .moved(let originalSource, let originalDestination, let identity):
+                source = originalDestination
+                destination = originalSource
+                expectedIdentity = identity
+            }
+
+            do {
+                try restoreItem(
+                    from: source,
+                    to: destination,
+                    expectedIdentity: expectedIdentity
+                )
+            } catch {
+                failures.append("\(source.path) -> \(destination.path): \(error.localizedDescription)")
+            }
         }
-        guard !FileManager.default.fileExists(atPath: destination.path) else {
-            throw ExplorerError.operationFailed("Cannot undo because the destination already exists: \(destination.path)")
+        return failures
+    }
+
+    private func restoreItem(
+        from source: URL,
+        to destination: URL,
+        expectedIdentity: FileSystemPathIdentity.FileSystemEntryIdentity
+    ) throws {
+        guard let currentIdentity = FileSystemPathIdentity.entryIdentity(source) else {
+            throw missingUndoSourceError(source)
         }
-        try FileManager.default.createDirectory(
-            at: destination.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try FileManager.default.moveItem(at: source, to: destination)
+        guard currentIdentity == expectedIdentity else {
+            throw changedUndoSourceError(source)
+        }
+        if FileSystemPathIdentity.entryExists(destination),
+           !isAllowedCaseOnlyUndo(source: source, destination: destination) {
+            throw undoDestinationExistsError(destination)
+        }
+        do {
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try FileManager.default.moveItem(at: source, to: destination)
+        } catch {
+            throw ExplorerError.operationFailed(
+                "Cannot undo \(source.path) to \(destination.path): \(error.localizedDescription)"
+            )
+        }
+        guard FileSystemPathIdentity.entryIdentity(destination) == expectedIdentity else {
+            throw ExplorerError.operationFailed(
+                "Undo moved an item but destination ownership could not be verified at \(destination.path); "
+                    + "automatic rollback was not attempted."
+            )
+        }
+    }
+
+    private func isAllowedCaseOnlyUndo(source: URL, destination: URL) -> Bool {
+        do {
+            return try FileSystemPathIdentity.isCaseOnlyRenameOfSameItem(
+                source: source,
+                destination: destination
+            )
+        } catch {
+            return false
+        }
+    }
+
+    private func missingUndoSourceError(_ source: URL) -> ExplorerError {
+        .operationFailed("Cannot undo because the item is missing: \(source.path)")
+    }
+
+    private func missingUndoOwnershipError(_ source: URL) -> ExplorerError {
+        .operationFailed("Cannot undo because recorded ownership is unavailable: \(source.path)")
+    }
+
+    private func changedUndoSourceError(_ source: URL) -> ExplorerError {
+        .operationFailed("Cannot undo because the recorded item changed: \(source.path)")
+    }
+
+    private func undoDestinationExistsError(_ destination: URL) -> ExplorerError {
+        .operationFailed("Cannot undo because the destination already exists: \(destination.path)")
     }
 
     private func calculateSelectedFolderSize() async throws {
@@ -1913,7 +2370,10 @@ public final class ExplorerStore: ObservableObject {
         let reporter = makeOperationReporter(kind: .extractZip, title: operationTitle("Extracting", count: zipURLs.count))
         let result = try await zipExtractor.extract(zipURLs, to: currentURL, progress: reporter)
         if !result.createdURLs.isEmpty {
-            recordUndo(undoAction(.extracted(result.createdURLs), from: result))
+            recordUndo(
+                undoAction(.extracted(result.createdURLs), from: result),
+                ownership: result.undoSourceIdentities
+            )
         }
         await refresh()
         await reporter.complete()
@@ -1935,7 +2395,10 @@ public final class ExplorerStore: ObservableObject {
         let reporter = makeOperationReporter(kind: .compressZip, title: operationTitle("Compressing", count: sourceURLs.count))
         let result = try await zipCompressor.compress(sourceURLs, to: currentURL, progress: reporter)
         if !result.createdURLs.isEmpty {
-            recordUndo(undoAction(.compressed(result.createdURLs), from: result))
+            recordUndo(
+                undoAction(.compressed(result.createdURLs), from: result),
+                ownership: result.undoSourceIdentities
+            )
         }
         await refresh()
         if !result.createdURLs.isEmpty {
@@ -2048,17 +2511,23 @@ public final class ExplorerStore: ObservableObject {
     private func scheduleFinderTagPopulationIfNeeded() {
         cancelFinderTagPopulation()
 
+        let criteria = activeSearchCriteria
         guard searchOptions.scope == .currentFolder,
-              !searchOptions.finderTagQuery.isEmpty,
+              Self.searchRequiresFinderTags(criteria),
               panes.indices.contains(activePaneIndex),
-              !panes[activePaneIndex].location.isArchive else {
+              let rootURL = panes[activePaneIndex].location.fileSystemURL else {
             return
         }
 
         let paneIndex = activePaneIndex
-        let location = panes[paneIndex].location
-        let activeTabID = activeTab.id
-        let tagQuery = searchOptions.finderTagQuery
+        let context = FinderTagPopulationContext(
+            tabID: activeTab.id,
+            paneID: panes[paneIndex].id,
+            rootURL: rootURL.standardizedFileURL,
+            scope: searchOptions.scope,
+            ordinaryQuery: criteria.query,
+            explicitTagQuery: criteria.finderTagQuery
+        )
         let entries = panes[paneIndex].entries
         let finderTagService = finderTagService
         let token = UUID()
@@ -2072,7 +2541,11 @@ public final class ExplorerStore: ObservableObject {
                 guard !Task.isCancelled else {
                     return
                 }
-                tagsByURL[entry.url.standardizedFileURL] = (try? finderTagService.tags(for: entry.url)) ?? entry.finderTags
+                do {
+                    tagsByURL[entry.url.standardizedFileURL] = try finderTagService.tags(for: entry.url)
+                } catch {
+                    tagsByURL[entry.url.standardizedFileURL] = entry.finderTags
+                }
             }
 
             guard !Task.isCancelled else {
@@ -2082,17 +2555,12 @@ public final class ExplorerStore: ObservableObject {
             await MainActor.run { [weak self] in
                 guard let self,
                       self.finderTagPopulationToken == token,
-                      self.tabs.indices.contains(self.activeTabIndex),
-                      self.tabs[self.activeTabIndex].id == activeTabID,
-                      self.activePaneIndex == paneIndex,
-                      self.panes.indices.contains(paneIndex),
-                      self.panes[paneIndex].location == location,
-                      self.searchOptions.scope == .currentFolder,
-                      self.searchOptions.finderTagQuery == tagQuery else {
+                      self.isCurrentFinderTagPopulationContext(context),
+                      let currentPaneIndex = self.panes.firstIndex(where: { $0.id == context.paneID }) else {
                     return
                 }
 
-                self.panes[paneIndex].entries = self.panes[paneIndex].entries.map { entry in
+                self.panes[currentPaneIndex].entries = self.panes[currentPaneIndex].entries.map { entry in
                     guard let tags = tagsByURL[entry.url.standardizedFileURL] else {
                         return entry
                     }
@@ -2102,6 +2570,20 @@ public final class ExplorerStore: ObservableObject {
                 self.finderTagPopulationTask = nil
             }
         }
+    }
+
+    private func isCurrentFinderTagPopulationContext(_ context: FinderTagPopulationContext) -> Bool {
+        guard tabs.indices.contains(activeTabIndex),
+              tabs[activeTabIndex].id == context.tabID,
+              panes.indices.contains(activePaneIndex),
+              panes[activePaneIndex].id == context.paneID,
+              panes[activePaneIndex].location.fileSystemURL?.standardizedFileURL == context.rootURL,
+              searchOptions.scope == context.scope,
+              searchQuery == context.ordinaryQuery,
+              searchOptions.finderTagQuery == context.explicitTagQuery else {
+            return false
+        }
+        return true
     }
 
     private func revealSelectedInFinder() {
@@ -2262,8 +2744,10 @@ public final class ExplorerStore: ObservableObject {
     }
 
     private func loadCurrentDirectory() async {
+        let paneID = activePane.id
+        let location = activePane.location
         do {
-            try await loadLocation(activePane.location, pushHistory: false, paneIndex: activePaneIndex)
+            try await loadLocation(location, pushHistory: false, paneID: paneID)
         } catch let error as ExplorerError {
             present(error)
         } catch {
@@ -2272,9 +2756,10 @@ public final class ExplorerStore: ObservableObject {
     }
 
     private func reloadAllPanes() async {
-        for index in panes.indices {
+        let targets = panes.map { PaneReloadTarget(paneID: $0.id, location: $0.location) }
+        for target in targets {
             do {
-                try await loadLocation(panes[index].location, pushHistory: false, paneIndex: index)
+                try await reloadCapturedPane(target)
             } catch let error as ExplorerError {
                 present(error)
             } catch {
@@ -2284,17 +2769,17 @@ public final class ExplorerStore: ObservableObject {
     }
 
     private func reloadWatchedPanes() async {
-        let targets = panes.indices.compactMap { index -> (Int, PaneLocation)? in
+        let targets = panes.indices.compactMap { index -> PaneReloadTarget? in
             guard let url = watchedDirectoryURL(for: panes[index].location),
                   watchedDirectoryURLs.contains(url) else {
                 return nil
             }
-            return (index, panes[index].location)
+            return PaneReloadTarget(paneID: panes[index].id, location: panes[index].location)
         }
 
-        for (index, location) in targets where panes.indices.contains(index) {
+        for target in targets {
             do {
-                try await loadLocation(location, pushHistory: false, paneIndex: index)
+                try await reloadCapturedPane(target)
             } catch let error as ExplorerError {
                 present(error)
             } catch {
@@ -2303,36 +2788,100 @@ public final class ExplorerStore: ObservableObject {
         }
     }
 
-    private func loadLocation(_ requestedLocation: PaneLocation, pushHistory: Bool, paneIndex: Int? = nil) async throws {
-        let location = canonicalized(requestedLocation)
-        let targetPaneIndex = paneIndex ?? activePaneIndex
-        guard panes.indices.contains(targetPaneIndex) else {
-            return
-        }
+    private struct PaneReloadTarget {
+        var paneID: PaneID
+        var location: PaneLocation
+    }
 
-        panes[targetPaneIndex].isLoading = true
-        defer {
-            if panes.indices.contains(targetPaneIndex) {
-                panes[targetPaneIndex].isLoading = false
-            }
+    private struct PaneLoadCommit {
+        var paneID: PaneID
+        var generation: UInt64
+        var location: PaneLocation
+    }
+
+    @discardableResult
+    private func reloadCapturedPane(_ target: PaneReloadTarget) async throws -> Bool {
+        try await reloadCapturedPaneCommit(target) != nil
+    }
+
+    private func reloadCapturedPaneCommit(_ target: PaneReloadTarget) async throws -> PaneLoadCommit? {
+        guard let paneIndex = panes.firstIndex(where: { $0.id == target.paneID }),
+              canonicalized(panes[paneIndex].location) == canonicalized(target.location) else {
+            return nil
         }
+        return try await loadLocationCommit(target.location, pushHistory: false, paneID: target.paneID)
+    }
+
+    @discardableResult
+    private func loadLocation(
+        _ requestedLocation: PaneLocation,
+        pushHistory: Bool,
+        paneIndex: Int? = nil,
+        paneID requestedPaneID: PaneID? = nil
+    ) async throws -> Bool {
+        try await loadLocationCommit(
+            requestedLocation,
+            pushHistory: pushHistory,
+            paneIndex: paneIndex,
+            paneID: requestedPaneID
+        ) != nil
+    }
+
+    private func loadLocationCommit(
+        _ requestedLocation: PaneLocation,
+        pushHistory: Bool,
+        paneIndex: Int? = nil,
+        paneID requestedPaneID: PaneID? = nil
+    ) async throws -> PaneLoadCommit? {
+        let location = canonicalized(requestedLocation)
+        let targetPaneID: PaneID
+        if let requestedPaneID {
+            guard panes.contains(where: { $0.id == requestedPaneID }) else {
+                return nil
+            }
+            targetPaneID = requestedPaneID
+        } else {
+            let targetPaneIndex = paneIndex ?? activePaneIndex
+            guard panes.indices.contains(targetPaneIndex) else {
+                return nil
+            }
+            targetPaneID = panes[targetPaneIndex].id
+        }
+        let generation = nextPaneLoadGeneration(for: targetPaneID)
+        guard let startingPaneIndex = currentPaneIndex(for: targetPaneID, generation: generation) else {
+            return nil
+        }
+        let shouldShowHiddenFiles = showHiddenFiles
+
+        panes[startingPaneIndex].isLoading = true
 
         let entries: [FileEntry]
-        switch location {
-        case .fileSystem(let url):
-            entries = try await fileSystemService.contentsOfDirectory(
-                at: url,
-                options: DirectoryReadOptions(
-                    showHiddenFiles: showHiddenFiles,
-                    includeFinderTags: false
+        do {
+            switch location {
+            case .fileSystem(let url):
+                entries = try await fileSystemService.contentsOfDirectory(
+                    at: url,
+                    options: DirectoryReadOptions(
+                        showHiddenFiles: shouldShowHiddenFiles,
+                        includeFinderTags: false
+                    )
                 )
-            )
-        case .archive(let archiveLocation):
-            entries = try await archiveBrowser
-                .list(archiveLocation, showHiddenFiles: showHiddenFiles)
-                .map(makeFileEntry)
+            case .archive(let archiveLocation):
+                entries = try await archiveBrowser
+                    .list(archiveLocation, showHiddenFiles: shouldShowHiddenFiles)
+                    .map(makeFileEntry)
+            }
+        } catch {
+            guard let currentPaneIndex = currentPaneIndex(for: targetPaneID, generation: generation) else {
+                return nil
+            }
+            panes[currentPaneIndex].isLoading = false
+            throw error
         }
 
+        guard let targetPaneIndex = currentPaneIndex(for: targetPaneID, generation: generation) else {
+            return nil
+        }
         var pane = panes[targetPaneIndex]
         let didChangeLocation = pane.location != location
         if pushHistory && didChangeLocation {
@@ -2343,6 +2892,7 @@ public final class ExplorerStore: ObservableObject {
         pane.entries = SortEngine.sorted(entries, descriptor: pane.sort)
         pane.selectedURLs = pane.selectedURLs.intersection(visibleURLs(for: pane.entries, paneIndex: targetPaneIndex))
         pane.error = nil
+        pane.isLoading = false
         panes[targetPaneIndex] = pane
 
         if targetPaneIndex == activePaneIndex {
@@ -2359,6 +2909,32 @@ public final class ExplorerStore: ObservableObject {
                 recordRecentFolder(url)
             }
         }
+        return PaneLoadCommit(
+            paneID: targetPaneID,
+            generation: generation,
+            location: location
+        )
+    }
+
+    private func nextPaneLoadGeneration(for paneID: PaneID) -> UInt64 {
+        let generation = (paneLoadGenerations[paneID] ?? 0) &+ 1
+        paneLoadGenerations[paneID] = generation
+        return generation
+    }
+
+    private func currentPaneIndex(for paneID: PaneID, generation: UInt64) -> Int? {
+        guard paneLoadGenerations[paneID] == generation else {
+            return nil
+        }
+        return panes.firstIndex(where: { $0.id == paneID })
+    }
+
+    private func currentPaneIndex(for commit: PaneLoadCommit) -> Int? {
+        guard let paneIndex = currentPaneIndex(for: commit.paneID, generation: commit.generation),
+              canonicalized(panes[paneIndex].location) == canonicalized(commit.location) else {
+            return nil
+        }
+        return paneIndex
     }
 
     private func makeFileEntry(from archiveEntry: ArchiveEntry) -> FileEntry {

@@ -1,10 +1,5 @@
 import Foundation
 
-public struct EventDeletePlan: Equatable {
-    public let eventID: UUID
-    public let notificationIdentifiers: [String]
-}
-
 public struct EventService {
     private let calendar: Calendar
 
@@ -13,6 +8,7 @@ public struct EventService {
     }
 
     public func upcomingEvents(from startDate: Date, events: [CalendarEvent], limit: Int) -> [CalendarEvent] {
+        guard limit > 0 else { return [] }
         let startOfDay = calendar.startOfDay(for: startDate)
         return events
             .filter { calendar.startOfDay(for: $0.endDate) >= startOfDay }
@@ -27,6 +23,7 @@ public struct EventService {
     }
 
     public func upcomingOccurrences(from startDate: Date, events: [CalendarEvent], limit: Int, horizonDays: Int = 90) -> [EventOccurrence] {
+        guard limit > 0 else { return [] }
         let start = calendar.startOfDay(for: startDate)
         let end = calendar.date(byAdding: .day, value: horizonDays, to: start) ?? start
         let interval = DateInterval(start: start, end: end)
@@ -48,16 +45,16 @@ public struct EventService {
     public func search(_ query: String, in events: [CalendarEvent]) -> [CalendarEvent] {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard normalized.isEmpty == false else { return events }
-        return events.filter { event in
-            event.title.lowercased().contains(normalized) ||
-            event.notes.lowercased().contains(normalized)
-        }
-    }
-
-    public func deletePlan(for event: CalendarEvent) -> EventDeletePlan {
-        let identifiers = event.notificationOffsetsDays.map { offset in
-            "event-\(event.id.uuidString.lowercased())-offset-\(offset)"
-        }
-        return EventDeletePlan(eventID: event.id, notificationIdentifiers: identifiers)
+        return events
+            .filter { event in
+                event.title.lowercased().contains(normalized) ||
+                    event.notes.lowercased().contains(normalized)
+            }
+            .sorted {
+                if $0.startDate == $1.startDate {
+                    return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+                }
+                return $0.startDate < $1.startDate
+            }
     }
 }

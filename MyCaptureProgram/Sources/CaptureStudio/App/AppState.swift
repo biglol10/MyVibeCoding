@@ -31,6 +31,8 @@ public final class AppState: ObservableObject {
     @Published public var statusMessage: String?
     @Published public var permissionPrompt: PermissionPrompt?
     @Published public var isGuidePresented: Bool
+    @Published public var isCaptureOperationInProgress: Bool
+    @Published public var isFileOperationInProgress: Bool
     @Published public var isRecordingInProgress: Bool
     @Published public var isHistoryPresented: Bool
     @Published public var historySearchText: String
@@ -42,6 +44,8 @@ public final class AppState: ObservableObject {
         statusMessage: String? = nil,
         permissionPrompt: PermissionPrompt? = nil,
         isGuidePresented: Bool = false,
+        isCaptureOperationInProgress: Bool = false,
+        isFileOperationInProgress: Bool = false,
         isRecordingInProgress: Bool = false,
         isHistoryPresented: Bool = false,
         historySearchText: String = ""
@@ -52,8 +56,14 @@ public final class AppState: ObservableObject {
         self.statusMessage = statusMessage
         self.permissionPrompt = permissionPrompt
         self.isGuidePresented = isGuidePresented
+        self.isCaptureOperationInProgress = isCaptureOperationInProgress
+        self.isFileOperationInProgress = isFileOperationInProgress
         self.isRecordingInProgress = isRecordingInProgress
         self.isHistoryPresented = isHistoryPresented
         self.historySearchText = historySearchText
+    }
+
+    public var isInteractionBlocked: Bool {
+        isCaptureOperationInProgress || isFileOperationInProgress
     }
 }

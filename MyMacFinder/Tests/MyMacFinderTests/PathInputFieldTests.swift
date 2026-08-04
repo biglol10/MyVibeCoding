@@ -149,6 +149,37 @@ final class PathInputFieldTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(textField.currentEditor()).string, "/Users/biglol/Documents")
     }
 
+    func testExternalPathUpdateDoesNotOverwriteAnotherTextFieldsSharedEditor() throws {
+        let field = PathInputField(
+            text: .constant("/Users/biglol"),
+            isFocused: false,
+            onFocusChange: { _ in },
+            onSubmit: { _ in }
+        )
+        let coordinator = field.makeCoordinator()
+        let pathField = NSTextField(frame: NSRect(x: 0, y: 32, width: 320, height: 28))
+        let renameField = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 28))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 96),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView?.addSubview(pathField)
+        window.contentView?.addSubview(renameField)
+        pathField.stringValue = "/Users/biglol"
+        renameField.stringValue = "rename-me.txt"
+        XCTAssertTrue(window.makeFirstResponder(renameField))
+        let renameEditor = try XCTUnwrap(renameField.currentEditor())
+        renameEditor.string = "renamed.txt"
+
+        coordinator.applyTextIfNeeded("/Users/biglol/Documents", to: pathField)
+
+        XCTAssertEqual(pathField.stringValue, "/Users/biglol/Documents")
+        XCTAssertEqual(renameEditor.string, "renamed.txt")
+        XCTAssertTrue(window.firstResponder === renameEditor)
+    }
+
     func testSyncFocusFalseKeepsActiveEditorWithoutClearRequest() throws {
         let field = PathInputField(
             text: .constant("/Users/biglol"),
@@ -196,6 +227,34 @@ final class PathInputFieldTests: XCTestCase {
         coordinator.applyFocusClearIfNeeded(1, to: textField)
 
         XCTAssertNil(textField.currentEditor())
+    }
+
+    func testFocusClearRequestDoesNotResignAnotherTextFieldsSharedEditor() throws {
+        let field = PathInputField(
+            text: .constant("/Users/biglol"),
+            isFocused: false,
+            focusClearSequence: 0,
+            onFocusChange: { _ in },
+            onSubmit: { _ in }
+        )
+        let coordinator = field.makeCoordinator()
+        let pathField = NSTextField(frame: NSRect(x: 0, y: 32, width: 320, height: 28))
+        let renameField = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 28))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 96),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView?.addSubview(pathField)
+        window.contentView?.addSubview(renameField)
+        XCTAssertTrue(window.makeFirstResponder(renameField))
+        let renameEditor = try XCTUnwrap(renameField.currentEditor())
+
+        coordinator.applyFocusClearIfNeeded(1, to: pathField)
+
+        XCTAssertTrue(window.firstResponder === renameEditor)
+        XCTAssertNotNil(renameField.currentEditor())
     }
 
     func testReturnKeyDetectionIgnoresCommandEditingShortcuts() throws {

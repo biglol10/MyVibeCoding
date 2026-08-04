@@ -27,6 +27,7 @@ public struct FileOperationResult: Equatable, Sendable {
     public var trashedItems: [FileTrashRecord]
     public var replacedItems: [FileTrashRecord]
     public var skippedURLs: [URL]
+    var undoSourceIdentities: [URL: FileSystemPathIdentity.FileSystemEntryIdentity] = [:]
 
     public init(
         createdURLs: [URL] = [],

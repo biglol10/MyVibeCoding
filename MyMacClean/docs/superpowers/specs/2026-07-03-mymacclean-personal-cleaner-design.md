@@ -106,13 +106,14 @@ Current behavior to preserve:
 - Exclude currently installed apps and the running MyMacClean bundle.
 - Avoid weak name matches such as generic development packages.
 - Require explicit selection before cleanup.
+- Select or clear an orphan group in one action while keeping protected
+  candidates unselected.
+- Reveal individual leftover candidates in Finder and copy their paths.
 - Remove verified-deleted groups from the UI.
 - Record cleanup receipts.
 
-Improvements in this phase:
+Remaining improvements:
 
-- Add group-level select/deselect controls.
-- Add Finder reveal and copy-path actions.
 - Surface scan coverage limitations when roots are inaccessible.
 - Keep LaunchAgent leftovers manual-review by default.
 
@@ -371,9 +372,7 @@ Current limits:
 Still useful to refine:
 
 - Consistent receipts and report panels.
-- Group-level selection for orphan leftovers.
 - More visible permission/coverage notices.
-- Finder reveal and copy-path actions where missing.
 
 ## Testing Strategy
 

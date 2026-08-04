@@ -18,17 +18,6 @@ Current macOS direction:
 - The native app includes its own macOS foreground app/window collector, idle detection, Chrome/Edge bridge, Safari Automation domain capture, rules editing, reports, and menu bar summary.
 - The Tauri app remains for the cross-platform React/Rust path and Windows continuity.
 
-## Download
-
-- macOS Swift Native personal zip (recommended): [FlowPilot_native_mac_arm64.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.zip)
-- macOS Swift Native DMG: [FlowPilot_native_mac_arm64.dmg](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.dmg)
-- macOS Tauri personal zip: [FlowPilot_personal_mac_arm64.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_personal_mac_arm64.zip)
-- macOS Tauri DMG: [FlowPilot_0.1.0_aarch64.dmg](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_0.1.0_aarch64.dmg)
-- Windows setup: [FlowPilot_0.1.0_x64-setup.exe](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_0.1.0_x64-setup.exe)
-- Windows portable: [FlowPilot-0.1.0-portable.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot-0.1.0-portable.zip)
-
-Current personal macOS packages are ad-hoc signed and not Apple-notarized. For a personal Mac, unzip the native package and open `install-flowpilot-native.command` from Finder. The installer removes quarantine, replaces `/Applications/FlowPilot.app`, verifies the app, and opens it.
-
 ## Development
 
 Install dependencies:
@@ -119,13 +108,6 @@ release/FlowPilot_native_mac_arm64.dmg
 These personal packages are ad-hoc signed and intended for your own Macs only. Use the included
 `install-flowpilot-native.command` to replace `/Applications/FlowPilot.app` and remove quarantine.
 
-Refresh the MyVibeCoding download artifacts:
-
-```bash
-cp release/FlowPilot_native_mac_arm64.zip ../downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.zip
-cp release/FlowPilot_native_mac_arm64.dmg ../downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.dmg
-```
-
 For the Tauri personal package, use:
 
 ```bash
@@ -136,12 +118,6 @@ Expected output:
 
 ```text
 release/FlowPilot_personal_mac_arm64.zip
-```
-
-Refresh the MyVibeCoding Tauri artifact:
-
-```bash
-cp release/FlowPilot_personal_mac_arm64.zip ../downloads/FlowPilot_mac/FlowPilot_personal_mac_arm64.zip
 ```
 
 ## Distribution

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **Status:** Historical implementation plan for the first MVP only. The current app has moved beyond this plan. Real region selection, screenshot capture, screen recording, editing, OCR, quick redact, recording preview, trim-copy export, GIF export, history, presets, smart filenames, floating pins, and result deletion are now covered by later work. Use `README.md` and the source code as the current source of truth.
+> **Status:** Historical implementation plan for the first MVP only. The current app has moved beyond this plan. Rectangle/window/full-screen capture and recording, editing, OCR, quick redact, recording preview, trim-copy export, GIF export, history, presets, smart filenames, floating pins, and result deletion are now covered by later work. Use `README.md`, the current QA checklist, and the source code as the current source of truth.
 
 **Goal:** Build the first native macOS milestone: SwiftUI/AppKit app skeleton, minimal main window, Settings window, persistent settings, customizable shortcuts with reset defaults, file output naming/fallback, and capture coordinator interfaces.
 
@@ -24,7 +24,7 @@ This plan implements the first working foundation from the approved design spec:
 - Output filename and folder fallback model
 - Capture coordinator protocols and a simulated ScreenCaptureKit service
 
-At the MVP phase, this plan was limited to the app foundation and simulated capture coordinator. Later work added real region selection, MP4 recording, annotation rendering, OCR, and recording trim-copy export. Color picker remains future work unless added in source after this note.
+At the MVP phase, this plan was limited to the app foundation and simulated capture coordinator. Later work added rectangle/window/full-screen selection, MP4 recording, annotation rendering, OCR, and recording trim-copy export. Color picker remains future work unless added in source after this note.
 
 ## File Structure
 
@@ -1735,7 +1735,7 @@ swift test
 ## Features
 
 - Native macOS app bundle with a compact Capture / Record first workflow
-- Region screenshot capture and region screen recording
+- Rectangle, window, and full-screen screenshot capture and screen recording
 - Settings, shortcuts, output folders, smart filenames, capture history, presets, and in-app guide
 - Screenshot editing, OCR, quick redaction, save/copy/delete, floating pins
 - Recording preview, trim-copy export, and GIF export

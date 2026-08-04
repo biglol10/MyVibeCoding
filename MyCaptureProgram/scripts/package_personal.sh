@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export PATH="/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="${CAPTURE_STUDIO_APP_NAME:-CaptureStudio}"
@@ -25,11 +24,12 @@ codesign --verify --deep --strict "$APP_BUNDLE"
 cat > "$INSTALLER" <<'INSTALLER_SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
-export PATH="/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_SOURCE="$SCRIPT_DIR/CaptureStudio.app"
 APP_DEST="/Applications/CaptureStudio.app"
+APP_INSTALLING="/Applications/.CaptureStudio.installing.$$.app"
+APP_BACKUP="/Applications/.CaptureStudio.previous.$$.app"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
 if [[ ! -d "$APP_SOURCE" ]]; then
@@ -40,27 +40,57 @@ if [[ ! -d "$APP_SOURCE" ]]; then
 fi
 
 echo "Installing CaptureStudio for this Mac..."
-osascript -e 'tell application "CaptureStudio" to quit' >/dev/null 2>&1 || true
-pkill -x CaptureStudio >/dev/null 2>&1 || true
+if pgrep -x CaptureStudio >/dev/null 2>&1; then
+  echo "CaptureStudio is currently running."
+  echo "Save any open capture or recording, close CaptureStudio, then run this installer again."
+  read -r -p "Press Return to close this installer."
+  exit 1
+fi
 
 echo "Removing download quarantine from the package..."
-xattr -dr com.apple.quarantine "$SCRIPT_DIR" 2>/dev/null || true
-xattr -cr "$APP_SOURCE" 2>/dev/null || true
+xattr -dr com.apple.quarantine "$APP_SOURCE" 2>/dev/null || true
 
 echo "Signing locally for this Mac..."
 codesign --force --deep --sign - "$APP_SOURCE" >/dev/null
 codesign --verify --deep --strict "$APP_SOURCE"
 
 echo "Copying to /Applications..."
+USE_SUDO=0
 if [[ -w "/Applications" ]]; then
-  rm -rf "$APP_DEST"
-  ditto "$APP_SOURCE" "$APP_DEST"
-  xattr -dr com.apple.quarantine "$APP_DEST" 2>/dev/null || true
+  :
 else
-  sudo rm -rf "$APP_DEST"
-  sudo ditto "$APP_SOURCE" "$APP_DEST"
-  sudo xattr -dr com.apple.quarantine "$APP_DEST" 2>/dev/null || true
+  sudo -v
+  USE_SUDO=1
 fi
+
+run_install_command() {
+  if [[ "$USE_SUDO" -eq 1 ]]; then
+    sudo "$@"
+  else
+    "$@"
+  fi
+}
+
+restore_previous_install() {
+  run_install_command rm -rf "$APP_INSTALLING" 2>/dev/null || true
+  if [[ ! -e "$APP_DEST" && -e "$APP_BACKUP" ]]; then
+    run_install_command mv "$APP_BACKUP" "$APP_DEST" 2>/dev/null || true
+  fi
+}
+trap restore_previous_install EXIT
+
+run_install_command rm -rf "$APP_INSTALLING" "$APP_BACKUP"
+run_install_command ditto "$APP_SOURCE" "$APP_INSTALLING"
+if [[ -e "$APP_DEST" ]]; then
+  run_install_command mv "$APP_DEST" "$APP_BACKUP"
+fi
+if ! run_install_command mv "$APP_INSTALLING" "$APP_DEST"; then
+  echo "Installation failed; restoring the previous app."
+  exit 1
+fi
+run_install_command xattr -dr com.apple.quarantine "$APP_DEST" 2>/dev/null || true
+run_install_command rm -rf "$APP_BACKUP"
+trap - EXIT
 
 if [[ -x "$LSREGISTER" ]]; then
   "$LSREGISTER" -f "$APP_DEST" >/dev/null 2>&1 || true
@@ -86,7 +116,7 @@ Use this package only on your own Macs.
 
 1. Double-click "Install CaptureStudio.command".
 2. If macOS blocks the installer script, right-click it and choose Open.
-3. The installer removes the download quarantine, signs the app locally, copies it to /Applications, and opens it.
+3. The installer removes quarantine only from CaptureStudio.app, signs it locally, replaces the app in /Applications with rollback protection, and opens it.
 4. Enable CaptureStudio in System Settings > Privacy & Security > Screen & System Audio Recording.
 
 This personal package is not for public distribution. For a public download site, use scripts/package_release.sh with Developer ID notarization.

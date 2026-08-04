@@ -73,6 +73,28 @@ public final class OrphanFilesViewModel {
         selectedCandidates.reduce(Int64(0)) { $0 + $1.size }
     }
 
+    public func setGroupSelection(_ groupID: OrphanFileGroup.ID, isSelected: Bool) {
+        guard let group = groups.first(where: { $0.id == groupID }) else { return }
+        let groupCandidateIDs = Set(group.candidates.map(\.id))
+        if isSelected {
+            let selectableIDs = Set(group.candidates.filter { !$0.isProtected }.map(\.id))
+            selectedCandidateIDs.formUnion(selectableIDs)
+        } else {
+            selectedCandidateIDs.subtract(groupCandidateIDs)
+        }
+    }
+
+    public func isGroupFullySelected(_ group: OrphanFileGroup) -> Bool {
+        let selectableIDs = group.candidates.filter { !$0.isProtected }.map(\.id)
+        guard !selectableIDs.isEmpty else { return false }
+        return selectableIDs.allSatisfy { selectedCandidateIDs.contains($0) }
+    }
+
+    public func groupSelectionSummary(for group: OrphanFileGroup) -> String {
+        let selectedCount = group.candidates.filter { selectedCandidateIDs.contains($0.id) }.count
+        return "\(selectedCount) of \(group.candidates.count) selected"
+    }
+
     @discardableResult
     public func deleteSelectedLeftovers(
         confirmation: String,

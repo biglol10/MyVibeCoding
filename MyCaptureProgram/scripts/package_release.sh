@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export PATH="/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="${CAPTURE_STUDIO_APP_NAME:-CaptureStudio}"
@@ -60,22 +59,14 @@ if [[ "$IDENTITY_LINE" != *"Developer ID Application:"* && "$DEVELOPER_ID" != De
   exit 2
 fi
 
-NOTARY_ARGS=()
-if [[ -n "$NOTARY_PROFILE" ]]; then
-  NOTARY_ARGS=(--keychain-profile "$NOTARY_PROFILE")
-else
-  APPLE_ID="${CAPTURE_STUDIO_APPLE_ID:-}"
-  TEAM_ID="${CAPTURE_STUDIO_TEAM_ID:-}"
-  APP_SPECIFIC_PASSWORD="${CAPTURE_STUDIO_APP_SPECIFIC_PASSWORD:-}"
-  if [[ -z "$APPLE_ID" || -z "$TEAM_ID" || -z "$APP_SPECIFIC_PASSWORD" ]]; then
-    echo "No notarization credentials provided." >&2
-    echo "Either set CAPTURE_STUDIO_NOTARY_PROFILE after running:" >&2
-    echo "  xcrun notarytool store-credentials capturestudio-notary" >&2
-    echo "or set CAPTURE_STUDIO_APPLE_ID, CAPTURE_STUDIO_TEAM_ID, and CAPTURE_STUDIO_APP_SPECIFIC_PASSWORD." >&2
-    exit 2
-  fi
-  NOTARY_ARGS=(--apple-id "$APPLE_ID" --team-id "$TEAM_ID" --password "$APP_SPECIFIC_PASSWORD")
+if [[ -z "$NOTARY_PROFILE" ]]; then
+  echo "No notarization keychain profile provided." >&2
+  echo "Create one with:" >&2
+  echo "  xcrun notarytool store-credentials capturestudio-notary" >&2
+  echo "Then set CAPTURE_STUDIO_NOTARY_PROFILE=capturestudio-notary." >&2
+  exit 2
 fi
+NOTARY_ARGS=(--keychain-profile "$NOTARY_PROFILE")
 
 echo "Building $APP_NAME ($CONFIGURATION)..."
 BUILD_ARGS=(--package-path "$ROOT_DIR" -c "$CONFIGURATION")

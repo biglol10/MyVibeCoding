@@ -78,7 +78,8 @@ final class DeveloperCacheViewModelTests: XCTestCase {
                 fileRemover: remover,
                 deletionProtectionPolicy: UserFileCleanupPolicy(allowedRoots: [derivedData]).deletionProtectionPolicy
             ),
-            receiptStore: store
+            receiptStore: store,
+            runningApplicationMonitor: RunningApplicationMonitor(isRunning: { _ in false })
         )
 
         await viewModel.scan()

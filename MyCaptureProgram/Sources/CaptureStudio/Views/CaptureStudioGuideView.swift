@@ -58,8 +58,9 @@ struct CaptureStudioGuideView: View {
                 Spacer()
 
                 Button {
-                    SettingsTab.selectDefaultOpenTab()
-                    openSettings()
+                    AppKitSettingsWindowPresenter.shared.present {
+                        openSettings()
+                    }
                 } label: {
                     Label("Settings", systemImage: "gearshape")
                 }

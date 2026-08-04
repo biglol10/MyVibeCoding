@@ -15,7 +15,8 @@ final class ExplorerSortSettingsTests: XCTestCase {
 
     override func tearDownWithError() throws {
         if let tempDirectory {
-            try? FileManager.default.removeItem(at: tempDirectory)
+            try FileManager.default.removeItem(at: tempDirectory)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: tempDirectory.path))
         }
     }
 
@@ -101,6 +102,49 @@ final class ExplorerSortSettingsTests: XCTestCase {
         )
         XCTAssertEqual(store.activePane.entries.map(\.name), ["a.txt", "longer.txt"])
     }
+
+    @MainActor
+    func testRecursiveSearchCompletionUsesLatestPaneSort() async throws {
+        let searchService = PendingSortSearchService()
+        let store = ExplorerStore(
+            initialURL: tempDirectory,
+            settingsStore: settingsStore,
+            directoryWatcher: nil,
+            fileSearchService: searchService
+        )
+        await store.loadInitialDirectory()
+        store.setSearchScope(.recursive)
+        store.setSearchQuery("txt")
+        await searchService.waitUntilStarted()
+
+        store.sortActivePane(by: .name)
+        await searchService.finish(with: [
+            makeSearchEntry(name: "a.txt"),
+            makeSearchEntry(name: "z.txt")
+        ])
+        await store.waitForSearchForTesting()
+
+        XCTAssertEqual(store.activePane.sort.direction, .descending)
+        XCTAssertEqual(store.activePaneVisibleEntries.map(\.name), ["z.txt", "a.txt"])
+    }
+
+    private func makeSearchEntry(name: String) -> FileEntry {
+        let url = tempDirectory.appendingPathComponent(name)
+        return FileEntry(
+            url: url,
+            name: name,
+            kind: .file,
+            typeDescription: "File",
+            fileExtension: url.pathExtension,
+            size: nil,
+            dateModified: nil,
+            dateCreated: nil,
+            dateAccessed: nil,
+            isHidden: false,
+            isDirectoryLike: false,
+            isReadable: true
+        )
+    }
 }
 
 private final class InMemoryExplorerSettingsStore: ExplorerSettingsStoring {
@@ -112,5 +156,38 @@ private final class InMemoryExplorerSettingsStore: ExplorerSettingsStoring {
 
     func save(_ settings: ExplorerSettings) {
         self.settings = settings
+    }
+}
+
+private actor PendingSortSearchService: FileSearchServicing {
+    private var startedContinuation: CheckedContinuation<Void, Never>?
+    private var resultContinuation: CheckedContinuation<[FileEntry], Error>?
+    private var didStart = false
+
+    func search(
+        in rootURL: URL,
+        criteria: FileEntrySearchCriteria,
+        options: DirectoryReadOptions
+    ) async throws -> [FileEntry] {
+        didStart = true
+        startedContinuation?.resume()
+        startedContinuation = nil
+        return try await withCheckedThrowingContinuation { continuation in
+            resultContinuation = continuation
+        }
+    }
+
+    func waitUntilStarted() async {
+        if didStart {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            startedContinuation = continuation
+        }
+    }
+
+    func finish(with entries: [FileEntry]) {
+        resultContinuation?.resume(returning: entries)
+        resultContinuation = nil
     }
 }

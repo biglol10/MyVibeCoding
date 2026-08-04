@@ -38,13 +38,13 @@ final class AppBundleIconTests: XCTestCase {
             .appendingPathComponent("install_app.sh")
         let script = try String(contentsOf: scriptURL, encoding: .utf8)
 
-        XCTAssertTrue(script.contains("Contents/Resources"))
-        XCTAssertTrue(script.contains("AppIcon.icns"))
+        XCTAssertTrue(script.contains("RESOURCES_DIR=\"$CONTENTS_DIR/Resources\""))
+        XCTAssertTrue(script.contains("cp \"$ICON_SOURCE\" \"$RESOURCES_DIR/AppIcon.icns\""))
         XCTAssertTrue(script.contains("CFBundleIconFile"))
         XCTAssertTrue(script.contains("<string>AppIcon.icns</string>"))
         XCTAssertTrue(script.contains("CFBundleIconName"))
         XCTAssertTrue(script.contains("lsregister"))
-        XCTAssertTrue(script.contains("touch \"$APP_BUNDLE\""))
+        XCTAssertTrue(script.contains("touch \"$STAGED_APP\""))
     }
 
     func testInstallScriptUsesStableCodeSigningIdentityForTCC() throws {
@@ -55,7 +55,7 @@ final class AppBundleIconTests: XCTestCase {
 
         XCTAssertTrue(script.contains("CAPTURE_STUDIO_CODE_SIGN_IDENTITY"))
         XCTAssertTrue(script.contains("security find-identity -v -p codesigning"))
-        XCTAssertTrue(script.contains("codesign --force --deep --sign \"$SIGN_IDENTITY\" \"$APP_BUNDLE\""))
+        XCTAssertTrue(script.contains("codesign --force --deep --sign \"$SIGN_IDENTITY\" \"$STAGED_APP\""))
     }
 
     func testPackageLinksAVKitForRecordingPreviewPlayback() throws {

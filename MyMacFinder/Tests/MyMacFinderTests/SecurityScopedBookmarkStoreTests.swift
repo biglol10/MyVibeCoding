@@ -3,6 +3,7 @@ import XCTest
 @testable import MyMacFinder
 
 final class SecurityScopedBookmarkStoreTests: XCTestCase {
+    private let storageKey = "MyMacFinder.SecurityScopedBookmarks"
     private var defaults: UserDefaults!
     private var suiteName: String!
 
@@ -31,10 +32,10 @@ final class SecurityScopedBookmarkStoreTests: XCTestCase {
         )
 
         try store.save(grant)
-        XCTAssertEqual(store.load(), [grant])
+        XCTAssertEqual(try store.load(), [grant])
 
-        store.remove(id: grant.id)
-        XCTAssertEqual(store.load(), [])
+        try store.remove(id: grant.id)
+        XCTAssertEqual(try store.load(), [])
     }
 
     func testResetRemovesAllGrants() throws {
@@ -44,7 +45,7 @@ final class SecurityScopedBookmarkStoreTests: XCTestCase {
 
         store.reset()
 
-        XCTAssertEqual(store.load(), [])
+        XCTAssertEqual(try store.load(), [])
     }
 
     func testSavingSameURLReplacesExistingGrant() throws {
@@ -53,9 +54,42 @@ final class SecurityScopedBookmarkStoreTests: XCTestCase {
         try store.save(FolderAccessGrant(url: url, bookmarkData: Data([1]), createdAt: Date(timeIntervalSince1970: 1)))
         try store.save(FolderAccessGrant(url: url, bookmarkData: Data([9]), createdAt: Date(timeIntervalSince1970: 2)))
 
-        let grants = store.load()
+        let grants = try store.load()
         XCTAssertEqual(grants.count, 1)
         XCTAssertEqual(grants[0].url, url.standardizedFileURL)
         XCTAssertEqual(grants[0].bookmarkData, Data([9]))
+    }
+
+    func testLoadingCorruptedDataThrowsWithoutChangingStoredBytes() {
+        let corruptedData = Data("not-valid-bookmark-json".utf8)
+        defaults.set(corruptedData, forKey: storageKey)
+        let store = SecurityScopedBookmarkStore(defaults: defaults)
+
+        XCTAssertThrowsError(try store.load()) { error in
+            XCTAssertEqual(error as? SecurityScopedBookmarkStoreError, .corruptedData)
+        }
+        XCTAssertEqual(defaults.data(forKey: storageKey), corruptedData)
+    }
+
+    func testSavingWithCorruptedExistingDataThrowsWithoutOverwritingStoredBytes() {
+        let corruptedData = Data("not-valid-bookmark-json".utf8)
+        defaults.set(corruptedData, forKey: storageKey)
+        let store = SecurityScopedBookmarkStore(defaults: defaults)
+        let newGrant = FolderAccessGrant(
+            url: URL(fileURLWithPath: "/tmp/new-grant", isDirectory: true),
+            bookmarkData: Data([7, 8, 9])
+        )
+
+        XCTAssertThrowsError(try store.save(newGrant))
+        XCTAssertEqual(defaults.data(forKey: storageKey), corruptedData)
+    }
+
+    func testRemovingWithCorruptedExistingDataThrowsWithoutOverwritingStoredBytes() {
+        let corruptedData = Data("not-valid-bookmark-json".utf8)
+        defaults.set(corruptedData, forKey: storageKey)
+        let store = SecurityScopedBookmarkStore(defaults: defaults)
+
+        XCTAssertThrowsError(try store.remove(id: FolderAccessGrantID()))
+        XCTAssertEqual(defaults.data(forKey: storageKey), corruptedData)
     }
 }

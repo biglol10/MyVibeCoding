@@ -21,6 +21,18 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(state.areaType, .rectangle)
     }
 
+    @MainActor
+    func testInteractionIsBlockedByCaptureOrFileOperation() {
+        let state = AppState()
+
+        XCTAssertFalse(state.isInteractionBlocked)
+        state.isFileOperationInProgress = true
+        XCTAssertTrue(state.isInteractionBlocked)
+        state.isFileOperationInProgress = false
+        state.isCaptureOperationInProgress = true
+        XCTAssertTrue(state.isInteractionBlocked)
+    }
+
     func testEditorDocumentDirtyState() {
         let document = EditorDocument(kind: .screenshot, createdAt: Date(timeIntervalSince1970: 10))
 

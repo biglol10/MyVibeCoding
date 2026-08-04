@@ -88,12 +88,14 @@ struct FileTableView: NSViewRepresentable {
     var currentLocation: PaneLocation
     var currentSort: EntrySortDescriptor
     var showsPathColumn: Bool
+    var paneID: PaneID = PaneID()
     var inlineRenameRequest: InlineRenameRequest?
     var requestsInitialFocus: Bool = false
     var onFocus: () -> Void = {}
     var onSelectionChange: (Set<URL>) -> Void
     var onOpen: (URL) -> Void
-    var onRename: (String) -> Void = { _ in }
+    var onRename: (PaneID, URL, String) -> Void = { _, _, _ in }
+    var onInlineRenameEnd: (UUID) -> Void = { _ in }
     var onCommand: (ExplorerCommand) -> Void
     var isCommandEnabled: (ExplorerCommand) -> Bool = { _ in true }
     var openWithApplications: [OpenWithApplication] = []
@@ -140,8 +142,8 @@ struct FileTableView: NSViewRepresentable {
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         context.coordinator.parent = self
         context.coordinator.syncColumns()
-        context.coordinator.resetScrollIfLocationChanged(in: nsView)
         context.coordinator.reloadDataIfNeeded()
+        context.coordinator.resetScrollIfLocationChanged(in: nsView)
         context.coordinator.applySelection(selectedURLs)
         context.coordinator.syncSortDescriptor()
         context.coordinator.syncInlineRenameRequest()
@@ -191,8 +193,15 @@ struct FileTableView: NSViewRepresentable {
         private weak var activeInlineRenameField: InlineRenameTextField?
         private weak var activeInlineRenameSourceTextField: NSTextField?
         private var activeInlineRenameOriginalName: String?
+        private var activeInlineRenameContext: ActiveInlineRenameContext?
         private var isPreparingInlineRenameEditor = false
+        private var pendingInlineRenameEndWhilePreparing = false
         private static let inlineRenameFieldAccessibilityIdentifier = "FileTableInlineRenameField"
+
+        private struct ActiveInlineRenameContext {
+            var request: InlineRenameRequest
+            var isExternallyRequested: Bool
+        }
 
         private struct IconCacheKey: Hashable {
             var kind: FileEntryKind
@@ -320,21 +329,64 @@ struct FileTableView: NSViewRepresentable {
                   field === activeInlineRenameField else {
                 return
             }
-            guard !isPreparingInlineRenameEditor else {
+            if isPreparingInlineRenameEditor,
+               !field.didRequestCommit,
+               !field.didCancelRename {
+                pendingInlineRenameEndWhilePreparing = true
                 return
             }
 
+            completeInlineRename(field)
+        }
+
+        func control(
+            _ control: NSControl,
+            textView: NSTextView,
+            doCommandBy commandSelector: Selector
+        ) -> Bool {
+            guard let field = control as? InlineRenameTextField,
+                  field === activeInlineRenameField else {
+                return false
+            }
+
+            switch commandSelector {
+            case #selector(NSResponder.cancelOperation(_:)):
+                field.cancelRename()
+                return true
+            case #selector(NSResponder.insertNewline(_:)),
+                 #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+                field.commitRename()
+                return true
+            default:
+                return false
+            }
+        }
+
+        private func completeInlineRename(_ field: InlineRenameTextField) {
+            guard field === activeInlineRenameField else {
+                return
+            }
             let didCancel = field.didCancelRename
             let originalName = activeInlineRenameOriginalName
+            let renameContext = activeInlineRenameContext
             let newName = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             removeInlineRenameEditor()
 
+            if let renameContext {
+                parent.onInlineRenameEnd(renameContext.request.id)
+            }
+
             guard !didCancel,
                   !newName.isEmpty,
-                  newName != originalName else {
+                  newName != originalName,
+                  let renameContext else {
                 return
             }
-            parent.onRename(newName)
+            parent.onRename(
+                renameContext.request.paneID,
+                renameContext.request.url,
+                newName
+            )
         }
 
         func publishSelection() {
@@ -505,7 +557,15 @@ struct FileTableView: NSViewRepresentable {
 
             renderedLocation = parent.currentLocation
             pruneIconCache(keeping: parent.entries)
-            scrollView.contentView.scroll(to: .zero)
+            if let tableView, tableView.numberOfRows > 0 {
+                tableView.scrollToBeginningOfDocument(nil)
+            } else {
+                scrollView.contentView.scroll(
+                    to: NSPoint(x: 0, y: -scrollView.contentView.contentInsets.top)
+                )
+            }
+            let topOrigin = scrollView.contentView.bounds.origin
+            scrollView.contentView.scroll(to: NSPoint(x: 0, y: topOrigin.y))
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
 
@@ -566,14 +626,32 @@ struct FileTableView: NSViewRepresentable {
         }
 
         func syncInlineRenameRequest() {
+            if let context = activeInlineRenameContext,
+               shouldCancelActiveInlineRename(context) {
+                cancelActiveInlineRename()
+            }
+
             guard let request = parent.inlineRenameRequest else {
                 return
             }
             guard handledInlineRenameRequestID != request.id else {
                 return
             }
-            handledInlineRenameRequestID = request.id
-            beginInlineRename(for: request.url)
+            if beginInlineRename(request: request, isExternallyRequested: true) {
+                handledInlineRenameRequestID = request.id
+                return
+            }
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      let currentRequest = self.parent.inlineRenameRequest,
+                      currentRequest.id == request.id,
+                      self.handledInlineRenameRequestID != request.id,
+                      self.beginInlineRename(request: currentRequest, isExternallyRequested: true) else {
+                    return
+                }
+                self.handledInlineRenameRequestID = request.id
+            }
         }
 
         @discardableResult
@@ -581,14 +659,21 @@ struct FileTableView: NSViewRepresentable {
             guard let entry = currentSelectedEntries.first else {
                 return false
             }
-            return beginInlineRename(for: entry.url)
+            return beginInlineRename(
+                request: InlineRenameRequest(paneID: parent.paneID, url: entry.url),
+                isExternallyRequested: false
+            )
         }
 
         @discardableResult
-        private func beginInlineRename(for url: URL) -> Bool {
+        private func beginInlineRename(
+            request: InlineRenameRequest,
+            isExternallyRequested: Bool
+        ) -> Bool {
             guard let tableView else {
                 return false
             }
+            let url = request.url
             guard let row = parent.entries.firstIndex(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) else {
                 return false
             }
@@ -617,7 +702,11 @@ struct FileTableView: NSViewRepresentable {
                 name: entryName,
                 cell: cell,
                 sourceTextField: sourceTextField,
-                tableView: tableView
+                tableView: tableView,
+                context: ActiveInlineRenameContext(
+                    request: request,
+                    isExternallyRequested: isExternallyRequested
+                )
             )
             return true
         }
@@ -626,11 +715,13 @@ struct FileTableView: NSViewRepresentable {
             name: String,
             cell: NSTableCellView,
             sourceTextField: NSTextField,
-            tableView: NSTableView
+            tableView: NSTableView,
+            context: ActiveInlineRenameContext
         ) {
             removeInlineRenameEditor()
 
             let field = InlineRenameTextField(string: name)
+            field.completionFirstResponder = tableView
             field.setAccessibilityIdentifier(Self.inlineRenameFieldAccessibilityIdentifier)
             field.delegate = self
             field.font = sourceTextField.font
@@ -658,6 +749,7 @@ struct FileTableView: NSViewRepresentable {
             activeInlineRenameField = field
             activeInlineRenameSourceTextField = sourceTextField
             activeInlineRenameOriginalName = name
+            activeInlineRenameContext = context
 
             isPreparingInlineRenameEditor = true
             focusInlineRenameField(field, in: tableView, name: name)
@@ -670,7 +762,33 @@ struct FileTableView: NSViewRepresentable {
             activeInlineRenameField = nil
             activeInlineRenameSourceTextField = nil
             activeInlineRenameOriginalName = nil
+            activeInlineRenameContext = nil
             isPreparingInlineRenameEditor = false
+            pendingInlineRenameEndWhilePreparing = false
+        }
+
+        private func shouldCancelActiveInlineRename(_ context: ActiveInlineRenameContext) -> Bool {
+            guard context.request.paneID == parent.paneID,
+                  parent.entries.contains(where: {
+                      $0.url.standardizedFileURL == context.request.url.standardizedFileURL
+                  }) else {
+                return true
+            }
+            guard context.isExternallyRequested else {
+                return false
+            }
+            return parent.inlineRenameRequest?.id != context.request.id
+        }
+
+        private func cancelActiveInlineRename() {
+            guard let field = activeInlineRenameField else {
+                removeInlineRenameEditor()
+                return
+            }
+            field.cancelRename()
+            if activeInlineRenameField === field {
+                removeInlineRenameEditor()
+            }
         }
 
         private func focusInlineRenameField(_ field: InlineRenameTextField, in tableView: NSTableView, name: String) {
@@ -704,8 +822,14 @@ struct FileTableView: NSViewRepresentable {
                         self.focusInlineRenameField(field, in: tableView, name: name)
                     }
 
-                    if index == 0 {
+                    if index == delays.count - 1 {
                         self.isPreparingInlineRenameEditor = false
+                        if self.pendingInlineRenameEndWhilePreparing {
+                            self.pendingInlineRenameEndWhilePreparing = false
+                            if field.currentEditor() == nil {
+                                self.completeInlineRename(field)
+                            }
+                        }
                     }
                 }
             }
@@ -1313,6 +1437,8 @@ struct FileTableView: NSViewRepresentable {
     @MainActor
     final class InlineRenameTextField: NSTextField {
         private(set) var didCancelRename = false
+        private(set) var didRequestCommit = false
+        weak var completionFirstResponder: NSView?
 
         override var acceptsFirstResponder: Bool {
             true
@@ -1329,13 +1455,24 @@ struct FileTableView: NSViewRepresentable {
         override func keyDown(with event: NSEvent) {
             switch event.keyCode {
             case 36, 76:
-                window?.makeFirstResponder(superview)
+                didRequestCommit = true
+                window?.makeFirstResponder(completionFirstResponder)
             case 53:
                 didCancelRename = true
-                window?.makeFirstResponder(superview)
+                window?.makeFirstResponder(completionFirstResponder)
             default:
                 super.keyDown(with: event)
             }
+        }
+
+        func cancelRename() {
+            didCancelRename = true
+            window?.makeFirstResponder(completionFirstResponder)
+        }
+
+        func commitRename() {
+            didRequestCommit = true
+            window?.makeFirstResponder(completionFirstResponder)
         }
     }
 }

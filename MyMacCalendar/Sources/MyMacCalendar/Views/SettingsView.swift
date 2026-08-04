@@ -70,9 +70,7 @@ struct SettingsView: View {
 
     private var settings: AppSettings {
         if let existing = settingsRows.first { return existing }
-        let created = AppSettings()
-        modelContext.insert(created)
-        return created
+        return AppSettings()
     }
 
     private var generalTab: some View {
@@ -121,7 +119,7 @@ struct SettingsView: View {
                 }
                 SettingsDivider()
                 SettingsRow("표시할 일정 수") {
-                    Picker("", selection: binding(\.floatingWidgetVisibleCount)) {
+                    Picker("", selection: visibleCountBinding) {
                         Text("3개").tag(3)
                         Text("5개").tag(5)
                         Text("8개").tag(8)
@@ -142,8 +140,8 @@ struct SettingsView: View {
                         ForEach(reminderPresets) { preset in
                             ReminderTimePresetButton(
                                 title: preset.title,
-                                isSelected: settings.defaultReminderHour == preset.hour &&
-                                    settings.defaultReminderMinute == preset.minute
+                                isSelected: settingsSnapshot.defaultReminderHour == preset.hour &&
+                                    settingsSnapshot.defaultReminderMinute == preset.minute
                             ) {
                                 setReminderTime(hour: preset.hour, minute: preset.minute)
                             }
@@ -219,7 +217,7 @@ struct SettingsView: View {
         SettingsPage {
             SettingsSection("달력") {
                 SettingsRow("달력 밀도") {
-                    Picker("", selection: binding(\.calendarDensity)) {
+                    Picker("", selection: densityBinding) {
                         Text("여유 있게").tag("comfortable")
                         Text("촘촘하게").tag("compact")
                     }
@@ -246,11 +244,15 @@ struct SettingsView: View {
     }
 
     private var opacityPercentText: String {
-        "\(Int((floatingWidgetOpacityValue * 100).rounded()))%"
+        "\(SettingsValidation.opacityPercent(floatingWidgetOpacityValue))%"
     }
 
     private var floatingWidgetOpacityValue: Double {
-        floatingWidgetOpacityDraft ?? settings.floatingWidgetOpacity
+        SettingsValidation.opacity(floatingWidgetOpacityDraft ?? settings.floatingWidgetOpacity)
+    }
+
+    private var settingsSnapshot: AppSettingsSnapshot {
+        SettingsValidation.snapshot(settings)
     }
 
     private var floatingWidgetOpacityDraftBinding: Binding<Double> {
@@ -264,8 +266,8 @@ struct SettingsView: View {
         Binding(
             get: {
                 var components = Calendar.current.dateComponents([.year, .month, .day], from: Date())
-                components.hour = settings.defaultReminderHour
-                components.minute = settings.defaultReminderMinute
+                components.hour = settingsSnapshot.defaultReminderHour
+                components.minute = settingsSnapshot.defaultReminderMinute
                 return Calendar.current.date(from: components) ?? Date()
             },
             set: { date in
@@ -282,6 +284,30 @@ struct SettingsView: View {
         )
     }
 
+    private var visibleCountBinding: Binding<Int> {
+        Binding(
+            get: { settingsSnapshot.floatingWidgetVisibleCount },
+            set: { value in
+                settings.floatingWidgetVisibleCount = SettingsValidation.visibleCount(value)
+                if saveModelContext("설정을 저장할 수 없습니다.") {
+                    notifyAppSettingsChanged()
+                }
+            }
+        )
+    }
+
+    private var densityBinding: Binding<String> {
+        Binding(
+            get: { settingsSnapshot.calendarDensity },
+            set: { value in
+                settings.calendarDensity = SettingsValidation.density(value)
+                if saveModelContext("설정을 저장할 수 없습니다.") {
+                    notifyAppSettingsChanged()
+                }
+            }
+        )
+    }
+
     private var settingsErrorBinding: Binding<Bool> {
         Binding(
             get: { settingsErrorMessage != nil },
@@ -295,14 +321,23 @@ struct SettingsView: View {
 
     private func ensureSettings() {
         if settingsRows.isEmpty {
-            modelContext.insert(AppSettings())
-            saveModelContext("설정을 만들 수 없습니다.")
+            let created = AppSettings()
+            modelContext.insert(created)
+            do {
+                try PersistenceTransaction.save(context: modelContext)
+            } catch {
+                settingsErrorMessage = error.localizedDescription.isEmpty
+                    ? "설정을 만들 수 없습니다."
+                    : error.localizedDescription
+            }
+        } else if SettingsValidation.repair(settings) {
+            saveModelContext("손상된 설정을 복구할 수 없습니다.")
         }
     }
 
     private func setReminderTime(hour: Int, minute: Int) {
-        settings.defaultReminderHour = min(max(hour, 0), 23)
-        settings.defaultReminderMinute = min(max(minute, 0), 59)
+        settings.defaultReminderHour = SettingsValidation.reminderHour(hour)
+        settings.defaultReminderMinute = SettingsValidation.reminderMinute(minute)
         saveModelContext("알림 시간을 저장할 수 없습니다.")
     }
 
@@ -316,7 +351,7 @@ struct SettingsView: View {
 
     private func commitFloatingWidgetOpacity() {
         guard let draft = floatingWidgetOpacityDraft else { return }
-        settings.floatingWidgetOpacity = min(max(draft, 0.4), 1.0)
+        settings.floatingWidgetOpacity = SettingsValidation.opacity(draft)
         floatingWidgetOpacityDraft = nil
         if saveModelContext("위젯 투명도를 저장할 수 없습니다.") {
             notifyAppSettingsChanged()
@@ -324,15 +359,20 @@ struct SettingsView: View {
     }
 
     private func setLaunchAtLogin(_ isEnabled: Bool) {
+        guard let settings = settingsRows.first else {
+            settingsErrorMessage = "설정을 먼저 불러와야 합니다."
+            return
+        }
         do {
-            try LoginItemController.setEnabled(isEnabled)
-            settings.launchAtLogin = isEnabled
-            if saveModelContext("자동 실행 설정을 저장할 수 없습니다.") {
-                notifyAppSettingsChanged()
-            }
+            try ExternalStateTransaction.apply(
+                previous: LoginItemController.isEnabled,
+                desired: isEnabled,
+                applyExternal: LoginItemController.setEnabled,
+                mutateLocal: { settings.launchAtLogin = $0 },
+                saveLocal: { try PersistenceTransaction.save(context: modelContext) }
+            )
+            notifyAppSettingsChanged()
         } catch {
-            settings.launchAtLogin = false
-            saveModelContext("자동 실행 설정을 되돌릴 수 없습니다.")
             settingsErrorMessage = error.localizedDescription
         }
     }
@@ -341,8 +381,9 @@ struct SettingsView: View {
         let normalizedTitle = newHolidayTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         let year = Calendar.current.component(.year, from: newHolidayDate)
         modelContext.insert(HolidayRecord(date: Calendar.current.startOfDay(for: newHolidayDate), title: normalizedTitle, source: .manual, year: year))
-        newHolidayTitle = ""
-        saveModelContext("휴일을 저장할 수 없습니다.")
+        if saveModelContext("휴일을 저장할 수 없습니다.") {
+            newHolidayTitle = ""
+        }
     }
 
     private func fetchOnlineHolidays() {
@@ -406,8 +447,13 @@ struct SettingsView: View {
 
     @discardableResult
     private func saveModelContext(_ fallbackMessage: String) -> Bool {
+        guard let settings = settingsRows.first else {
+            settingsErrorMessage = fallbackMessage
+            return false
+        }
+        SettingsValidation.repair(settings)
         do {
-            try modelContext.save()
+            try PersistenceTransaction.save(context: modelContext)
             return true
         } catch {
             settingsErrorMessage = error.localizedDescription.isEmpty ? fallbackMessage : error.localizedDescription

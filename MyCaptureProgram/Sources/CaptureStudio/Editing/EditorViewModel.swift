@@ -235,7 +235,11 @@ public final class EditorViewModel: ObservableObject {
             return
         }
 
+        let originalLayers = document.layers
         mutate(&document)
+        if document.layers != originalLayers {
+            document.ocrResult = nil
+        }
         appState.currentDocument = document
     }
 

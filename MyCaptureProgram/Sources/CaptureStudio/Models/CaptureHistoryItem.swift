@@ -1,4 +1,32 @@
+import Darwin
 import Foundation
+
+public struct CaptureFileIdentity: Codable, Equatable, Sendable {
+    public let device: UInt64
+    public let inode: UInt64
+
+    public static func existingFile(at url: URL) throws -> CaptureFileIdentity {
+        var information = stat()
+        let result = url.withUnsafeFileSystemRepresentation { path -> Int32 in
+            guard let path else {
+                errno = EINVAL
+                return -1
+            }
+            return Darwin.lstat(path, &information)
+        }
+        guard result == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        return CaptureFileIdentity(
+            device: UInt64(information.st_dev),
+            inode: UInt64(information.st_ino)
+        )
+    }
+
+    public func matchesExistingFile(at url: URL) -> Bool {
+        (try? Self.existingFile(at: url)) == self
+    }
+}
 
 public struct CaptureHistoryItem: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
@@ -7,6 +35,7 @@ public struct CaptureHistoryItem: Codable, Equatable, Identifiable, Sendable {
     public var fileURL: URL
     public var title: String
     public var detail: String
+    public var fileIdentity: CaptureFileIdentity?
     public var thumbnailURL: URL?
     public var thumbnailData: Data?
     public var sourceApplication: String?
@@ -19,6 +48,7 @@ public struct CaptureHistoryItem: Codable, Equatable, Identifiable, Sendable {
         fileURL: URL,
         title: String,
         detail: String,
+        fileIdentity: CaptureFileIdentity? = nil,
         thumbnailURL: URL? = nil,
         thumbnailData: Data? = nil,
         sourceApplication: String? = nil,
@@ -30,6 +60,7 @@ public struct CaptureHistoryItem: Codable, Equatable, Identifiable, Sendable {
         self.fileURL = fileURL
         self.title = title
         self.detail = detail
+        self.fileIdentity = fileIdentity
         self.thumbnailURL = thumbnailURL
         self.thumbnailData = thumbnailData
         self.sourceApplication = sourceApplication
@@ -43,6 +74,7 @@ public struct CaptureHistoryItem: Codable, Equatable, Identifiable, Sendable {
         case fileURL
         case title
         case detail
+        case fileIdentity
         case thumbnailURL
         case sourceApplication
         case windowTitle
@@ -56,6 +88,7 @@ public struct CaptureHistoryItem: Codable, Equatable, Identifiable, Sendable {
         fileURL = try container.decode(URL.self, forKey: .fileURL)
         title = try container.decode(String.self, forKey: .title)
         detail = try container.decode(String.self, forKey: .detail)
+        fileIdentity = try container.decodeIfPresent(CaptureFileIdentity.self, forKey: .fileIdentity)
         thumbnailURL = try container.decodeIfPresent(URL.self, forKey: .thumbnailURL)
         thumbnailData = nil
         sourceApplication = try container.decodeIfPresent(String.self, forKey: .sourceApplication)
@@ -70,6 +103,7 @@ public struct CaptureHistoryItem: Codable, Equatable, Identifiable, Sendable {
         try container.encode(fileURL, forKey: .fileURL)
         try container.encode(title, forKey: .title)
         try container.encode(detail, forKey: .detail)
+        try container.encodeIfPresent(fileIdentity, forKey: .fileIdentity)
         try container.encodeIfPresent(thumbnailURL, forKey: .thumbnailURL)
         try container.encodeIfPresent(sourceApplication, forKey: .sourceApplication)
         try container.encodeIfPresent(windowTitle, forKey: .windowTitle)

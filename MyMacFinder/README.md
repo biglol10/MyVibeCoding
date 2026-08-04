@@ -56,6 +56,7 @@ MyMacFinder는 macOS Finder를 Windows 파일 탐색기와 ForkLift에 가까운
 - Sidebar favorite, recent folder, mounted volume, 경로 입력의 파일 상태 확인은 백그라운드 경로 상태 서비스로 처리
 - 파일 작업 컨텍스트 메뉴와 단축키 동작
 - Rename은 `F2`, 메뉴, 컨텍스트 메뉴에서 별도 alert 없이 선택 행의 Name cell을 바로 편집
+- 경로 입력창과 inline rename은 AppKit shared field editor를 서로 침범하지 않으며, 기존 파일/폴더와 새 폴더 생성 직후 rename에서 Return은 commit, Escape는 cancel로 동작
 - Dual pane에서 `F5`는 선택 항목을 반대편 pane의 현재 폴더로 복사하고, `F6`는 반대편 pane으로 이동하며 양쪽 pane 목록을 갱신
 - 경로 입력창의 `cmd`, `terminal`, `code .`, `open .` 명령 해석
 - `cmd` / `terminal`은 Terminal 실행 요청 후 MyMacFinder를 유지하고, Terminal completion error를 앱 오류로 표시하지 않음
@@ -65,18 +66,26 @@ MyMacFinder는 macOS Finder를 Windows 파일 탐색기와 ForkLift에 가까운
 - Open in VS Code는 LaunchServices bundle id로 앱을 찾고, 앱 위치를 찾지 못하면 하드코딩된 후보 경로 대신 사용자 셸의 `code` 명령으로 fallback
 - Settings의 기본 정렬 변경은 현재 pane뿐 아니라 열려 있는 비활성 tab에도 적용
 - 폴더 이동 시 table scroll position을 좌상단으로 초기화해서 이전 폴더의 가로/세로 스크롤이 새 폴더에 남지 않음
+- AppKit의 실제 문서 시작 좌표를 사용해 폴더/ZIP 이동 직후 첫 행이 column header 뒤에 가려지지 않음
 - 폴더를 자기 하위 경로로 copy/move/paste/drop 하는 edge case 차단
+- destination의 parent symlink까지 canonical path로 검사해 symlink를 통한 자기 하위 copy/move/drop 우회를 차단하고, source 자체가 symlink인 정상 이동/복사는 leaf symlink를 보존
 - 같은 폴더에 같은 이름으로 copy할 때 원본을 replace하지 않고 `copy` 이름으로 분기
+- case-insensitive volume의 case-only rename과 Undo를 filesystem identity로 검증하며, 실패 cleanup이 원본을 partial destination으로 오인해 삭제하지 않음
+- 새 폴더, rename, move, duplicate/copy 결과는 작업이 실제로 소유한 filesystem identity만 Undo ownership으로 기록하고, 공개 경로가 작업 직후 교체되면 해당 교체 항목을 소유물로 오인하지 않음
 - 충돌 처리, replace 실패 rollback, Undo, 대용량 작업 progress banner
 - 일반 파일 복사는 byte manifest 기반 진행률을 표시하고, 단일 대용량 파일도 스트리밍 복사 중 중간 진행률/취소를 처리하며 Finder tag/xattr/ACL/resource fork 계열 metadata를 보존
+- copy와 ZIP extraction은 UUID staging에서 완성한 전체 tree snapshot을 확인한 뒤 공개하며, rollback은 공개 경로를 고유한 `0700` quarantine으로 먼저 이동한 다음 identity와 전체 tree를 재검증해서 외부 교체 파일을 삭제하지 않음
 - 휴지통 이동 중 일부 항목 처리 후 후속 항목이 실패하면 이미 이동한 항목을 원래 위치로 복구
 - 휴지통 rollback이 실패하면 실패 경로를 사용자 오류로 노출해서 조용한 데이터 잔존을 피함
+- compound Undo는 모든 단계를 사전 검증하고, 중간 실패나 취소 시 이미 완료한 변경을 역순 rollback하며 rollback 불완전 상태를 명시적으로 표시
 - Inspector 폴더 크기 계산은 백그라운드에서 실행해 큰 폴더 선택 시 메인 UI 정지를 줄임
 - Back/Forward 대상 로드 실패 시 현재 위치와 history stack을 유지하고 오류를 표시
+- pane별 load generation과 검색 generation으로 느린 이전 요청이 최신 위치, 목록, 검색 결과, 정렬, 오류, loading, history를 덮어쓰지 못하게 차단
 - 파일 목록 아이콘은 파일 경로별 동기 `fileExists`/`NSWorkspace.icon(forFile:)` 조회 없이 metadata 기반 아이콘을 캐시
 - 파일 목록에서 URL 순서가 같은 metadata-only 변경은 전체 table reload 대신 변경 행만 갱신
 - 권한 안내, 선택 폴더 grant 저장/초기화, sandboxed launch 시 persisted grant resolve와 stale/unavailable 표시
-- Settings > Privacy & Access는 전용 설정 뷰에서 sandbox 상태, 폴더 grant empty/list 상태, remove/reset, Privacy Settings 이동을 표시
+- security-scoped bookmark 손상 시 원본 보존, stale refresh 실패 access 정리, 저장 실패 시 기존 grant 유지
+- Settings > Privacy & Access는 sandbox 상태, grant 목록, 영속화 오류 경고, remove/reset, Privacy Settings 이동을 표시
 - 외부에서 Finder tag 변경 후 Refresh로 table과 inspector 동기화
 
 ## 요구사항
@@ -171,12 +180,16 @@ GitHub Actions CI도 루트 `.github/workflows/ci.yml`에서 `swift test --enabl
 
 - 파일 시스템 listing, hidden file, symlink, Finder tag lazy loading/background current-folder filtering/read fallback, 항목별 metadata 실패 skip
 - 파일 작업 copy/move/rename/duplicate/trash, source preflight, conflict decision, replace rollback, trash partial rollback, rollback failure surfacing
+- case-only rename 성공/실패 원본 보존, strict filesystem identity, hard-link 오판 방지, case-only Undo
 - 파일 작업/ZIP 작업/외부 앱 실행 오류 분류
 - copy/move descendant guard, same-folder copy naming, rename separator validation
 - copy byte progress, single-file streaming progress, mid-copy cancellation cleanup, extended attribute metadata preservation
 - drag and drop pasteboard/validator/store flow, descendant drop guard, archive-backed drag 차단
 - undo action과 undo command
-- 정렬, 검색, 고급 검색, Finder tag 검색, 태그 편집 후 필터/selection 동기화, 탭별 검색 상태 복원
+- transactional compound Undo preflight/rollback/rollback-incomplete 처리
+- 정렬, 검색, 고급 검색, Finder tag 검색, 태그 편집 후 필터/selection 동기화, 탭별 검색 상태 복원, stale recursive search 차단
+- recursive search symlink 비진입, root/descendant 권한 구분, unreadable directory skip, cancellation 전파
+- pane load generation, 제거된 secondary pane의 late completion, Back/Forward 중 active pane 전환 경쟁 상태
 - ZIP 탐색, 압축, 압축 해제
 - invalid/unsafe ZIP extraction side-effect 방지, unsafe archive entry path filtering, extraction partial folder cleanup
 - preview content loader/policy: 텍스트 판별, byte limit, Smart/Text Only/Off mode, 큰 visual file thumbnail skip, main-thread read 방지, stale read cancellation, binary fallback, read error fallback
@@ -186,7 +199,7 @@ GitHub Actions CI도 루트 `.github/workflows/ci.yml`에서 `swift test --enabl
 - directory watcher 기반 active/visible pane refresh, ZIP host 변경 시 archive pane refresh
 - path input command resolver, Terminal fire-and-forget launch, empty-area Open in Terminal routing, Open With menu routing, VS Code bundle lookup/user-shell command fallback, external app launcher duplicate-completion guard
 - permission guidance, security-scoped bookmark store, persisted grant resolution/access lifecycle
-- AppKit table bridge, inline rename request/edit commit, column sizing, location-change scroll reset, supported-column sort affordance, content-aware row whitespace context menu, context menu command availability, responder-chain shortcuts, F5/F6 opposite-pane commands, system pasteboard file copy/paste
+- AppKit table bridge, shared field editor 격리, 기존 파일/폴더 및 새 폴더 inline rename Return commit/Escape cancel, column sizing, location-change scroll reset, supported-column sort affordance, content-aware row whitespace context menu, context menu command availability, responder-chain shortcuts, F5/F6 opposite-pane commands, system pasteboard file copy/paste
 - metadata-based table row icon caching
 - metadata-only table row reload
 - inspector model, thumbnail/Quick Look wiring, folder size background execution
@@ -208,6 +221,8 @@ docs/qa/path-command-open-with-manual-qa.md
 docs/qa/inspector-preview-manual-qa.md
 docs/qa/regression-audit-2026-06-29.md
 docs/qa/e2e-ui-ux-audit-2026-06-30.md
+docs/qa/2026-07-22-rename-filesystem-safety-verification.md
+docs/qa/2026-08-04-full-feature-audit.md
 ```
 
 ## 프로젝트 구조
@@ -238,6 +253,8 @@ scripts/package_personal.sh
 - 텍스트 preview는 Inspector 반응성을 위해 기본 64KB까지만 읽으며, Settings에서 16KB/64KB/256KB/1MB 중 선택할 수 있습니다. Smart mode에서는 큰 visual 파일의 inline thumbnail 생성을 건너뜁니다. 전체 파일 확인은 Open 또는 Quick Look을 사용하세요.
 - 네트워크 볼륨은 mounted volume으로 탐색할 수 있지만, SMB/NFS 연결을 새로 생성하는 전용 UI는 없습니다.
 - Finder Tags는 macOS resource value 기반이라 파일 시스템이나 볼륨에 따라 지원되지 않을 수 있습니다.
+- Redo, Spotlight index/content 검색, Windows식 접이형 Group By UI는 아직 제공하지 않습니다.
+- ZIP Quick Look 임시 추출물의 lifecycle cleanup은 후속 보강 대상입니다. 상세 검증 경계는 `docs/qa/2026-08-04-full-feature-audit.md`를 참고하세요.
 
 ## 개발 메모
 
@@ -245,11 +262,11 @@ scripts/package_personal.sh
 
 ```bash
 swift test --enable-code-coverage
-swift build
+swift build -Xswiftc -warnings-as-errors
 git diff --check
 ./scripts/build_app.sh
 ./scripts/verify-app-icon.sh
 ./scripts/package_personal.sh
 ```
 
-최근 검증 기준으로 `swift test --enable-code-coverage`는 382 tests / 0 failures로 통과했습니다. `swift build`, `git diff --check`, CI YAML parse, `./scripts/build_app.sh`, `./scripts/verify-app-icon.sh`, `./scripts/package_personal.sh`, `unzip -t dist/MyMacFinder-personal-mac.zip`, `codesign --verify --deep --strict --verbose=2 build/MyMacFinder.app`도 통과했고, 개인 설치 zip은 `dist/MyMacFinder-personal-mac.zip`에 생성됩니다. 최근 수동 QA에서는 `build/MyMacFinder.app`을 직접 실행해 기본 파일 탐색 화면과 Settings 창 실행을 확인했습니다.
+2026-08-04 최신 검증에서 `swift test --enable-code-coverage`는 508 tests / 0 failures, `swift build -Xswiftc -warnings-as-errors`는 경고 없이 통과했습니다. release 앱 번들, strict codesign, 아이콘, 개인 설치 ZIP 무결성도 통과했습니다. 별도 QA bundle ID와 UUID 임시 디렉터리에서 navigation, search, tabs, dual pane copy/Undo, inline rename, 새 폴더, context menu, ZIP 탐색, 숨김 파일, Favorites, 외부 변경 watcher, preview를 실제 UI로 확인했습니다. 손상된 bookmark 데이터는 앱 시작 후에도 보존되고 Settings 경고와 명시적 Reset으로만 제거되는 것도 격리된 UserDefaults namespace에서 확인했습니다. 탐색 후 첫 행이 header 뒤에 가려지던 AppKit scroll 문제도 실제 release 앱에서 수정 확인했고, stale bookmark access cleanup은 회귀 테스트로 보강했습니다. QA fixture와 앱 번들은 전부 제거했습니다. 같은 release를 `/Applications/MyMacFinder.app`에 안전 교체한 뒤 서명, 실행 파일 해시, 실제 실행 경로까지 재확인했습니다. 전체 기능별 자동/수동 검증 경계와 남은 위험은 `docs/qa/2026-08-04-full-feature-audit.md`에 기록되어 있습니다.

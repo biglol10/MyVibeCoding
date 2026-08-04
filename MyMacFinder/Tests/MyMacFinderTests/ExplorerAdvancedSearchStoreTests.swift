@@ -15,7 +15,8 @@ final class ExplorerAdvancedSearchStoreTests: XCTestCase {
 
     override func tearDownWithError() throws {
         if let tempDirectory {
-            try? FileManager.default.removeItem(at: tempDirectory)
+            try FileManager.default.removeItem(at: tempDirectory)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: tempDirectory.path))
         }
     }
 
@@ -113,6 +114,69 @@ final class ExplorerAdvancedSearchStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testOrdinaryCurrentFolderQueryMatchesFinderTag() async throws {
+        let taggedFile = tempDirectory.appendingPathComponent("Notes.txt")
+        try "notes".write(to: taggedFile, atomically: true, encoding: .utf8)
+        let tagService = ThreadRecordingFinderTagService(tagsByURL: [
+            taggedFile.standardizedFileURL: [FinderTag("Work")]
+        ])
+        let store = ExplorerStore(
+            initialURL: tempDirectory,
+            settingsStore: settingsStore,
+            directoryWatcher: nil,
+            finderTagService: tagService
+        )
+        await store.loadInitialDirectory()
+
+        store.setSearchQuery("work")
+        await store.waitForFinderTagPopulationForTesting()
+
+        XCTAssertEqual(store.activePaneVisibleEntries.map(\.name), ["Notes.txt"])
+        XCTAssertEqual(tagService.recordedWasMainThread, false)
+    }
+
+    @MainActor
+    func testOrdinaryRecursiveQueryMatchesFinderTag() async throws {
+        let nested = tempDirectory.appendingPathComponent("Nested", isDirectory: true)
+        let taggedFile = nested.appendingPathComponent("Notes.txt")
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try "notes".write(to: taggedFile, atomically: true, encoding: .utf8)
+        try FinderTagService().setTags([FinderTag("Work")], for: taggedFile)
+        let store = ExplorerStore(
+            initialURL: tempDirectory,
+            settingsStore: settingsStore,
+            directoryWatcher: nil
+        )
+        await store.loadInitialDirectory()
+
+        store.setSearchScope(.recursive)
+        store.setSearchQuery("work")
+        await store.waitForSearchForTesting()
+
+        XCTAssertEqual(store.activePaneVisibleEntries.map(\.name), ["Notes.txt"])
+    }
+
+    @MainActor
+    func testOrdinaryRecursiveQueryRequestsFinderTagsFromSearchService() async throws {
+        let searchService = RecordingSearchOptionsService()
+        let store = ExplorerStore(
+            initialURL: tempDirectory,
+            settingsStore: settingsStore,
+            directoryWatcher: nil,
+            fileSearchService: searchService
+        )
+        await store.loadInitialDirectory()
+
+        store.setSearchScope(.recursive)
+        store.setSearchQuery("work")
+        await store.waitForSearchForTesting()
+
+        let requests = await searchService.requests
+        XCTAssertEqual(requests.last?.criteria.query, "work")
+        XCTAssertEqual(requests.last?.options.includeFinderTags, true)
+    }
+
+    @MainActor
     func testAdvancedTagFilterAppliesToRecursiveResults() async throws {
         let nested = tempDirectory.appendingPathComponent("Nested", isDirectory: true)
         try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
@@ -166,4 +230,23 @@ private final class ThreadRecordingFinderTagService: FinderTagServicing, @unchec
     }
 
     func setTags(_ tags: [FinderTag], for url: URL) throws {}
+}
+
+private actor RecordingSearchOptionsService: FileSearchServicing {
+    struct Request: Sendable {
+        var rootURL: URL
+        var criteria: FileEntrySearchCriteria
+        var options: DirectoryReadOptions
+    }
+
+    private(set) var requests: [Request] = []
+
+    func search(
+        in rootURL: URL,
+        criteria: FileEntrySearchCriteria,
+        options: DirectoryReadOptions
+    ) async throws -> [FileEntry] {
+        requests.append(Request(rootURL: rootURL, criteria: criteria, options: options))
+        return []
+    }
 }

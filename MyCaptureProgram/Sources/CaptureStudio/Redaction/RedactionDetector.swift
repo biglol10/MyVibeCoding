@@ -24,6 +24,14 @@ public struct RedactionCandidate: Equatable, Identifiable, Sendable {
 }
 
 public struct RedactionDetector {
+    private static let patterns: [(String, RedactionCandidate.Kind)] = [
+        ("[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}", .email),
+        ("\\b\\d{8,}\\b", .longNumber),
+        ("(\\+?\\d[\\d\\-\\s()]{7,}\\d)", .phone),
+        ("https?://[^\\s]+|[A-Z0-9.-]+\\.[A-Z]{2,}", .url),
+        ("[A-Z0-9_-]{20,}", .longToken)
+    ]
+
     public init() {}
 
     public func detect(in result: OCRResult) -> [RedactionCandidate] {
@@ -33,64 +41,47 @@ public struct RedactionDetector {
     }
 
     private func candidates(for observation: OCRObservation) -> [RedactionCandidate] {
-        var candidates: [RedactionCandidate] = []
-        var acceptedRanges: [NSRange] = []
-        appendMatches(pattern: "[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}", kind: .email, observation: observation, acceptedRanges: &acceptedRanges, candidates: &candidates)
-        appendMatches(pattern: "\\b\\d{8,}\\b", kind: .longNumber, observation: observation, acceptedRanges: &acceptedRanges, candidates: &candidates)
-        appendMatches(pattern: "(\\+?\\d[\\d\\-\\s()]{7,}\\d)", kind: .phone, observation: observation, acceptedRanges: &acceptedRanges, candidates: &candidates)
-        appendMatches(pattern: "https?://[^\\s]+|[A-Z0-9.-]+\\.[A-Z]{2,}", kind: .url, observation: observation, acceptedRanges: &acceptedRanges, candidates: &candidates)
-        appendMatches(pattern: "[A-Z0-9_-]{20,}", kind: .longToken, observation: observation, acceptedRanges: &acceptedRanges, candidates: &candidates)
-        return candidates
-    }
-
-    private func appendMatches(
-        pattern: String,
-        kind: RedactionCandidate.Kind,
-        observation: OCRObservation,
-        acceptedRanges: inout [NSRange],
-        candidates: inout [RedactionCandidate]
-    ) {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
-            return
-        }
-
-        let text = observation.text
-        let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        for match in regex.matches(in: text, range: range) {
-            guard !acceptedRanges.contains(where: { NSIntersectionRange($0, match.range).length > 0 }) else {
-                continue
+        Self.textMatches(in: observation.text).compactMap { match in
+            guard let swiftRange = Range(match.range, in: observation.text) else {
+                return nil
             }
-
-            guard let swiftRange = Range(match.range, in: text) else {
-                continue
-            }
-
-            acceptedRanges.append(match.range)
-            candidates.append(
-                RedactionCandidate(
-                    text: String(text[swiftRange]),
-                    kind: kind,
-                    boundingBox: boundingBox(for: match.range, in: observation)
-                )
+            return RedactionCandidate(
+                text: String(observation.text[swiftRange]),
+                kind: match.kind,
+                boundingBox: boundingBox(for: match.range, in: observation)
             )
         }
     }
 
-    private func boundingBox(for matchRange: NSRange, in observation: OCRObservation) -> CGRect {
-        let textLength = max(1, (observation.text as NSString).length)
-        let startRatio = CGFloat(matchRange.location) / CGFloat(textLength)
-        let widthRatio = CGFloat(matchRange.length) / CGFloat(textLength)
-        let horizontalPadding = min(4, observation.boundingBox.height * 0.15)
-        let minX = observation.boundingBox.minX + observation.boundingBox.width * startRatio
-        let width = observation.boundingBox.width * widthRatio
-        let paddedMinX = max(observation.boundingBox.minX, minX - horizontalPadding)
-        let paddedMaxX = min(observation.boundingBox.maxX, minX + width + horizontalPadding)
-
-        return CGRect(
-            x: paddedMinX,
-            y: observation.boundingBox.minY,
-            width: max(1, paddedMaxX - paddedMinX),
-            height: observation.boundingBox.height
-        ).integral
+    static func textMatches(in text: String) -> [RedactionTextMatch] {
+        var matches: [RedactionTextMatch] = []
+        var acceptedRanges: [NSRange] = []
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        for (pattern, kind) in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+                continue
+            }
+            for match in regex.matches(in: text, range: range) {
+                guard !acceptedRanges.contains(where: { NSIntersectionRange($0, match.range).length > 0 }) else {
+                    continue
+                }
+                acceptedRanges.append(match.range)
+                matches.append(RedactionTextMatch(range: match.range, kind: kind))
+            }
+        }
+        return matches
     }
+
+    private func boundingBox(for matchRange: NSRange, in observation: OCRObservation) -> CGRect {
+        if let exactRangeBox = observation.textRangeBoxes.first(where: { $0.range == matchRange }) {
+            return exactRangeBox.boundingBox.integral
+        }
+
+        return observation.boundingBox.integral
+    }
+}
+
+struct RedactionTextMatch: Equatable, Sendable {
+    let range: NSRange
+    let kind: RedactionCandidate.Kind
 }

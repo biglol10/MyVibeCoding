@@ -63,6 +63,34 @@ final class CaptureCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testAutoSaveFailurePreservesCapturedScreenshotAsUnsavedDocument() async {
+        let appState = AppState()
+        let settingsStore = makeSettingsStore("screenshotAutoSaveFailure")
+        let missingDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        settingsStore.update { settings in
+            settings.screenshotFolderPath = missingDirectory.path
+            settings.automaticallySaveScreenshots = true
+        }
+        let service = MockScreenshotService()
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: settingsStore,
+            screenshotService: service,
+            fileOutputService: FileOutputService(),
+            selectionService: MockSelectionService()
+        )
+
+        await coordinator.startNewCapture()
+
+        XCTAssertEqual(appState.currentDocument?.kind, .screenshot)
+        XCTAssertEqual(appState.currentDocument?.data, service.pngData)
+        XCTAssertNil(appState.currentDocument?.fileURL)
+        XCTAssertTrue(appState.currentDocument?.isDirty ?? false)
+        XCTAssertTrue(appState.statusMessage?.contains("captured but could not be saved") ?? false)
+    }
+
+    @MainActor
     func testScreenshotSelectionCancelReturnsToInitialState() async {
         let appState = AppState()
         let coordinator = CaptureCoordinator(
@@ -469,9 +497,44 @@ final class CaptureCoordinatorTests: XCTestCase {
 
         await coordinator.startNewCapture()
 
-        XCTAssertEqual(recordingService.lastOutputURL?.deletingLastPathComponent().standardizedFileURL, temporaryDirectory.standardizedFileURL)
+        XCTAssertNotEqual(recordingService.lastOutputURL?.deletingLastPathComponent().standardizedFileURL, temporaryDirectory.standardizedFileURL)
         XCTAssertTrue(appState.currentDocument?.fileURL?.lastPathComponent.hasSuffix(".mp4") ?? false)
+        XCTAssertEqual(appState.currentDocument?.fileURL?.deletingLastPathComponent().standardizedFileURL, temporaryDirectory.standardizedFileURL)
+        if let temporaryOutputURL = recordingService.lastOutputURL {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: temporaryOutputURL.path))
+        }
         XCTAssertEqual(recordingService.lastSelection, selectionService.selection)
+    }
+
+    @MainActor
+    func testAutoSaveFailurePreservesCapturedRecordingAsUnsavedTemporaryDocument() async {
+        let appState = AppState(captureMode: .record)
+        let settingsStore = makeSettingsStore("recordingAutoSaveFailure")
+        let missingDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        settingsStore.update { settings in
+            settings.recordingFolderPath = missingDirectory.path
+            settings.automaticallySaveRecordings = true
+        }
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: settingsStore,
+            screenshotService: MockScreenshotService(),
+            recordingService: MockRecordingService(),
+            selectionService: MockSelectionService(),
+            delaySleeper: MockDelaySleeper()
+        )
+
+        await coordinator.startNewCapture()
+
+        XCTAssertEqual(appState.currentDocument?.kind, .recording)
+        XCTAssertTrue(appState.currentDocument?.isDirty ?? false)
+        if let temporaryURL = appState.currentDocument?.fileURL {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: temporaryURL.path))
+        } else {
+            XCTFail("Expected the completed temporary recording to be preserved")
+        }
+        XCTAssertTrue(appState.statusMessage?.contains("captured but could not be saved") ?? false)
     }
 
     @MainActor
@@ -630,7 +693,7 @@ final class CaptureCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testRecordingHidesAppWindowWhileSelectingAndRecordingWhenEnabled() async {
+    func testRecordingRestoresAppAfterSelectionSoStopControlRemainsAvailable() async {
         let events = CaptureVisibilityEventLog()
         let appState = AppState(captureMode: .record)
         let settingsStore = makeSettingsStore("hideDuringRecording")
@@ -651,7 +714,7 @@ final class CaptureCoordinatorTests: XCTestCase {
 
         await coordinator.startScreenRecording()
 
-        XCTAssertEqual(events.values, ["hide", "select", "record", "restore"])
+        XCTAssertEqual(events.values, ["hide", "select", "restore", "record"])
     }
 
     @MainActor
@@ -678,7 +741,7 @@ final class CaptureCoordinatorTests: XCTestCase {
 
         XCTAssertNil(appState.currentDocument)
         XCTAssertEqual(appState.statusMessage, "Recording stopped.")
-        XCTAssertEqual(events.values, ["hide", "select", "record-stopped", "restore"])
+        XCTAssertEqual(events.values, ["hide", "select", "restore", "record-stopped"])
     }
 
     @MainActor
@@ -703,7 +766,7 @@ final class CaptureCoordinatorTests: XCTestCase {
 
         await coordinator.startScreenRecording()
 
-        XCTAssertEqual(events.values, ["hide", "select", "sleep:2", "record", "restore"])
+        XCTAssertEqual(events.values, ["hide", "select", "restore", "sleep:2", "record"])
     }
 
     @MainActor
@@ -1087,7 +1150,7 @@ private final class MockFileRevealService: FileRevealServicing {
 private final class MockFileTrashService: FileTrashServicing {
     var trashedURLs: [URL] = []
 
-    func trash(_ url: URL) throws {
+    func trash(_ url: URL, expectedIdentity: CaptureFileIdentity?) throws {
         trashedURLs.append(url)
     }
 }

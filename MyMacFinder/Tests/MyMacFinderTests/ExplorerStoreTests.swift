@@ -13,7 +13,8 @@ final class ExplorerStoreTests: XCTestCase {
 
     override func tearDownWithError() throws {
         if let tempDirectory {
-            try? FileManager.default.removeItem(at: tempDirectory)
+            try FileManager.default.removeItem(at: tempDirectory)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: tempDirectory.path))
         }
     }
 
@@ -255,6 +256,36 @@ final class ExplorerStoreTests: XCTestCase {
         XCTAssertTrue(store.activePane.entries.contains { $0.name == "new-name.txt" })
         XCTAssertFalse(store.activePane.entries.contains { $0.name == "old-name.txt" })
         XCTAssertEqual(store.activePane.selectedEntries.first?.name, "new-name.txt")
+    }
+
+    @MainActor
+    func testRenameSelectedRenamesSingleSelectedFolder() async throws {
+        let folder = tempDirectory.appendingPathComponent("Old Folder", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let store = ExplorerStore(initialURL: tempDirectory, directoryWatcher: nil)
+        await store.refresh()
+        store.updateSelection([folder.standardizedFileURL])
+
+        await store.renameSelected(to: "New Folder")
+
+        XCTAssertTrue(store.activePane.entries.contains { $0.name == "New Folder" })
+        XCTAssertFalse(store.activePane.entries.contains { $0.name == "Old Folder" })
+        XCTAssertEqual(store.activePane.selectedEntries.first?.name, "New Folder")
+    }
+
+    @MainActor
+    func testNewFolderCanBeRenamedImmediatelyAfterCreation() async throws {
+        let store = ExplorerStore(initialURL: tempDirectory, directoryWatcher: nil)
+        await store.refresh()
+
+        await store.perform(.newFolder)
+        let createdURL = try XCTUnwrap(store.inlineRenameRequest?.url)
+        XCTAssertEqual(store.activePane.selectedURLs, [createdURL])
+        await store.renameSelected(to: "Project Files")
+
+        XCTAssertTrue(store.activePane.entries.contains { $0.name == "Project Files" })
+        XCTAssertFalse(store.activePane.entries.contains { $0.name == "Untitled Folder" })
+        XCTAssertEqual(store.activePane.selectedEntries.first?.name, "Project Files")
     }
 
     @MainActor

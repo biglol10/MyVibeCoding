@@ -17,24 +17,17 @@ public enum FileDropValidator {
             throw ExplorerError.notDirectory(destination.path)
         }
 
+        let canonicalDestination = FileSystemPathIdentity.canonicalDirectory(destination)
         for source in urls.map(\.standardizedFileURL) {
-            if source == destination {
+            let canonicalSource = try FileSystemPathIdentity.canonicalExistingEntryPreservingLeaf(source)
+            if canonicalSource == canonicalDestination {
                 throw ExplorerError.operationFailed("Cannot drop an item onto itself.")
             }
 
-            if isDescendant(destination, of: source) {
+            if FileSystemPathIdentity.isDescendant(canonicalDestination, of: canonicalSource) {
                 let verb = operation == .copy ? "copy" : "move"
                 throw ExplorerError.operationFailed("Cannot \(verb) a folder into itself.")
             }
         }
-    }
-
-    private static func isDescendant(_ possibleChild: URL, of possibleParent: URL) -> Bool {
-        let childPath = possibleChild.standardizedFileURL.path
-        let parentPath = possibleParent.standardizedFileURL.path
-        guard childPath != parentPath else {
-            return false
-        }
-        return childPath.hasPrefix(parentPath + "/")
     }
 }

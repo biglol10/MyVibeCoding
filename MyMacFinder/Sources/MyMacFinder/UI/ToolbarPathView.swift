@@ -373,16 +373,7 @@ struct PathInputField: NSViewRepresentable {
         }
 
         private func activeEditor(for textField: NSTextField) -> NSText? {
-            if let currentEditor = textField.currentEditor() {
-                return currentEditor
-            }
-
-            guard let window = textField.window,
-                  let fieldEditor = window.fieldEditor(false, for: textField),
-                  window.firstResponder === fieldEditor else {
-                return nil
-            }
-            return fieldEditor
+            textField.currentEditor()
         }
     }
 }

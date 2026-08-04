@@ -45,7 +45,6 @@ public struct CapturePreset: Codable, Equatable, Identifiable, Sendable {
                     var settings = AppSettings.defaults
                     settings.recordingDurationSeconds = 12
                     settings.countdownSeconds = 3
-                    settings.recordingQuality = .high
                     return settings
                 }()
             ),

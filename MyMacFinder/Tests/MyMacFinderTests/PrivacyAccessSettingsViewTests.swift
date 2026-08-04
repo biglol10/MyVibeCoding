@@ -57,4 +57,19 @@ final class PrivacyAccessSettingsViewTests: XCTestCase {
             "exclamationmark.triangle.fill"
         ])
     }
+
+    func testPrivacyAccessSettingsPresentationOffersResetForPersistenceError() {
+        let presentation = PrivacyAccessSettingsPresentation(
+            sandboxPolicy: SandboxPolicySummary(isSandboxed: true),
+            grantedFolderSummaries: [],
+            persistenceErrorMessage: "Saved folder access data is damaged."
+        )
+
+        XCTAssertTrue(presentation.showsPersistenceError)
+        XCTAssertTrue(presentation.showsResetAction)
+        XCTAssertEqual(
+            presentation.persistenceErrorMessage,
+            "Saved folder access data is damaged."
+        )
+    }
 }

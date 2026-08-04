@@ -112,7 +112,7 @@ final class CalendarWorkflowE2ETests: XCTestCase {
         let loadedSettings = try settingsStore.load()
         XCTAssertFalse(loadedSettings.floatingWidgetEnabled)
         XCTAssertFalse(loadedSettings.floatingWidgetAlwaysOnTop)
-        XCTAssertEqual(loadedSettings.floatingWidgetVisibleCount, 2)
+        XCTAssertEqual(loadedSettings.floatingWidgetVisibleCount, 3)
         XCTAssertEqual(loadedSettings.defaultReminderHour, 8)
         XCTAssertEqual(loadedSettings.defaultReminderMinute, 30)
 
@@ -123,7 +123,7 @@ final class CalendarWorkflowE2ETests: XCTestCase {
             limit: loadedSettings.floatingWidgetVisibleCount
         )
 
-        XCTAssertEqual(upcoming.map(\.title), ["오늘 마감", "내일 회의"])
+        XCTAssertEqual(upcoming.map(\.title), ["오늘 마감", "내일 회의", "다음 주 준비"])
     }
 
     func testMultipleDatesWithMultipleEventsWorkflow() throws {
@@ -164,7 +164,6 @@ final class CalendarWorkflowE2ETests: XCTestCase {
 
         let taxEvent = try XCTUnwrap(saved.first { $0.title == "세금 납부" })
         XCTAssertEqual(taxEvent.notificationOffsetsDays, [7, 2, 1])
-        XCTAssertEqual(service.deletePlan(for: taxEvent).notificationIdentifiers.count, 3)
 
         let searchResults = service.search("예", in: saved)
         XCTAssertEqual(searchResults.map(\.title), ["병원 예약", "영화 예매"])

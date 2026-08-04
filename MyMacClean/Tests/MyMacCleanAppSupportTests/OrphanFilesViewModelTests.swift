@@ -247,6 +247,66 @@ final class OrphanFilesViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isDeleting)
     }
 
+    func testSetGroupSelectionSelectsAndDeselectsOnlyGroupCandidates() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("MyMacCleanOrphanGroupSelection-\(UUID().uuidString)", isDirectory: true)
+        let firstSelectable = RelatedFileCandidate(
+            url: home.appendingPathComponent("Library/Caches/com.example.first", isDirectory: true),
+            kind: .cache,
+            size: 1,
+            matchReason: "orphan",
+            confidence: .high,
+            defaultSelected: false,
+            requiresManualReview: false,
+            isProtected: false
+        )
+        let firstProtected = RelatedFileCandidate(
+            url: home.appendingPathComponent("Documents/com.example.first", isDirectory: true),
+            kind: .unknown,
+            size: 1,
+            matchReason: "protected",
+            confidence: .low,
+            safety: .risky,
+            defaultSelected: false,
+            requiresManualReview: true,
+            isProtected: true
+        )
+        let secondSelectable = RelatedFileCandidate(
+            url: home.appendingPathComponent("Library/Caches/com.example.second", isDirectory: true),
+            kind: .cache,
+            size: 1,
+            matchReason: "orphan",
+            confidence: .high,
+            defaultSelected: false,
+            requiresManualReview: false,
+            isProtected: false
+        )
+        let firstGroup = OrphanFileGroup(
+            inferredName: "First",
+            inferredIdentifier: "com.example.first",
+            candidates: [firstSelectable, firstProtected]
+        )
+        let secondGroup = OrphanFileGroup(
+            inferredName: "Second",
+            inferredIdentifier: "com.example.second",
+            candidates: [secondSelectable]
+        )
+        let viewModel = OrphanFilesViewModel(homeDirectory: home, installedApps: [])
+        viewModel.groups = [firstGroup, secondGroup]
+        viewModel.selectedCandidateIDs = [secondSelectable.id]
+
+        viewModel.setGroupSelection(firstGroup.id, isSelected: true)
+
+        XCTAssertEqual(viewModel.selectedCandidateIDs, [firstSelectable.id, secondSelectable.id])
+        XCTAssertTrue(viewModel.isGroupFullySelected(firstGroup))
+        XCTAssertEqual(viewModel.groupSelectionSummary(for: firstGroup), "1 of 2 selected")
+
+        viewModel.setGroupSelection(firstGroup.id, isSelected: false)
+
+        XCTAssertEqual(viewModel.selectedCandidateIDs, [secondSelectable.id])
+        XCTAssertFalse(viewModel.isGroupFullySelected(firstGroup))
+        XCTAssertEqual(viewModel.groupSelectionSummary(for: firstGroup), "0 of 2 selected")
+    }
+
     func testLoadGroupsClearsPreviousDeletionReport() async throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("MyMacCleanOrphanClearReport-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: home) }

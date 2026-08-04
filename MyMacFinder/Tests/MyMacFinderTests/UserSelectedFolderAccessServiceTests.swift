@@ -49,6 +49,81 @@ final class UserSelectedFolderAccessServiceTests: XCTestCase {
         XCTAssertEqual(grant.url, url.standardizedFileURL)
         XCTAssertEqual(grant.bookmarkData, Data())
     }
+
+    func testStaleBookmarkRefreshFailureStopsStartedSecurityScopedAccess() {
+        let url = URL(fileURLWithPath: "/tmp/stale-grant", isDirectory: true)
+        var stoppedURLs: [URL] = []
+
+        XCTAssertThrowsError(
+            try SecurityScopedBookmarkResolver.resolveAccess(
+                url: url,
+                isStale: true,
+                startAccessing: { _ in true },
+                refreshBookmarkData: { _ in throw StubBookmarkResolverError.refreshFailed },
+                stopAccessing: { stoppedURLs.append($0.standardizedFileURL) }
+            )
+        )
+
+        XCTAssertEqual(stoppedURLs, [url.standardizedFileURL])
+    }
+
+    func testStaleBookmarkRefreshFailureDoesNotStopAccessThatNeverStarted() {
+        let url = URL(fileURLWithPath: "/tmp/stale-denied-grant", isDirectory: true)
+        var stoppedURLs: [URL] = []
+
+        XCTAssertThrowsError(
+            try SecurityScopedBookmarkResolver.resolveAccess(
+                url: url,
+                isStale: true,
+                startAccessing: { _ in false },
+                refreshBookmarkData: { _ in throw StubBookmarkResolverError.refreshFailed },
+                stopAccessing: { stoppedURLs.append($0.standardizedFileURL) }
+            )
+        )
+
+        XCTAssertEqual(stoppedURLs, [])
+    }
+
+    func testStaleBookmarkRefreshSuccessReturnsFreshDataWithoutStoppingAccess() throws {
+        let url = URL(fileURLWithPath: "/tmp/refreshed-grant", isDirectory: true)
+        let refreshedData = Data([5, 4, 3])
+        var stoppedURLs: [URL] = []
+
+        let access = try SecurityScopedBookmarkResolver.resolveAccess(
+            url: url,
+            isStale: true,
+            startAccessing: { _ in true },
+            refreshBookmarkData: { _ in refreshedData },
+            stopAccessing: { stoppedURLs.append($0.standardizedFileURL) }
+        )
+
+        XCTAssertEqual(access.refreshedBookmarkData, refreshedData)
+        XCTAssertTrue(access.didStartAccessing)
+        XCTAssertEqual(stoppedURLs, [])
+    }
+
+    func testFreshBookmarkDoesNotRegenerateBookmarkData() throws {
+        let url = URL(fileURLWithPath: "/tmp/fresh-grant", isDirectory: true)
+        var refreshCallCount = 0
+
+        let access = try SecurityScopedBookmarkResolver.resolveAccess(
+            url: url,
+            isStale: false,
+            startAccessing: { _ in true },
+            refreshBookmarkData: { _ in
+                refreshCallCount += 1
+                return Data([1])
+            },
+            stopAccessing: { _ in }
+        )
+
+        XCTAssertNil(access.refreshedBookmarkData)
+        XCTAssertEqual(refreshCallCount, 0)
+    }
+}
+
+private enum StubBookmarkResolverError: Error {
+    case refreshFailed
 }
 
 private final class StubFolderPicker: FolderPicking, @unchecked Sendable {

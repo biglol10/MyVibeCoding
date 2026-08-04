@@ -34,4 +34,13 @@ final class EditorCanvasGeometryTests: XCTestCase {
 
         XCTAssertEqual(rect, CGRect(x: 200, y: 287.5, width: 200, height: 112.5))
     }
+
+    func testViewScaleConvertsImagePixelLengthsForWYSIWYGStrokes() {
+        let geometry = EditorCanvasGeometry(
+            imageSize: CGSize(width: 1600, height: 900),
+            viewSize: CGSize(width: 800, height: 800)
+        )
+
+        XCTAssertEqual(geometry.viewScale, 0.5, accuracy: 0.001)
+    }
 }

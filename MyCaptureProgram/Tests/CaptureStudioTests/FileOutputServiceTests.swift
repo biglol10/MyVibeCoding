@@ -62,18 +62,22 @@ final class FileOutputServiceTests: XCTestCase {
         XCTAssertFalse(filename.contains("Chrome"))
     }
 
-    func testTrimmedRecordingAndGIFURLsUseExpectedExtensions() {
+    func testTrimmedRecordingAndGIFURLsUseExpectedExtensions() throws {
         let service = FileOutputService()
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
         var settings = AppSettings.defaults
         settings.smartFilenamesEnabled = true
+        settings.recordingFolderPath = temporaryDirectory.path
         let context = FileNamingContext(applicationName: "Codex", windowTitle: "Bug Report")
 
-        let trimmed = service.trimmedRecordingURL(
+        let trimmed = try service.trimmedRecordingURL(
             settings: settings,
             date: Date(timeIntervalSince1970: 1_782_000_000),
             context: context
         )
-        let gif = service.gifRecordingURL(
+        let gif = try service.gifRecordingURL(
             settings: settings,
             date: Date(timeIntervalSince1970: 1_782_000_000),
             context: context
@@ -91,7 +95,7 @@ final class FileOutputServiceTests: XCTestCase {
         try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
         let service = FileOutputService()
 
-        let resolved = service.resolvedOutputDirectory(preferredPath: temporaryDirectory.path)
+        let resolved = try service.resolvedOutputDirectory(preferredPath: temporaryDirectory.path)
 
         XCTAssertEqual(resolved.standardizedFileURL, temporaryDirectory.standardizedFileURL)
     }
@@ -111,24 +115,24 @@ final class FileOutputServiceTests: XCTestCase {
         XCTAssertEqual(fileURL.deletingLastPathComponent().standardizedFileURL, temporaryDirectory.standardizedFileURL)
     }
 
-    func testMissingDirectoryFallsBackToDesktop() {
+    func testMissingDirectoryFailsInsteadOfSavingToDesktop() {
         let service = FileOutputService()
         let missingPath = "/path/that/does/not/exist"
 
-        let resolved = service.resolvedOutputDirectory(preferredPath: missingPath)
-
-        XCTAssertTrue(resolved.path.hasSuffix("/Desktop"))
+        XCTAssertThrowsError(try service.resolvedOutputDirectory(preferredPath: missingPath)) { error in
+            XCTAssertEqual(error as? FileOutputError, .outputDirectoryUnavailable(missingPath))
+        }
     }
 
-    func testFilePathFallsBackToDesktopInsteadOfBeingTreatedAsDirectory() throws {
+    func testFilePathFailsInsteadOfBeingTreatedAsDirectory() throws {
         let temporaryFile = FileManager.default.temporaryDirectory
             .appendingPathComponent("CaptureStudio-output-\(UUID().uuidString).txt")
         try Data("not a directory".utf8).write(to: temporaryFile)
         let service = FileOutputService()
 
-        let resolved = service.resolvedOutputDirectory(preferredPath: temporaryFile.path)
-
-        XCTAssertTrue(resolved.path.hasSuffix("/Desktop"))
+        XCTAssertThrowsError(try service.resolvedOutputDirectory(preferredPath: temporaryFile.path)) { error in
+            XCTAssertEqual(error as? FileOutputError, .outputDirectoryUnavailable(temporaryFile.path))
+        }
     }
 
     func testWritesScreenshotPNGDataToConfiguredDirectory() throws {
@@ -203,5 +207,466 @@ final class FileOutputServiceTests: XCTestCase {
         XCTAssertNotEqual(firstURL, secondURL)
         XCTAssertEqual(try Data(contentsOf: firstURL), firstData)
         XCTAssertEqual(try Data(contentsOf: secondURL), secondData)
+    }
+
+    func testMovingRecordingRejectsSourceThatNoLongerMatchesExpectedIdentity() throws {
+        let rootDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let sourceDirectory = rootDirectory.appendingPathComponent("source", isDirectory: true)
+        let outputDirectory = rootDirectory.appendingPathComponent("output", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+        let sourceURL = sourceDirectory.appendingPathComponent("recording.mp4")
+        let movedOriginalURL = sourceDirectory.appendingPathComponent("original.mp4")
+        let replacementData = Data("replacement".utf8)
+        try Data("original".utf8).write(to: sourceURL)
+        let originalIdentity = try CaptureFileIdentity.existingFile(at: sourceURL)
+        try FileManager.default.moveItem(at: sourceURL, to: movedOriginalURL)
+        try replacementData.write(to: sourceURL)
+        var settings = AppSettings.defaults
+        settings.recordingFolderPath = outputDirectory.path
+
+        XCTAssertThrowsError(
+            try FileOutputService().moveRecordingFile(
+                from: sourceURL,
+                expectedSourceIdentity: originalIdentity,
+                settings: settings
+            )
+        ) { error in
+            XCTAssertEqual(error as? FileOutputError, .sourceFileChanged)
+        }
+
+        XCTAssertEqual(try Data(contentsOf: sourceURL), replacementData)
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: outputDirectory.path).isEmpty)
+    }
+
+    @MainActor
+    func testAsyncRecordingMoveExecutesFileIOOffMainThread() async throws {
+        let rootDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let sourceDirectory = rootDirectory.appendingPathComponent("source", isDirectory: true)
+        let outputDirectory = rootDirectory.appendingPathComponent("output", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+        let sourceURL = sourceDirectory.appendingPathComponent("recording.mp4")
+        try Data(repeating: 0x5A, count: 128 * 1_024).write(to: sourceURL)
+        let sourceIdentity = try CaptureFileIdentity.existingFile(at: sourceURL)
+        let observation = ThreadObservation()
+        let service = FileOutputService(
+            fileManager: .default,
+            operationObserver: { observation.recordCurrentThread() }
+        )
+        var settings = AppSettings.defaults
+        settings.recordingFolderPath = outputDirectory.path
+
+        let resultURL = try await service.moveRecordingFileAsync(
+            from: sourceURL,
+            expectedSourceIdentity: sourceIdentity,
+            settings: settings
+        )
+
+        XCTAssertEqual(observation.mainThreadValues, [false])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: resultURL.path))
+    }
+
+    func testAvailableRecordingURLsDoNotCollideBeforeEitherFileExists() throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        var settings = AppSettings.defaults
+        settings.recordingFolderPath = temporaryDirectory.path
+        let service = FileOutputService()
+        let date = Date(timeIntervalSince1970: 1_782_000_000)
+
+        let firstURL = try service.availableRecordingURL(settings: settings, date: date)
+        let secondURL = try service.availableRecordingURL(settings: settings, date: date)
+
+        XCTAssertNotEqual(firstURL, secondURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: firstURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: secondURL.path))
+    }
+
+    func testSmartFilenameWithLongEmojiTitleFitsFileSystemComponentLimit() throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        var settings = AppSettings.defaults
+        settings.screenshotFolderPath = temporaryDirectory.path
+        settings.smartFilenamesEnabled = true
+        let context = FileNamingContext(
+            applicationName: "CaptureStudio",
+            windowTitle: String(repeating: "😀", count: 300)
+        )
+
+        let outputURL = try FileOutputService().writeScreenshotData(
+            Data([0x89, 0x50, 0x4E, 0x47]),
+            settings: settings,
+            date: Date(timeIntervalSince1970: 1_782_000_000),
+            context: context
+        )
+
+        XCTAssertLessThanOrEqual(outputURL.lastPathComponent.utf8.count, 255)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outputURL.path))
+    }
+
+    func testConcurrentScreenshotWritesAllocateDistinctFilesWithoutOverwriting() throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        let results = ConcurrentWriteResults()
+        let directoryPath = temporaryDirectory.path
+        let date = Date(timeIntervalSince1970: 1_782_000_000)
+
+        DispatchQueue.concurrentPerform(iterations: 12) { index in
+            var settings = AppSettings.defaults
+            settings.screenshotFolderPath = directoryPath
+            do {
+                let url = try FileOutputService().writeScreenshotData(
+                    Data([UInt8(index)]),
+                    settings: settings,
+                    date: date
+                )
+                results.append(url: url)
+            } catch {
+                results.append(error: error)
+            }
+        }
+
+        XCTAssertTrue(results.errors.isEmpty)
+        XCTAssertEqual(results.urls.count, 12)
+        XCTAssertEqual(Set(results.urls).count, 12)
+        XCTAssertEqual(
+            Set(try results.urls.compactMap { try Data(contentsOf: $0).first }),
+            Set((0..<12).map(UInt8.init))
+        )
+    }
+
+    func testConcurrentRecordingMovesAllocateDistinctFilesWithoutOverwriting() throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        let results = ConcurrentWriteResults()
+        let directoryPath = temporaryDirectory.path
+        let date = Date(timeIntervalSince1970: 1_782_000_000)
+        let iterationCount = 40
+
+        DispatchQueue.concurrentPerform(iterations: iterationCount) { index in
+            var settings = AppSettings.defaults
+            settings.recordingFolderPath = directoryPath
+            let sourceURL = temporaryDirectory.appendingPathComponent("source-\(index).mp4")
+            do {
+                try Data([UInt8(index)]).write(to: sourceURL)
+                let url = try FileOutputService().moveRecordingFile(
+                    from: sourceURL,
+                    settings: settings,
+                    date: date
+                )
+                results.append(url: url)
+            } catch {
+                results.append(error: error)
+            }
+        }
+
+        XCTAssertTrue(results.errors.isEmpty, "Unexpected move errors: \(results.errors)")
+        XCTAssertEqual(results.urls.count, iterationCount)
+        XCTAssertEqual(Set(results.urls).count, iterationCount)
+        XCTAssertEqual(
+            Set(try results.urls.compactMap { try Data(contentsOf: $0).first }),
+            Set((0..<iterationCount).map(UInt8.init))
+        )
+        for index in 0..<iterationCount {
+            XCTAssertFalse(
+                FileManager.default.fileExists(
+                    atPath: temporaryDirectory.appendingPathComponent("source-\(index).mp4").path
+                )
+            )
+        }
+    }
+
+    func testExclusiveCopyFallbackCopiesDataWithoutOverwriting() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let sourceURL = directory.appendingPathComponent("source.bin")
+        let destinationURL = directory.appendingPathComponent("destination.bin")
+        let sourceData = Data(repeating: 0x5A, count: 128 * 1_024)
+        try sourceData.write(to: sourceURL)
+
+        try ExclusiveFilePublisher.copyExclusively(from: sourceURL, to: destinationURL)
+
+        XCTAssertEqual(try Data(contentsOf: destinationURL), sourceData)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sourceURL.path))
+    }
+
+    func testExclusiveCopyFallbackPreservesExistingDestination() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let sourceURL = directory.appendingPathComponent("source.bin")
+        let destinationURL = directory.appendingPathComponent("destination.bin")
+        try Data("source".utf8).write(to: sourceURL)
+        try Data("existing".utf8).write(to: destinationURL)
+
+        XCTAssertThrowsError(
+            try ExclusiveFilePublisher.copyExclusively(from: sourceURL, to: destinationURL)
+        ) { error in
+            XCTAssertEqual((error as? POSIXError)?.code, .EEXIST)
+        }
+
+        XCTAssertEqual(try Data(contentsOf: destinationURL), Data("existing".utf8))
+        XCTAssertEqual(try Data(contentsOf: sourceURL), Data("source".utf8))
+    }
+
+    func testExclusiveCopyRejectsSourceThatNoLongerMatchesExpectedIdentity() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let sourceURL = directory.appendingPathComponent("source.bin")
+        let movedOriginalURL = directory.appendingPathComponent("original.bin")
+        let destinationURL = directory.appendingPathComponent("destination.bin")
+        let replacementData = Data("replacement".utf8)
+        try Data("original".utf8).write(to: sourceURL)
+        let originalIdentity = try CaptureFileIdentity.existingFile(at: sourceURL)
+        try FileManager.default.moveItem(at: sourceURL, to: movedOriginalURL)
+        try replacementData.write(to: sourceURL)
+
+        XCTAssertThrowsError(
+            try ExclusiveFilePublisher.copyExclusively(
+                from: sourceURL,
+                to: destinationURL,
+                expectedSourceIdentity: originalIdentity
+            )
+        ) { error in
+            XCTAssertEqual(error as? FileOutputError, .sourceFileChanged)
+        }
+
+        XCTAssertEqual(try Data(contentsOf: sourceURL), replacementData)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destinationURL.path))
+    }
+
+    func testExclusiveCopyDoesNotExposeFinalDestinationUntilCopyCompletes() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let sourceURL = directory.appendingPathComponent("source-large.bin")
+        let destinationURL = directory.appendingPathComponent("destination-large.bin")
+        let sourceData = Data(repeating: 0xA5, count: 256 * 1_024)
+        try sourceData.write(to: sourceURL)
+        let gate = CopyProgressGate()
+        let errorBox = ConcurrentErrorBox()
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            defer { group.leave() }
+            do {
+                try ExclusiveFilePublisher.copyExclusively(
+                    from: sourceURL,
+                    to: destinationURL,
+                    copyDidWriteChunk: gate.pauseAfterFirstChunk
+                )
+            } catch {
+                errorBox.store(error)
+            }
+        }
+
+        XCTAssertEqual(gate.waitUntilPaused(timeout: 2), .success)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destinationURL.path))
+        gate.resume()
+        XCTAssertEqual(group.wait(timeout: .now() + 5), .success)
+
+        XCTAssertNil(errorBox.error)
+        XCTAssertEqual(try Data(contentsOf: destinationURL), sourceData)
+    }
+
+    func testPublisherPreservesReplacementCreatedImmediatelyBeforeSourceRemoval() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let sourceURL = directory.appendingPathComponent("source-race.bin")
+        let movedOriginalURL = directory.appendingPathComponent("moved-original.bin")
+        let destinationURL = directory.appendingPathComponent("destination-race.bin")
+        let originalData = Data("original".utf8)
+        let replacementData = Data("replacement".utf8)
+        try originalData.write(to: sourceURL)
+        let originalIdentity = try CaptureFileIdentity.existingFile(at: sourceURL)
+
+        try ExclusiveFilePublisher.publish(
+            from: sourceURL,
+            to: destinationURL,
+            expectedSourceIdentity: originalIdentity,
+            sourceIdentityWasCheckedBeforeRemoval: {
+                try FileManager.default.moveItem(at: sourceURL, to: movedOriginalURL)
+                try replacementData.write(to: sourceURL)
+            }
+        )
+
+        XCTAssertEqual(try Data(contentsOf: destinationURL), originalData)
+        XCTAssertEqual(try Data(contentsOf: sourceURL), replacementData)
+        XCTAssertEqual(try Data(contentsOf: movedOriginalURL), originalData)
+        XCTAssertFalse(
+            try FileManager.default.contentsOfDirectory(atPath: directory.path)
+                .contains { $0.hasPrefix(".CaptureStudio-Remove-") }
+        )
+    }
+
+    func testPublisherPreservesReplacementAtFinalPathBeforeIdentityValidation() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let sourceURL = directory.appendingPathComponent("source-destination-race.bin")
+        let destinationURL = directory.appendingPathComponent("destination-race.bin")
+        let movedPublishedURL = directory.appendingPathComponent("moved-published.bin")
+        let originalData = Data("original".utf8)
+        let replacementData = Data("replacement".utf8)
+        try originalData.write(to: sourceURL)
+        let originalIdentity = try CaptureFileIdentity.existingFile(at: sourceURL)
+
+        XCTAssertThrowsError(
+            try ExclusiveFilePublisher.publish(
+                from: sourceURL,
+                to: destinationURL,
+                expectedSourceIdentity: originalIdentity,
+                destinationWasPublished: {
+                    try FileManager.default.moveItem(at: destinationURL, to: movedPublishedURL)
+                    try replacementData.write(to: destinationURL)
+                }
+            )
+        ) { error in
+            XCTAssertEqual(error as? FileOutputError, .sourceFileChanged)
+        }
+
+        XCTAssertEqual(try Data(contentsOf: sourceURL), originalData)
+        XCTAssertEqual(try Data(contentsOf: destinationURL), replacementData)
+        XCTAssertEqual(try Data(contentsOf: movedPublishedURL), originalData)
+    }
+
+    func testPublisherKeepsCompletedDestinationWhenSourceCleanupFailsAfterQuarantine() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let sourceURL = directory.appendingPathComponent("source-cleanup-failure.bin")
+        let destinationURL = directory.appendingPathComponent("destination-cleanup-failure.bin")
+        let originalData = Data("original".utf8)
+        try originalData.write(to: sourceURL)
+
+        try ExclusiveFilePublisher.publish(
+            from: sourceURL,
+            to: destinationURL,
+            quarantinedSourceWillBeRemoved: {
+                throw POSIXError(.EACCES)
+            }
+        )
+
+        XCTAssertEqual(try Data(contentsOf: destinationURL), originalData)
+        XCTAssertEqual(try Data(contentsOf: sourceURL), originalData)
+        XCTAssertFalse(
+            try FileManager.default.contentsOfDirectory(atPath: directory.path)
+                .contains { $0.hasPrefix(".CaptureStudio-Remove-") }
+        )
+    }
+
+    func testCopyFallbackKeepsCompletedDestinationWhenSourceCleanupFailsAfterQuarantine() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let sourceURL = directory.appendingPathComponent("copy-source-cleanup-failure.bin")
+        let destinationURL = directory.appendingPathComponent("copy-destination-cleanup-failure.bin")
+        let originalData = Data(repeating: 0x4C, count: 128 * 1_024)
+        try originalData.write(to: sourceURL)
+
+        try ExclusiveFilePublisher.copyExclusively(
+            from: sourceURL,
+            to: destinationURL,
+            quarantinedSourceWillBeRemoved: {
+                throw POSIXError(.EACCES)
+            }
+        )
+
+        XCTAssertEqual(try Data(contentsOf: destinationURL), originalData)
+        XCTAssertEqual(try Data(contentsOf: sourceURL), originalData)
+        XCTAssertFalse(
+            try FileManager.default.contentsOfDirectory(atPath: directory.path)
+                .contains { $0.hasPrefix(".CaptureStudio-Remove-") }
+        )
+    }
+}
+
+private final class ConcurrentWriteResults: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedURLs: [URL] = []
+    private var storedErrors: [Error] = []
+
+    var urls: [URL] {
+        lock.withLock { storedURLs }
+    }
+
+    var errors: [Error] {
+        lock.withLock { storedErrors }
+    }
+
+    func append(url: URL) {
+        lock.withLock { storedURLs.append(url) }
+    }
+
+    func append(error: Error) {
+        lock.withLock { storedErrors.append(error) }
+    }
+}
+
+private final class ThreadObservation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [Bool] = []
+
+    var mainThreadValues: [Bool] {
+        lock.withLock { values }
+    }
+
+    func recordCurrentThread() {
+        lock.withLock { values.append(Thread.isMainThread) }
+    }
+}
+
+private final class CopyProgressGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private let paused = DispatchSemaphore(value: 0)
+    private let resumeSemaphore = DispatchSemaphore(value: 0)
+    private var didPause = false
+
+    func pauseAfterFirstChunk() {
+        let shouldPause = lock.withLock { () -> Bool in
+            guard !didPause else {
+                return false
+            }
+            didPause = true
+            return true
+        }
+        guard shouldPause else {
+            return
+        }
+        paused.signal()
+        resumeSemaphore.wait()
+    }
+
+    func waitUntilPaused(timeout: TimeInterval) -> DispatchTimeoutResult {
+        paused.wait(timeout: .now() + timeout)
+    }
+
+    func resume() {
+        resumeSemaphore.signal()
+    }
+}
+
+private final class ConcurrentErrorBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedError: Error?
+
+    var error: Error? {
+        lock.withLock { storedError }
+    }
+
+    func store(_ error: Error) {
+        lock.withLock { storedError = error }
     }
 }

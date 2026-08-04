@@ -34,7 +34,6 @@ struct EventEditorView: View {
     @State private var displayedDateMonth: Date
     @State private var showingDeleteConfirmation = false
     @State private var errorMessage: String?
-    @Query private var settingsRows: [AppSettings]
 
     init(event: CalendarEvent? = nil, defaultDate: Date = Date()) {
         self.event = event
@@ -253,10 +252,6 @@ struct EventEditorView: View {
         return "\(formattedDate(startDate)) - \(formattedDate(endDate))"
     }
 
-    private var settings: AppSettings {
-        settingsRows.first ?? AppSettings()
-    }
-
     private var errorBinding: Binding<Bool> {
         Binding(
             get: { errorMessage != nil },
@@ -326,8 +321,6 @@ struct EventEditorView: View {
         let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedStart = Calendar.current.startOfDay(for: startDate)
         let normalizedEnd = Calendar.current.startOfDay(for: max(endDate, startDate))
-        let previousNotificationIdentifiers = event.map { EventService().deletePlan(for: $0).notificationIdentifiers } ?? []
-        let savedEvent: CalendarEvent
 
         if let event {
             event.title = normalizedTitle
@@ -339,7 +332,6 @@ struct EventEditorView: View {
             event.recurrence = recurrence
             event.notificationOffsetsDays = notificationOffsets.sorted(by: >)
             event.updatedAt = Date()
-            savedEvent = event
         } else {
             let newEvent = CalendarEvent(
                 title: normalizedTitle,
@@ -352,54 +344,41 @@ struct EventEditorView: View {
                 notificationOffsetsDays: notificationOffsets.sorted(by: >)
             )
             modelContext.insert(newEvent)
-            savedEvent = newEvent
         }
 
         do {
-            try modelContext.save()
+            try PersistenceTransaction.save(context: modelContext)
         } catch {
             errorMessage = error.localizedDescription
             return
         }
 
-        refreshNotifications(for: savedEvent, replacing: previousNotificationIdentifiers)
         dismiss()
     }
 
     private func delete() {
         if let event {
-            let identifiers = EventService().deletePlan(for: event).notificationIdentifiers
+            let eventID = event.id
             modelContext.delete(event)
             do {
-                try modelContext.save()
-                NotificationService().cancel(identifiers: identifiers)
+                try PersistenceTransaction.save(context: modelContext)
             } catch {
                 errorMessage = error.localizedDescription
                 return
             }
-        }
-        dismiss()
-    }
-
-    private func refreshNotifications(for event: CalendarEvent, replacing previousIdentifiers: [String]) {
-        NotificationService().cancel(identifiers: previousIdentifiers)
-        guard event.notificationOffsetsDays.isEmpty == false else { return }
-        let reminderHour = settings.defaultReminderHour
-        let reminderMinute = settings.defaultReminderMinute
-
-        Task { @MainActor in
-            do {
-                let granted = try await NotificationService().requestAuthorization()
-                guard granted else { return }
-                NotificationService().schedule(
-                    event: event,
-                    defaultHour: reminderHour,
-                    defaultMinute: reminderMinute
-                )
-            } catch {
-                NSLog("Failed to request notification authorization: \(error)")
+            Task {
+                do {
+                    _ = try await AppNotificationCoordinator.shared.delete(eventID: eventID)
+                } catch {
+                    NSLog(
+                        "Notification delete failed for %@ (%@)",
+                        eventID.uuidString.lowercased(),
+                        String(describing: type(of: error))
+                    )
+                }
             }
         }
+        dismiss()
     }
 }
 

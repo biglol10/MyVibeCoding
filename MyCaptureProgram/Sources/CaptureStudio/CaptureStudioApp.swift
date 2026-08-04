@@ -50,10 +50,12 @@ struct CaptureStudioApp: App {
                 Button("Capture") {
                     startScreenshotCapture()
                 }
+                .disabled(appState.isInteractionBlocked)
 
                 Button("Record") {
                     startScreenRecording()
                 }
+                .disabled(appState.isInteractionBlocked)
 
                 Button("Stop Recording") {
                     stopActiveRecording()
@@ -113,9 +115,7 @@ struct CaptureStudioApp: App {
         case .newRecording:
             startScreenRecording()
         case .openSettings:
-            SettingsTab.selectDefaultOpenTab()
-            NSApp.activate(ignoringOtherApps: true)
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            AppKitSettingsWindowPresenter.shared.presentUsingApplicationAction()
         case .textExtraction, .colorPicker, .lastCapture:
             break
         }
@@ -129,8 +129,9 @@ private struct OpenSettingsCommand: View {
 
     var body: some View {
         Button("Settings") {
-            SettingsTab.selectDefaultOpenTab()
-            openSettings()
+            AppKitSettingsWindowPresenter.shared.present {
+                openSettings()
+            }
         }
         .keyboardShortcut(binding.keyEquivalent, modifiers: binding.eventModifiers)
     }

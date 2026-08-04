@@ -11,6 +11,9 @@ final class DistributionPackagingTests: XCTestCase {
         XCTAssertTrue(script.contains("xcrun notarytool submit"))
         XCTAssertTrue(script.contains("xcrun stapler staple"))
         XCTAssertTrue(script.contains("xcrun stapler validate"))
+        XCTAssertTrue(script.contains("--keychain-profile"))
+        XCTAssertFalse(script.contains("--password"))
+        XCTAssertFalse(script.contains("CAPTURE_STUDIO_APP_SPECIFIC_PASSWORD"))
     }
 
     func testReleasePackagingScriptUsesHardenedRuntimeTimestampEntitlementsAndGatekeeperAssessment() throws {
@@ -39,6 +42,7 @@ final class DistributionPackagingTests: XCTestCase {
         XCTAssertTrue(readme.contains("Developer ID Application"))
         XCTAssertTrue(readme.contains("notarization"))
         XCTAssertTrue(readme.contains("Do not upload"))
+        XCTAssertFalse(readme.contains("sudo scripts/install_app.sh"))
     }
 
     func testPersonalPackagingScriptCreatesInstallerThatClearsQuarantineAndInstallsToApplications() throws {
@@ -51,6 +55,28 @@ final class DistributionPackagingTests: XCTestCase {
         XCTAssertTrue(script.contains("/Applications/CaptureStudio.app"))
         XCTAssertTrue(script.contains("LaunchServices.framework"))
         XCTAssertTrue(script.contains("CaptureStudio-personal-mac.zip"))
+        XCTAssertFalse(script.contains("xattr -dr com.apple.quarantine \"$SCRIPT_DIR\""))
+        XCTAssertFalse(script.contains("rm -rf \"$APP_DEST\""))
+        XCTAssertTrue(script.contains("APP_BACKUP"))
+        XCTAssertTrue(script.contains("APP_INSTALLING"))
+        XCTAssertTrue(script.contains("run_install_command"))
+        XCTAssertFalse(script.contains("PRIVILEGED[@]"))
+        XCTAssertTrue(script.contains("Save any open capture or recording"))
+        XCTAssertFalse(script.contains("tell application \"CaptureStudio\" to quit"))
+        XCTAssertFalse(script.contains("pkill -x CaptureStudio"))
+    }
+
+    func testLocalInstallBuildsWithoutRootAndReplacesTheAppTransactionally() throws {
+        let script = try String(contentsOf: installScriptURL, encoding: .utf8)
+
+        XCTAssertTrue(script.contains("EUID"))
+        XCTAssertTrue(script.contains("Do not run this entire script with sudo"))
+        XCTAssertFalse(script.contains("rm -rf \"$APP_BUNDLE\""))
+        XCTAssertTrue(script.contains("APP_BACKUP"))
+        XCTAssertTrue(script.contains("APP_INSTALLING"))
+        XCTAssertTrue(script.contains("run_install_command"))
+        XCTAssertFalse(script.contains("PRIVILEGED[@]"))
+        XCTAssertTrue(script.contains("trap cleanup_staging EXIT"))
     }
 
     func testRepositoryDefinesSwiftPackageCIWorkflow() throws {
@@ -74,6 +100,12 @@ final class DistributionPackagingTests: XCTestCase {
         repositoryRoot
             .appendingPathComponent("scripts")
             .appendingPathComponent("package_personal.sh")
+    }
+
+    private var installScriptURL: URL {
+        repositoryRoot
+            .appendingPathComponent("scripts")
+            .appendingPathComponent("install_app.sh")
     }
 
     private var entitlementsURL: URL {

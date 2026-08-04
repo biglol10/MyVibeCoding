@@ -12,15 +12,6 @@ The app focuses on five daily-use cleanup areas:
 - Startup Items: audit LaunchAgents and LaunchDaemons, and safely disable user
   LaunchAgents.
 
-## Download
-
-- macOS personal/test build zip: [MyMacClean-test-build.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacClean/MyMacClean-test-build.zip)
-
-The zip is an ad-hoc signed personal build, not an Apple-notarized public
-release. After unzipping, use the included `Install MyMacClean.command` from
-Finder to remove quarantine, copy the app to `/Applications`, verify the local
-signature, and open the installed app.
-
 ## Safety Model
 
 MyMacClean is intentionally conservative.
@@ -71,6 +62,8 @@ MyMacClean is intentionally conservative.
 - Groups leftovers by inferred bundle identifier.
 - Excludes currently installed apps and the running MyMacClean bundle.
 - Requires manual selection before cleanup.
+- Supports group-level select/clear controls.
+- Supports reveal/copy-path actions for individual leftover candidates.
 - Moves selected leftovers to Trash by default.
 - Supports permanent deletion and force-delete options only after explicit
   confirmation.
@@ -124,23 +117,31 @@ This app is for personal use and is ad-hoc signed, not Apple-notarized. That
 means another Mac may show a Gatekeeper warning such as "damaged and can't be
 opened" or offer to move the app to Trash.
 
-Recommended personal install flow from this repository:
+Recommended personal install flow:
 
-1. Download `MyMacClean-test-build.zip` from the link above, or build it locally:
+1. Build the DMG on the development Mac:
 
    ```bash
-   ./scripts/build-app-bundle.sh
+   ./scripts/create-dmg.sh
    ```
 
-2. Unzip the package.
+2. Copy this file to the other Mac:
 
-3. Open `Install MyMacClean.command` from Finder. If macOS blocks the script,
-   right-click it and choose Open.
+   ```text
+   dist/MyMacClean-dev.dmg
+   ```
 
-4. The installer removes quarantine, copies the app to `/Applications`, verifies
-   the installed app, and opens it.
+3. Open the DMG and drag `MyMacClean.app` into `/Applications`.
 
-5. Grant Full Disk Access:
+4. If macOS refuses to open it because of quarantine, run this on the other Mac:
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/MyMacClean.app
+   ```
+
+5. Open the app from `/Applications`.
+
+6. Grant Full Disk Access:
 
    ```text
    System Settings -> Privacy & Security -> Full Disk Access -> add MyMacClean.app
@@ -189,11 +190,10 @@ Build a local app bundle:
 ./scripts/build-app-bundle.sh
 ```
 
-The package is written to:
+The app bundle is written to:
 
 ```text
-dist/MyMacClean/MyMacClean.app
-dist/MyMacClean-test-build.zip
+dist/MyMacClean.app
 ```
 
 Build a personal DMG:
@@ -208,11 +208,10 @@ The DMG is written to:
 dist/MyMacClean-dev.dmg
 ```
 
-Refresh the MyVibeCoding download artifact:
+If DMG creation fails, the script creates a zip fallback:
 
-```bash
-./scripts/build-app-bundle.sh
-cp dist/MyMacClean-test-build.zip ../downloads/MyMacClean/MyMacClean-test-build.zip
+```text
+dist/MyMacClean-dev.zip
 ```
 
 ## Test

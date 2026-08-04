@@ -65,14 +65,24 @@ struct EditorCanvasView: View {
         case .rectangle(let shape):
             Rectangle()
                 .fill(shape.style.fillColor.color)
-                .overlay(Rectangle().stroke(shape.style.strokeColor.color, lineWidth: shape.style.lineWidth))
+                .overlay(
+                    Rectangle().stroke(
+                        shape.style.strokeColor.color,
+                        lineWidth: shape.style.lineWidth * geometry.viewScale
+                    )
+                )
                 .frame(width: rect.width, height: rect.height)
                 .position(x: rect.midX, y: rect.midY)
                 .overlay(selectionOverlay(rect: rect, layer: layer))
         case .ellipse(let shape):
             Ellipse()
                 .fill(shape.style.fillColor.color)
-                .overlay(Ellipse().stroke(shape.style.strokeColor.color, lineWidth: shape.style.lineWidth))
+                .overlay(
+                    Ellipse().stroke(
+                        shape.style.strokeColor.color,
+                        lineWidth: shape.style.lineWidth * geometry.viewScale
+                    )
+                )
                 .frame(width: rect.width, height: rect.height)
                 .position(x: rect.midX, y: rect.midY)
                 .overlay(selectionOverlay(rect: rect, layer: layer))
@@ -122,7 +132,10 @@ struct EditorCanvasView: View {
                 path.addLine(to: geometry.viewPoint(forImagePoint: point))
             }
         }
-        .stroke(style.strokeColor.color.opacity(alpha), lineWidth: style.lineWidth)
+        .stroke(
+            style.strokeColor.color.opacity(alpha),
+            lineWidth: style.lineWidth * geometry.viewScale
+        )
     }
 
     private func arrowView(_ arrow: ArrowLayer, geometry: EditorCanvasGeometry) -> some View {
@@ -133,7 +146,7 @@ struct EditorCanvasView: View {
             path.addLine(to: end)
 
             let angle = atan2(end.y - start.y, end.x - start.x)
-            let headLength: CGFloat = 12
+            let headLength = 12 * geometry.viewScale
             let left = CGPoint(
                 x: end.x - headLength * cos(angle - .pi / 6),
                 y: end.y - headLength * sin(angle - .pi / 6)
@@ -147,7 +160,10 @@ struct EditorCanvasView: View {
             path.move(to: end)
             path.addLine(to: right)
         }
-        .stroke(arrow.style.strokeColor.color, lineWidth: arrow.style.lineWidth)
+        .stroke(
+            arrow.style.strokeColor.color,
+            lineWidth: arrow.style.lineWidth * geometry.viewScale
+        )
     }
 
     private var draftLayer: EditorLayer? {

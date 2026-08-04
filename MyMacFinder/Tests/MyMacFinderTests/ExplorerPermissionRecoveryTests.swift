@@ -138,6 +138,65 @@ final class ExplorerPermissionRecoveryTests: XCTestCase {
         XCTAssertEqual(bookmarkStore.grants.first?.bookmarkData, refreshedBookmarkData)
     }
 
+    func testCorruptedPersistedGrantDataSurfacesErrorWithoutResolvingGrants() {
+        let bookmarkStore = InMemoryBookmarkStore(
+            loadError: SecurityScopedBookmarkStoreError.corruptedData
+        )
+        let folderAccessService = StubFolderAccessService(result: .cancelled)
+
+        let store = ExplorerStore(
+            initialURL: FileManager.default.temporaryDirectory,
+            directoryWatcher: nil,
+            sandboxPolicy: SandboxPolicySummary(isSandboxed: true),
+            bookmarkStore: bookmarkStore,
+            folderAccessService: folderAccessService
+        )
+
+        XCTAssertEqual(store.grantedFolderSummaries, [])
+        XCTAssertEqual(folderAccessService.resolvedGrantIDs, [])
+        XCTAssertEqual(
+            store.folderAccessPersistenceErrorMessage,
+            SecurityScopedBookmarkStoreError.corruptedData.localizedDescription
+        )
+        XCTAssertEqual(
+            store.visibleError,
+            .operationFailed(SecurityScopedBookmarkStoreError.corruptedData.localizedDescription)
+        )
+    }
+
+    func testSandboxedInitStopsResolvedAccessWhenRefreshedGrantCannotBeSaved() {
+        let url = URL(fileURLWithPath: "/tmp/unsaved-refreshed-grant", isDirectory: true)
+        let grant = FolderAccessGrant(url: url, bookmarkData: Data([1]))
+        let access = ResolvedFolderAccess(
+            url: url,
+            isStale: true,
+            didStartAccessing: true,
+            refreshedBookmarkData: Data([9])
+        )
+        let bookmarkStore = InMemoryBookmarkStore(
+            grants: [grant],
+            saveError: BookmarkStoreStubError.saveFailed
+        )
+        let folderAccessService = StubFolderAccessService(
+            result: .cancelled,
+            resolvedAccesses: [grant.id: access]
+        )
+
+        let store = ExplorerStore(
+            initialURL: FileManager.default.temporaryDirectory,
+            directoryWatcher: nil,
+            sandboxPolicy: SandboxPolicySummary(isSandboxed: true),
+            bookmarkStore: bookmarkStore,
+            folderAccessService: folderAccessService
+        )
+
+        XCTAssertEqual(folderAccessService.stoppedAccesses, [access])
+        XCTAssertEqual(store.grantedFolderSummaries.map(\.availability), [.unavailable])
+        XCTAssertEqual(bookmarkStore.grants, [grant])
+        XCTAssertEqual(store.folderAccessPersistenceErrorMessage, "bookmark save failed")
+        XCTAssertEqual(store.visibleError, .operationFailed("bookmark save failed"))
+    }
+
     func testSandboxedInitMarksUnresolvablePersistedGrantsUnavailable() {
         let url = URL(fileURLWithPath: "/tmp/missing-grant", isDirectory: true)
         let grant = FolderAccessGrant(url: url, bookmarkData: Data([1]))
@@ -181,6 +240,81 @@ final class ExplorerPermissionRecoveryTests: XCTestCase {
 
         XCTAssertEqual(folderAccessService.stoppedAccesses, [oldAccess])
         XCTAssertEqual(store.grantedFolderSummaries.map(\.id), [newGrant.id])
+    }
+
+    func testChooseFolderSaveFailureStopsNewAccessWithoutStoppingExistingAccess() async {
+        let url = URL(fileURLWithPath: "/tmp/regrant-save-failure", isDirectory: true)
+        let oldGrant = FolderAccessGrant(url: url, bookmarkData: Data([1]))
+        let newGrant = FolderAccessGrant(url: url, bookmarkData: Data([2]))
+        let oldAccess = ResolvedFolderAccess(url: url, isStale: false, didStartAccessing: true)
+        let newAccess = ResolvedFolderAccess(url: url, isStale: false, didStartAccessing: true)
+        let bookmarkStore = InMemoryBookmarkStore(grants: [oldGrant])
+        let folderAccessService = StubFolderAccessService(
+            result: .granted(newGrant, newAccess),
+            resolvedAccesses: [oldGrant.id: oldAccess]
+        )
+        let store = ExplorerStore(
+            initialURL: FileManager.default.temporaryDirectory,
+            directoryWatcher: nil,
+            sandboxPolicy: SandboxPolicySummary(isSandboxed: true),
+            bookmarkStore: bookmarkStore,
+            folderAccessService: folderAccessService
+        )
+        bookmarkStore.saveError = BookmarkStoreStubError.saveFailed
+
+        await store.chooseFolderForAccess(startingAt: url)
+
+        XCTAssertEqual(folderAccessService.stoppedAccesses, [newAccess])
+        XCTAssertEqual(bookmarkStore.grants.map(\.id), [oldGrant.id])
+        XCTAssertEqual(store.grantedFolderSummaries.map(\.id), [oldGrant.id])
+        XCTAssertEqual(store.grantedFolderSummaries.map(\.availability), [.available])
+        XCTAssertEqual(store.visibleError, .operationFailed("bookmark save failed"))
+    }
+
+    func testRemoveGrantFailureKeepsActiveAccessAndSummary() async {
+        let url = URL(fileURLWithPath: "/tmp/remove-grant-failure", isDirectory: true)
+        let grant = FolderAccessGrant(url: url, bookmarkData: Data([1]))
+        let access = ResolvedFolderAccess(url: url, isStale: false, didStartAccessing: true)
+        let bookmarkStore = InMemoryBookmarkStore(grants: [grant])
+        let folderAccessService = StubFolderAccessService(
+            result: .cancelled,
+            resolvedAccesses: [grant.id: access]
+        )
+        let store = ExplorerStore(
+            initialURL: FileManager.default.temporaryDirectory,
+            directoryWatcher: nil,
+            sandboxPolicy: SandboxPolicySummary(isSandboxed: true),
+            bookmarkStore: bookmarkStore,
+            folderAccessService: folderAccessService
+        )
+        bookmarkStore.removeError = BookmarkStoreStubError.removeFailed
+
+        await store.removeGrantedFolder(id: grant.id)
+
+        XCTAssertEqual(folderAccessService.stoppedAccesses, [])
+        XCTAssertEqual(bookmarkStore.grants.map(\.id), [grant.id])
+        XCTAssertEqual(store.grantedFolderSummaries.map(\.availability), [.available])
+        XCTAssertEqual(store.visibleError, .operationFailed("bookmark remove failed"))
+    }
+
+    func testResetGrantedFoldersClearsPersistenceError() async {
+        let bookmarkStore = InMemoryBookmarkStore(
+            loadError: SecurityScopedBookmarkStoreError.corruptedData
+        )
+        let store = ExplorerStore(
+            initialURL: FileManager.default.temporaryDirectory,
+            directoryWatcher: nil,
+            sandboxPolicy: SandboxPolicySummary(isSandboxed: true),
+            bookmarkStore: bookmarkStore,
+            folderAccessService: StubFolderAccessService(result: .cancelled)
+        )
+
+        await store.resetGrantedFolders()
+
+        XCTAssertNil(store.folderAccessPersistenceErrorMessage)
+        XCTAssertEqual(store.grantedFolderSummaries, [])
+        XCTAssertNil(store.visibleError)
+        XCTAssertEqual(bookmarkStore.resetCallCount, 1)
     }
 
     func testRemoveAndResetGrantedFoldersUpdateSummaries() async {
@@ -267,26 +401,65 @@ private final class RetryingPermissionFileSystemService: FileSystemServicing, @u
 
 private final class InMemoryBookmarkStore: SecurityScopedBookmarkStoring {
     var grants: [FolderAccessGrant] = []
+    var loadError: Error?
+    var saveError: Error?
+    var removeError: Error?
+    var resetCallCount = 0
 
-    init(grants: [FolderAccessGrant] = []) {
+    init(
+        grants: [FolderAccessGrant] = [],
+        loadError: Error? = nil,
+        saveError: Error? = nil,
+        removeError: Error? = nil
+    ) {
         self.grants = grants
+        self.loadError = loadError
+        self.saveError = saveError
+        self.removeError = removeError
     }
 
-    func load() -> [FolderAccessGrant] {
-        grants
+    func load() throws -> [FolderAccessGrant] {
+        if let loadError {
+            throw loadError
+        }
+        return grants
     }
 
     func save(_ grant: FolderAccessGrant) throws {
+        if let saveError {
+            throw saveError
+        }
         grants.removeAll { $0.url == grant.url || $0.id == grant.id }
         grants.append(grant)
     }
 
-    func remove(id: FolderAccessGrantID) {
+    func remove(id: FolderAccessGrantID) throws {
+        if let removeError {
+            throw removeError
+        }
         grants.removeAll { $0.id == id }
     }
 
     func reset() {
+        resetCallCount += 1
+        loadError = nil
+        saveError = nil
+        removeError = nil
         grants.removeAll()
+    }
+}
+
+private enum BookmarkStoreStubError: LocalizedError {
+    case saveFailed
+    case removeFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .saveFailed:
+            return "bookmark save failed"
+        case .removeFailed:
+            return "bookmark remove failed"
+        }
     }
 }
 

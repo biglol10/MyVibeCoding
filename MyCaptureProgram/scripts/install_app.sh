@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export PATH="/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="${CAPTURE_STUDIO_APP_NAME:-CaptureStudio}"
@@ -8,6 +7,12 @@ BUNDLE_ID="${CAPTURE_STUDIO_BUNDLE_ID:-com.capturestudio.mac}"
 CONFIGURATION="${CONFIGURATION:-release}"
 DESTINATION="${1:-/Applications}"
 SIGN_IDENTITY="${CAPTURE_STUDIO_CODE_SIGN_IDENTITY:-}"
+
+if [[ "$EUID" -eq 0 ]]; then
+  echo "Do not run this entire script with sudo." >&2
+  echo "Run it as your normal user; the script requests installation permission only if needed." >&2
+  exit 2
+fi
 
 case "$CONFIGURATION" in
   debug|release) ;;
@@ -17,6 +22,44 @@ case "$CONFIGURATION" in
     exit 2
     ;;
 esac
+
+ICON_SOURCE="$ROOT_DIR/Resources/AppIcon.icns"
+if [[ ! -f "$ICON_SOURCE" ]]; then
+  echo "App icon not found: $ICON_SOURCE" >&2
+  echo "Generate it with: swift scripts/generate_app_icon.swift" >&2
+  exit 1
+fi
+
+APP_BUNDLE="$DESTINATION/$APP_NAME.app"
+APP_INSTALLING="$DESTINATION/.$APP_NAME.installing.$$.app"
+APP_BACKUP="$DESTINATION/.$APP_NAME.previous.$$.app"
+USE_SUDO=0
+
+if [[ ! -d "$DESTINATION" ]]; then
+  if ! mkdir -p "$DESTINATION" 2>/dev/null; then
+    command -v sudo >/dev/null 2>&1 || {
+      echo "Destination cannot be created: $DESTINATION" >&2
+      exit 1
+    }
+    sudo mkdir -p "$DESTINATION"
+  fi
+fi
+if [[ ! -w "$DESTINATION" ]]; then
+  command -v sudo >/dev/null 2>&1 || {
+    echo "Destination is not writable: $DESTINATION" >&2
+    exit 1
+  }
+  sudo -v
+  USE_SUDO=1
+fi
+
+run_install_command() {
+  if [[ "$USE_SUDO" -eq 1 ]]; then
+    sudo "$@"
+  else
+    "$@"
+  fi
+}
 
 echo "Building $APP_NAME ($CONFIGURATION)..."
 echo "Local install only. Do not upload this app bundle or a zip made from it for distribution."
@@ -30,31 +73,18 @@ if [[ ! -x "$EXECUTABLE" ]]; then
   exit 1
 fi
 
-ICON_SOURCE="$ROOT_DIR/Resources/AppIcon.icns"
-if [[ ! -f "$ICON_SOURCE" ]]; then
-  echo "App icon not found: $ICON_SOURCE" >&2
-  echo "Generate it with: swift scripts/generate_app_icon.swift" >&2
-  exit 1
-fi
-
-if [[ ! -d "$DESTINATION" ]]; then
-  mkdir -p "$DESTINATION"
-fi
-
-if [[ ! -w "$DESTINATION" ]]; then
-  echo "Destination is not writable: $DESTINATION" >&2
-  echo "Install to a writable folder or rerun with permission for that destination." >&2
-  echo "Example: sudo $0 $DESTINATION" >&2
-  exit 1
-fi
-
-APP_BUNDLE="$DESTINATION/$APP_NAME.app"
-CONTENTS_DIR="$APP_BUNDLE/Contents"
+STAGING_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/CaptureStudio-install.XXXXXX")"
+STAGED_APP="$STAGING_ROOT/$APP_NAME.app"
+CONTENTS_DIR="$STAGED_APP/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
-RESOURCES_DIR="$APP_BUNDLE/Contents/Resources"
+RESOURCES_DIR="$CONTENTS_DIR/Resources"
 INFO_PLIST="$CONTENTS_DIR/Info.plist"
 
-rm -rf "$APP_BUNDLE"
+cleanup_staging() {
+  rm -rf "$STAGING_ROOT"
+}
+trap cleanup_staging EXIT
+
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$EXECUTABLE" "$MACOS_DIR/$APP_NAME"
 chmod 755 "$MACOS_DIR/$APP_NAME"
@@ -112,12 +142,34 @@ if [[ -z "$SIGN_IDENTITY" ]]; then
     | awk -F'"' '/"/{ print $2; exit }')"
 fi
 if [[ -n "$SIGN_IDENTITY" ]]; then
-  codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_BUNDLE" >/dev/null
+  codesign --force --deep --sign "$SIGN_IDENTITY" "$STAGED_APP" >/dev/null
 else
   echo "Warning: no stable code signing identity found; falling back to ad-hoc signing." >&2
-  codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null
+  codesign --force --deep --sign - "$STAGED_APP" >/dev/null
 fi
-/usr/bin/touch "$APP_BUNDLE"
+/usr/bin/touch "$STAGED_APP"
+
+restore_previous_install() {
+  run_install_command rm -rf "$APP_INSTALLING" 2>/dev/null || true
+  if [[ ! -e "$APP_BUNDLE" && -e "$APP_BACKUP" ]]; then
+    run_install_command mv "$APP_BACKUP" "$APP_BUNDLE" 2>/dev/null || true
+  fi
+  cleanup_staging
+}
+trap restore_previous_install EXIT
+
+run_install_command rm -rf "$APP_INSTALLING" "$APP_BACKUP"
+run_install_command ditto "$STAGED_APP" "$APP_INSTALLING"
+if [[ -e "$APP_BUNDLE" ]]; then
+  run_install_command mv "$APP_BUNDLE" "$APP_BACKUP"
+fi
+if ! run_install_command mv "$APP_INSTALLING" "$APP_BUNDLE"; then
+  echo "Installation failed; restoring the previous app." >&2
+  exit 1
+fi
+run_install_command rm -rf "$APP_BACKUP"
+cleanup_staging
+trap - EXIT
 
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 if [[ -x "$LSREGISTER" ]]; then

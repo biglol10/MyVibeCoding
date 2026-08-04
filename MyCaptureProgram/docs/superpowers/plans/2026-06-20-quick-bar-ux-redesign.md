@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **Status:** Historical implementation plan for the quick-bar redesign. The quick-bar workflow is implemented, and later work added result deletion, recording preview, recording trim-copy export, GIF export, capture history, presets, smart filenames, and floating pins. Use `README.md` and the source code as the current source of truth.
+> **Status:** Historical implementation plan for the quick-bar redesign. The quick-bar workflow is implemented, and later work added window/full-screen capture and recording, result deletion, recording preview, recording trim-copy export, GIF export, capture history, presets, smart filenames, and floating pins. Use `README.md`, the current QA checklist, and the source code as the current source of truth.
 
 **Goal:** Replace the current `New + Mode` workflow with a direct `Capture` / `Record` quick bar while preserving settings, editing, OCR, redaction, shortcut customization, save/copy behavior, and E2E fixes already present in the working tree.
 

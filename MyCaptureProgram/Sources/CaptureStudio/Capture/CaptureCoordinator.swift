@@ -22,6 +22,8 @@ public final class CaptureCoordinator: ObservableObject {
     private let metadataService: CaptureMetadataServicing
     private let floatingPinService: FloatingPinServicing
     private let recordingExportService: RecordingExportServicing
+    private let documentReplacementAuthorizer: DocumentReplacementAuthorizing
+    private var screenshotSaveGenerationByDocumentID: [UUID: UInt64] = [:]
 
     public init(
         appState: AppState,
@@ -42,7 +44,8 @@ public final class CaptureCoordinator: ObservableObject {
         historyStore: CaptureHistoryStore? = nil,
         metadataService: CaptureMetadataServicing = CoreGraphicsCaptureMetadataService(),
         floatingPinService: FloatingPinServicing = AppKitFloatingPinService(),
-        recordingExportService: RecordingExportServicing = AVFoundationRecordingExportService()
+        recordingExportService: RecordingExportServicing = AVFoundationRecordingExportService(),
+        documentReplacementAuthorizer: DocumentReplacementAuthorizing = AppKitDocumentReplacementAuthorizer()
     ) {
         self.appState = appState
         self.settingsStore = settingsStore
@@ -63,6 +66,7 @@ public final class CaptureCoordinator: ObservableObject {
         self.metadataService = metadataService
         self.floatingPinService = floatingPinService
         self.recordingExportService = recordingExportService
+        self.documentReplacementAuthorizer = documentReplacementAuthorizer
     }
 
     public func startNewCapture() async {
@@ -75,9 +79,17 @@ public final class CaptureCoordinator: ObservableObject {
     }
 
     public func startScreenshotCapture() async {
+        guard beginCaptureOperation() else {
+            return
+        }
+        defer { endCaptureOperation() }
+
         do {
             appState.permissionPrompt = nil
             try ensureScreenCaptureAccess()
+            guard var replacement = await authorizeDocumentReplacementIfNeeded() else {
+                return
+            }
             let settings = settingsStore.settings
             let didHideCaptureWindows = hideCaptureWindowsIfNeeded(settings: settings)
             defer { restoreCaptureWindowsIfNeeded(didHideCaptureWindows) }
@@ -85,37 +97,58 @@ public final class CaptureCoordinator: ObservableObject {
             let selection = try await selectCaptureArea()
             let namingContext = metadataService.namingContext(for: selection)
             let result = try await screenshotService.captureImage(selection: selection)
+            guard let refreshedReplacement = await refreshReplacementAuthorizationIfDocumentChanged(replacement) else {
+                return
+            }
+            replacement = refreshedReplacement
             copyToClipboardIfNeeded(result.pngData, settings: settings)
             if settings.automaticallySaveScreenshots {
-                let fileURL = try fileOutputService.writeScreenshotData(
-                    result.pngData,
-                    settings: settings,
-                    date: result.createdAt,
-                    context: namingContext
-                )
+                let fileURL: URL
+                do {
+                    fileURL = try fileOutputService.writeScreenshotData(
+                        result.pngData,
+                        settings: settings,
+                        date: result.createdAt,
+                        context: namingContext
+                    )
+                } catch {
+                    let document = EditorDocument(
+                        kind: .screenshot,
+                        createdAt: result.createdAt,
+                        data: result.pngData,
+                        namingContext: namingContext
+                    )
+                    appState.currentDocument = document
+                    discardSupersededTemporaryRecordingIfNeeded(replacement)
+                    appState.statusMessage = "Screenshot captured but could not be saved: \(error.localizedDescription)"
+                    return
+                }
                 revealIfNeeded(fileURL, settings: settings)
                 let document = EditorDocument(
                     kind: .screenshot,
                     createdAt: result.createdAt,
                     fileURL: fileURL,
+                    fileIdentity: try? CaptureFileIdentity.existingFile(at: fileURL),
                     data: result.pngData,
                     namingContext: namingContext,
                     isDirty: false
                 )
                 appState.currentDocument = document
+                discardSupersededTemporaryRecordingIfNeeded(replacement)
                 addHistoryItem(for: document)
                 appState.statusMessage = "Screenshot captured."
             } else {
-                appState.currentDocument = EditorDocument(
+                let document = EditorDocument(
                     kind: .screenshot,
                     createdAt: result.createdAt,
                     data: result.pngData,
                     namingContext: namingContext
                 )
+                appState.currentDocument = document
+                discardSupersededTemporaryRecordingIfNeeded(replacement)
                 appState.statusMessage = "Screenshot captured. Press Save to write the file."
             }
         } catch {
-            appState.currentDocument = nil
             if isSelectionCancelled(error) {
                 appState.statusMessage = "Screenshot cancelled."
             } else {
@@ -126,38 +159,79 @@ public final class CaptureCoordinator: ObservableObject {
     }
 
     public func startScreenRecording() async {
+        guard beginCaptureOperation() else {
+            return
+        }
+        defer { endCaptureOperation() }
+
         do {
             appState.permissionPrompt = nil
             try ensureScreenCaptureAccess()
+            guard var replacement = await authorizeDocumentReplacementIfNeeded() else {
+                return
+            }
             let settings = settingsStore.settings
-            let didHideCaptureWindows = hideCaptureWindowsIfNeeded(settings: settings)
-            defer { restoreCaptureWindowsIfNeeded(didHideCaptureWindows) }
+            var captureWindowsAreHidden = hideCaptureWindowsIfNeeded(settings: settings)
+            defer { restoreCaptureWindowsIfNeeded(captureWindowsAreHidden) }
             let selection = try await selectCaptureArea()
+            restoreCaptureWindowsIfNeeded(captureWindowsAreHidden)
+            captureWindowsAreHidden = false
             let namingContext = metadataService.namingContext(for: selection)
             try await waitIfNeeded(seconds: settings.countdownSeconds)
-            let outputURL = settings.automaticallySaveRecordings
-                ? fileOutputService.availableRecordingURL(settings: settings, context: namingContext)
-                : fileOutputService.temporaryRecordingURL()
+            let outputURL = fileOutputService.temporaryRecordingURL()
             appState.isRecordingInProgress = true
             defer { appState.isRecordingInProgress = false }
             let result = try await recordingService.recordScreen(selection: selection, to: outputURL, settings: settings)
+            guard let refreshedReplacement = await refreshReplacementAuthorizationIfDocumentChanged(replacement) else {
+                discardRecordingResultIfOwned(result)
+                return
+            }
+            replacement = refreshedReplacement
+            let finalURL: URL
+            if settings.automaticallySaveRecordings {
+                do {
+                    finalURL = try await fileOutputService.moveRecordingFileAsync(
+                        from: result.fileURL,
+                        expectedSourceIdentity: result.fileIdentity,
+                        settings: settings,
+                        date: result.createdAt,
+                        context: namingContext
+                    )
+                } catch {
+                    let document = EditorDocument(
+                        kind: .recording,
+                        createdAt: result.createdAt,
+                        fileURL: result.fileURL,
+                        fileIdentity: result.fileIdentity,
+                        namingContext: namingContext,
+                        isDirty: true
+                    )
+                    appState.currentDocument = document
+                    discardSupersededTemporaryRecordingIfNeeded(replacement)
+                    appState.statusMessage = "Recording captured but could not be saved: \(error.localizedDescription)"
+                    return
+                }
+            } else {
+                finalURL = result.fileURL
+            }
             let document = EditorDocument(
                 kind: .recording,
                 createdAt: result.createdAt,
-                fileURL: result.fileURL,
+                fileURL: finalURL,
+                fileIdentity: try? CaptureFileIdentity.existingFile(at: finalURL),
                 namingContext: namingContext,
                 isDirty: !settings.automaticallySaveRecordings
             )
             appState.currentDocument = document
+            discardSupersededTemporaryRecordingIfNeeded(replacement)
             if settings.automaticallySaveRecordings {
                 addHistoryItem(for: document)
-                revealIfNeeded(result.fileURL, settings: settings)
+                revealIfNeeded(finalURL, settings: settings)
                 appState.statusMessage = "Recording saved."
             } else {
                 appState.statusMessage = "Recording captured. Press Save to write the file."
             }
         } catch {
-            appState.currentDocument = nil
             if isSelectionCancelled(error) {
                 appState.statusMessage = "Recording cancelled."
             } else if isRecordingStoppedByUser(error) {
@@ -187,8 +261,16 @@ public final class CaptureCoordinator: ObservableObject {
 
         switch document.kind {
         case .screenshot:
+            let saveGeneration = nextScreenshotSaveGeneration(for: document.id)
+            let expectedRevision = ScreenshotContentRevision(document)
             do {
                 let outputData = try await screenshotDataForOutput(document)
+                guard isCurrentScreenshotSave(
+                    saveGeneration,
+                    expectedRevision: expectedRevision
+                ) else {
+                    return
+                }
                 let fileURL = try fileOutputService.writeScreenshotData(
                     outputData,
                     settings: settingsStore.settings,
@@ -196,18 +278,31 @@ public final class CaptureCoordinator: ObservableObject {
                     context: document.namingContext
                 )
                 revealIfNeeded(fileURL, settings: settingsStore.settings)
-                document.data = outputData
-                document.renderedImageData = outputData
                 document.fileURL = fileURL
+                document.fileIdentity = try? CaptureFileIdentity.existingFile(at: fileURL)
                 document.savedSnapshot = document.currentSnapshot
                 document.isDirty = false
-                appState.currentDocument = document
-                addHistoryItem(for: document)
+                if var currentDocument = appState.currentDocument,
+                   ScreenshotContentRevision(currentDocument) == expectedRevision {
+                    currentDocument.fileURL = fileURL
+                    currentDocument.fileIdentity = document.fileIdentity
+                    currentDocument.renderedImageData = nil
+                    currentDocument.savedSnapshot = document.currentSnapshot
+                    currentDocument.refreshDirtyState()
+                    appState.currentDocument = currentDocument
+                }
+                var historyDocument = document
+                historyDocument.renderedImageData = outputData
+                addHistoryItem(for: historyDocument)
                 appState.statusMessage = "Screenshot saved."
             } catch let error as ImageRenderError {
-                appState.statusMessage = "Image render failed: \(error.localizedDescription)"
+                if isCurrentScreenshotSave(saveGeneration, expectedRevision: expectedRevision) {
+                    appState.statusMessage = "Image render failed: \(error.localizedDescription)"
+                }
             } catch {
-                appState.statusMessage = "Save failed: \(error.localizedDescription)"
+                if isCurrentScreenshotSave(saveGeneration, expectedRevision: expectedRevision) {
+                    appState.statusMessage = "Save failed: \(error.localizedDescription)"
+                }
             }
         case .recording:
             guard document.isDirty else {
@@ -219,17 +314,27 @@ public final class CaptureCoordinator: ObservableObject {
                 appState.statusMessage = "No recording file to save."
                 return
             }
+            guard let sourceIdentity = validatedRecordingIdentity(for: document, at: sourceURL) else {
+                appState.statusMessage = "Save stopped because the recording changed on disk."
+                return
+            }
+            guard beginFileOperation(allowDuringCapture: true) else {
+                return
+            }
+            defer { endFileOperation() }
 
             do {
                 let settings = settingsStore.settings
-                let fileURL = try fileOutputService.moveRecordingFile(
+                let fileURL = try await fileOutputService.moveRecordingFileAsync(
                     from: sourceURL,
+                    expectedSourceIdentity: sourceIdentity,
                     settings: settings,
                     date: document.createdAt,
                     context: document.namingContext
                 )
                 revealIfNeeded(fileURL, settings: settings)
                 document.fileURL = fileURL
+                document.fileIdentity = try? CaptureFileIdentity.existingFile(at: fileURL)
                 document.isDirty = false
                 appState.currentDocument = document
                 addHistoryItem(for: document)
@@ -285,8 +390,14 @@ public final class CaptureCoordinator: ObservableObject {
             return
         }
 
+        if let fileIdentity = document.fileIdentity,
+           !fileIdentity.matchesExistingFile(at: fileURL) {
+            appState.statusMessage = "Delete stopped because the file changed on disk."
+            return
+        }
+
         do {
-            try fileTrashService.trash(fileURL)
+            try fileTrashService.trash(fileURL, expectedIdentity: document.fileIdentity)
             historyStore?.remove(fileURL: fileURL)
             appState.currentDocument = nil
             appState.statusMessage = deletedMessage
@@ -295,57 +406,54 @@ public final class CaptureCoordinator: ObservableObject {
         }
     }
 
-    public func openHistoryItem(_ item: CaptureHistoryItem) {
-        guard FileManager.default.fileExists(atPath: item.fileURL.path) else {
-            historyStore?.remove(id: item.id)
-            appState.statusMessage = "History file is missing."
+    public func openHistoryItem(_ item: CaptureHistoryItem) async {
+        guard validateHistoryItemForOpening(item) else {
+            return
+        }
+        guard var replacement = await authorizeDocumentReplacementIfNeeded(
+            cancelStatusMessage: "History item was not opened. Current document was preserved."
+        ) else {
+            return
+        }
+        guard let refreshedReplacement = await refreshReplacementAuthorizationIfDocumentChanged(
+            replacement,
+            cancelStatusMessage: "History item was not opened. Current document was preserved."
+        ) else {
+            return
+        }
+        replacement = refreshedReplacement
+        guard validateHistoryItemForOpening(item),
+              let historyDocument = historyDocument(for: item)
+        else {
             return
         }
 
-        switch item.kind {
-        case .screenshot:
-            do {
-                let data = try Data(contentsOf: item.fileURL)
-                appState.currentDocument = EditorDocument(
-                    kind: .screenshot,
-                    createdAt: item.createdAt,
-                    fileURL: item.fileURL,
-                    data: data,
-                    namingContext: FileNamingContext(
-                        applicationName: item.sourceApplication ?? item.detail,
-                        windowTitle: item.windowTitle
-                    ),
-                    isDirty: false
-                )
-                appState.statusMessage = "History item opened."
-            } catch {
-                appState.statusMessage = "History item could not be opened."
-            }
-        case .recording:
-            appState.currentDocument = EditorDocument(
-                kind: .recording,
-                createdAt: item.createdAt,
-                fileURL: item.fileURL,
-                namingContext: FileNamingContext(
-                    applicationName: item.sourceApplication ?? item.detail,
-                    windowTitle: item.windowTitle
-                ),
-                isDirty: false
-            )
-            appState.statusMessage = "History item opened."
-        }
+        discardSupersededTemporaryRecordingIfNeeded(replacement)
+        appState.currentDocument = historyDocument
+        appState.statusMessage = "History item opened."
     }
 
     public func deleteHistoryItem(_ item: CaptureHistoryItem) {
         do {
             if FileManager.default.fileExists(atPath: item.fileURL.path) {
-                try fileTrashService.trash(item.fileURL)
+                guard let fileIdentity = item.fileIdentity,
+                      fileIdentity.matchesExistingFile(at: item.fileURL)
+                else {
+                    historyStore?.remove(id: item.id)
+                    appState.statusMessage = "History entry removed. The file changed and was not deleted."
+                    return
+                }
+                try fileTrashService.trash(item.fileURL, expectedIdentity: fileIdentity)
             }
-            historyStore?.remove(id: item.id)
+            let thumbnailCleanupSucceeded = historyStore?.remove(id: item.id) ?? true
             if appState.currentDocument?.fileURL?.standardizedFileURL == item.fileURL.standardizedFileURL {
                 appState.currentDocument = nil
             }
-            appState.statusMessage = item.kind == .recording ? "Recording deleted." : "Screenshot deleted."
+            if thumbnailCleanupSucceeded {
+                appState.statusMessage = item.kind == .recording ? "Recording deleted." : "Screenshot deleted."
+            } else {
+                appState.statusMessage = "Capture deleted, but its history thumbnail could not be removed."
+            }
         } catch {
             appState.statusMessage = "Delete failed: \(error.localizedDescription)"
         }
@@ -367,8 +475,12 @@ public final class CaptureCoordinator: ObservableObject {
         }
     }
 
-    public func trimCurrentRecording(startSeconds: Double, endSeconds: Double) async {
-        guard var document = appState.currentDocument, document.kind == .recording else {
+    public func trimCurrentRecording(startSeconds: Double, endSeconds: Double?) async {
+        guard beginFileOperation() else {
+            return
+        }
+        defer { endFileOperation() }
+        guard let document = appState.currentDocument, document.kind == .recording else {
             appState.statusMessage = "No recording to trim."
             return
         }
@@ -376,33 +488,66 @@ public final class CaptureCoordinator: ObservableObject {
             appState.statusMessage = "No recording file to trim."
             return
         }
+        guard let sourceIdentity = validatedRecordingIdentity(for: document, at: sourceURL) else {
+            appState.statusMessage = "Trim stopped because the recording changed on disk."
+            return
+        }
 
-        let outputURL = fileOutputService.trimmedRecordingURL(
-            settings: settingsStore.settings,
-            date: Date(),
-            context: document.namingContext
-        )
+        let exportDate = Date()
+        let temporaryOutputURL = fileOutputService.temporaryRecordingURL()
+        var producedResult: RecordingExportResult?
         do {
-            let trimmedURL = try await recordingExportService.trimRecording(
+            let exportResult = try await recordingExportService.trimRecording(
                 sourceURL: sourceURL,
                 startSeconds: startSeconds,
                 endSeconds: endSeconds,
-                outputURL: outputURL
+                outputURL: temporaryOutputURL
             )
-            document.fileURL = trimmedURL
-            document.createdAt = Date()
-            document.isDirty = false
-            appState.currentDocument = document
-            addHistoryItem(for: document)
+            producedResult = exportResult
+            let temporaryTrimmedURL = exportResult.fileURL
+            guard var currentDocument = appState.currentDocument,
+                  currentDocument.id == document.id,
+                  currentDocument.fileURL?.standardizedFileURL == sourceURL.standardizedFileURL
+            else {
+                discardExportResultIfOwned(exportResult)
+                appState.statusMessage = "Trim cancelled because the document changed."
+                return
+            }
+            guard sourceIdentity.matchesExistingFile(at: sourceURL),
+                  currentDocument.fileIdentity == nil || currentDocument.fileIdentity == sourceIdentity
+            else {
+                discardExportResultIfOwned(exportResult)
+                appState.statusMessage = "Trim cancelled because the source recording changed."
+                return
+            }
+            let trimmedURL = try await fileOutputService.moveTrimmedRecordingFileAsync(
+                from: temporaryTrimmedURL,
+                expectedSourceIdentity: exportResult.fileIdentity,
+                settings: settingsStore.settings,
+                date: exportDate,
+                context: document.namingContext
+            )
+            currentDocument.fileURL = trimmedURL
+            currentDocument.fileIdentity = try? CaptureFileIdentity.existingFile(at: trimmedURL)
+            currentDocument.createdAt = Date()
+            currentDocument.isDirty = false
+            appState.currentDocument = currentDocument
+            addHistoryItem(for: currentDocument)
             revealIfNeeded(trimmedURL, settings: settingsStore.settings)
             appState.statusMessage = "Recording trimmed."
         } catch {
-            try? FileManager.default.removeItem(at: outputURL)
+            if let producedResult {
+                discardExportResultIfOwned(producedResult)
+            }
             appState.statusMessage = "Trim failed: \(error.localizedDescription)"
         }
     }
 
     public func exportCurrentRecordingAsGIF() async {
+        guard beginFileOperation() else {
+            return
+        }
+        defer { endFileOperation() }
         guard let document = appState.currentDocument, document.kind == .recording else {
             appState.statusMessage = "No recording to export."
             return
@@ -411,37 +556,72 @@ public final class CaptureCoordinator: ObservableObject {
             appState.statusMessage = "No recording file to export."
             return
         }
+        guard let sourceIdentity = validatedRecordingIdentity(for: document, at: sourceURL) else {
+            appState.statusMessage = "GIF export stopped because the recording changed on disk."
+            return
+        }
 
-        let outputURL = fileOutputService.gifRecordingURL(
-            settings: settingsStore.settings,
-            date: Date(),
-            context: document.namingContext
-        )
+        let exportDate = Date()
+        let temporaryOutputURL = fileOutputService.temporaryGIFURL()
+        var producedResult: RecordingExportResult?
         do {
-            let gifURL = try await recordingExportService.exportGIF(
+            let exportResult = try await recordingExportService.exportGIF(
                 sourceURL: sourceURL,
-                outputURL: outputURL,
+                outputURL: temporaryOutputURL,
                 maxDurationSeconds: nil
+            )
+            producedResult = exportResult
+            let temporaryGIFURL = exportResult.fileURL
+            guard let currentDocument = appState.currentDocument,
+                  currentDocument.id == document.id,
+                  currentDocument.fileURL?.standardizedFileURL == sourceURL.standardizedFileURL
+            else {
+                discardExportResultIfOwned(exportResult)
+                appState.statusMessage = "GIF export cancelled because the document changed."
+                return
+            }
+            guard sourceIdentity.matchesExistingFile(at: sourceURL),
+                  currentDocument.fileIdentity == nil || currentDocument.fileIdentity == sourceIdentity
+            else {
+                discardExportResultIfOwned(exportResult)
+                appState.statusMessage = "GIF export cancelled because the source recording changed."
+                return
+            }
+            let gifURL = try await fileOutputService.moveGIFFileAsync(
+                from: temporaryGIFURL,
+                expectedSourceIdentity: exportResult.fileIdentity,
+                settings: settingsStore.settings,
+                date: exportDate,
+                context: document.namingContext
             )
             fileRevealService.reveal(gifURL)
             appState.statusMessage = "GIF exported."
         } catch {
-            try? FileManager.default.removeItem(at: outputURL)
+            if let producedResult {
+                discardExportResultIfOwned(producedResult)
+            }
             appState.statusMessage = "GIF export failed: \(error.localizedDescription)"
         }
     }
 
     public func runOCR() async {
-        guard var document = appState.currentDocument, document.kind == .screenshot else {
+        guard let document = appState.currentDocument, document.kind == .screenshot else {
             appState.statusMessage = "No screenshot to scan."
             return
         }
+        let expectedRevision = ScreenshotContentRevision(document)
 
         do {
             let data = try await screenshotDataForOutput(document)
             let result = try await ocrService.recognizeText(in: data)
-            document.ocrResult = result
-            appState.currentDocument = document
+            guard var currentDocument = appState.currentDocument,
+                  ScreenshotContentRevision(currentDocument) == expectedRevision
+            else {
+                appState.statusMessage = "OCR cancelled because the document changed."
+                return
+            }
+            currentDocument.ocrResult = result
+            appState.currentDocument = currentDocument
             appState.statusMessage = "OCR complete."
         } catch {
             appState.statusMessage = "OCR failed: \(error.localizedDescription)"
@@ -472,6 +652,7 @@ public final class CaptureCoordinator: ObservableObject {
             appState.statusMessage = "No screenshot to redact."
             return
         }
+        let expectedRevision = ScreenshotContentRevision(document)
 
         do {
             let result: OCRResult
@@ -480,6 +661,13 @@ public final class CaptureCoordinator: ObservableObject {
             } else {
                 let data = try await screenshotDataForOutput(document)
                 result = try await ocrService.recognizeText(in: data)
+                guard let currentDocument = appState.currentDocument,
+                      ScreenshotContentRevision(currentDocument) == expectedRevision
+                else {
+                    appState.statusMessage = "Redaction cancelled because the document changed."
+                    return
+                }
+                document = currentDocument
                 document.ocrResult = result
             }
 
@@ -504,9 +692,11 @@ public final class CaptureCoordinator: ObservableObject {
             document.layers.append(contentsOf: newLayers)
             document.selectedLayerID = newLayers.last?.id
             document.renderedImageData = nil
+            document.ocrResult = nil
             document.isDirty = true
             appState.currentDocument = document
-            appState.statusMessage = newLayers.count == 1 ? "Redaction added." : "\(newLayers.count) redactions added."
+            let resultSummary = newLayers.count == 1 ? "Redaction added." : "\(newLayers.count) redactions added."
+            appState.statusMessage = "\(resultSummary) Save or Copy creates a redacted version; the original file and clipboard are unchanged."
         } catch {
             appState.statusMessage = "Redaction failed: \(error.localizedDescription)"
         }
@@ -573,6 +763,7 @@ public final class CaptureCoordinator: ObservableObject {
                 fileURL: fileURL,
                 title: title,
                 detail: detail,
+                fileIdentity: try? CaptureFileIdentity.existingFile(at: fileURL),
                 thumbnailData: Self.historyThumbnailData(for: document),
                 sourceApplication: context?.applicationName,
                 windowTitle: context?.windowTitle
@@ -633,6 +824,223 @@ public final class CaptureCoordinator: ObservableObject {
         windowVisibilityController.restoreCaptureWindows()
     }
 
+    private struct ReplacementAuthorization {
+        let document: EditorDocument?
+        let shouldDiscardUnsavedRecording: Bool
+    }
+
+    private func beginCaptureOperation() -> Bool {
+        guard !appState.isFileOperationInProgress else {
+            appState.statusMessage = "A file operation is already in progress."
+            return false
+        }
+        guard !appState.isCaptureOperationInProgress else {
+            appState.statusMessage = "Another capture operation is already in progress."
+            return false
+        }
+
+        appState.isCaptureOperationInProgress = true
+        return true
+    }
+
+    private func endCaptureOperation() {
+        appState.isCaptureOperationInProgress = false
+    }
+
+    private func beginFileOperation(allowDuringCapture: Bool = false) -> Bool {
+        guard !appState.isFileOperationInProgress else {
+            appState.statusMessage = "A file operation is already in progress."
+            return false
+        }
+        guard allowDuringCapture || !appState.isCaptureOperationInProgress else {
+            appState.statusMessage = "A capture operation is already in progress."
+            return false
+        }
+        appState.isFileOperationInProgress = true
+        return true
+    }
+
+    private func endFileOperation() {
+        appState.isFileOperationInProgress = false
+    }
+
+    private func nextScreenshotSaveGeneration(for documentID: UUID) -> UInt64 {
+        let nextGeneration = (screenshotSaveGenerationByDocumentID[documentID] ?? 0) &+ 1
+        screenshotSaveGenerationByDocumentID[documentID] = nextGeneration
+        return nextGeneration
+    }
+
+    private func isLatestScreenshotSave(_ generation: UInt64, for documentID: UUID) -> Bool {
+        screenshotSaveGenerationByDocumentID[documentID] == generation
+    }
+
+    private func isCurrentScreenshotSave(
+        _ generation: UInt64,
+        expectedRevision: ScreenshotContentRevision
+    ) -> Bool {
+        guard isLatestScreenshotSave(generation, for: expectedRevision.documentID),
+              let currentDocument = appState.currentDocument
+        else {
+            return false
+        }
+        return ScreenshotContentRevision(currentDocument) == expectedRevision
+    }
+
+    private func validatedRecordingIdentity(
+        for document: EditorDocument,
+        at fileURL: URL
+    ) -> CaptureFileIdentity? {
+        let identity = document.fileIdentity ?? (try? CaptureFileIdentity.existingFile(at: fileURL))
+        guard let identity, identity.matchesExistingFile(at: fileURL) else {
+            return nil
+        }
+        return identity
+    }
+
+    private func authorizeDocumentReplacementIfNeeded(
+        cancelStatusMessage: String = "Capture cancelled. Current document was preserved."
+    ) async -> ReplacementAuthorization? {
+        while true {
+            guard let document = appState.currentDocument, document.isDirty else {
+                return ReplacementAuthorization(
+                    document: appState.currentDocument,
+                    shouldDiscardUnsavedRecording: false
+                )
+            }
+
+            let decision = await documentReplacementAuthorizer.replacementDecision(for: document)
+            guard appState.currentDocument == document else {
+                continue
+            }
+
+            switch decision {
+            case .save:
+                await saveCurrentDocument()
+                guard let savedDocument = appState.currentDocument else {
+                    continue
+                }
+                guard savedDocument.id == document.id else {
+                    continue
+                }
+                guard !savedDocument.isDirty else {
+                    return nil
+                }
+                return ReplacementAuthorization(
+                    document: savedDocument,
+                    shouldDiscardUnsavedRecording: false
+                )
+            case .discard:
+                return ReplacementAuthorization(
+                    document: document,
+                    shouldDiscardUnsavedRecording: true
+                )
+            case .cancel:
+                appState.statusMessage = cancelStatusMessage
+                return nil
+            }
+        }
+    }
+
+    private func refreshReplacementAuthorizationIfDocumentChanged(
+        _ authorization: ReplacementAuthorization,
+        cancelStatusMessage: String = "Capture cancelled. Current document was preserved."
+    ) async -> ReplacementAuthorization? {
+        guard appState.currentDocument != authorization.document else {
+            return authorization
+        }
+        return await authorizeDocumentReplacementIfNeeded(cancelStatusMessage: cancelStatusMessage)
+    }
+
+    private func validateHistoryItemForOpening(_ item: CaptureHistoryItem) -> Bool {
+        guard FileManager.default.fileExists(atPath: item.fileURL.path) else {
+            historyStore?.remove(id: item.id)
+            appState.statusMessage = "History file is missing."
+            return false
+        }
+        if let fileIdentity = item.fileIdentity,
+           !fileIdentity.matchesExistingFile(at: item.fileURL) {
+            historyStore?.remove(id: item.id)
+            appState.statusMessage = "History file changed and was not opened."
+            return false
+        }
+        return true
+    }
+
+    private func historyDocument(for item: CaptureHistoryItem) -> EditorDocument? {
+        do {
+            let fileIdentity = try item.fileIdentity ?? CaptureFileIdentity.existingFile(at: item.fileURL)
+            let namingContext = FileNamingContext(
+                applicationName: item.sourceApplication ?? item.detail,
+                windowTitle: item.windowTitle
+            )
+            switch item.kind {
+            case .screenshot:
+                let data = try Data(contentsOf: item.fileURL)
+                guard fileIdentity.matchesExistingFile(at: item.fileURL) else {
+                    appState.statusMessage = "History file changed and was not opened."
+                    return nil
+                }
+                return EditorDocument(
+                    kind: .screenshot,
+                    createdAt: item.createdAt,
+                    fileURL: item.fileURL,
+                    fileIdentity: fileIdentity,
+                    data: data,
+                    namingContext: namingContext,
+                    isDirty: false
+                )
+            case .recording:
+                return EditorDocument(
+                    kind: .recording,
+                    createdAt: item.createdAt,
+                    fileURL: item.fileURL,
+                    fileIdentity: fileIdentity,
+                    namingContext: namingContext,
+                    isDirty: false
+                )
+            }
+        } catch {
+            appState.statusMessage = "History item could not be opened."
+            return nil
+        }
+    }
+
+    private func discardSupersededTemporaryRecordingIfNeeded(_ replacement: ReplacementAuthorization) {
+        guard replacement.shouldDiscardUnsavedRecording,
+              let document = replacement.document,
+              document.kind == .recording,
+              document.isDirty,
+              let fileURL = document.fileURL,
+              let fileIdentity = document.fileIdentity,
+              fileIdentity.matchesExistingFile(at: fileURL),
+              fileURL.standardizedFileURL.path.hasPrefix(
+                FileManager.default.temporaryDirectory.standardizedFileURL.path + "/"
+              )
+        else {
+            return
+        }
+
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+
+    private func discardRecordingResultIfOwned(_ result: RecordingResult) {
+        guard let fileIdentity = result.fileIdentity,
+              fileIdentity.matchesExistingFile(at: result.fileURL)
+        else {
+            return
+        }
+        try? FileManager.default.removeItem(at: result.fileURL)
+    }
+
+    private func discardExportResultIfOwned(_ result: RecordingExportResult) {
+        guard let fileIdentity = result.fileIdentity,
+              fileIdentity.matchesExistingFile(at: result.fileURL)
+        else {
+            return
+        }
+        try? FileManager.default.removeItem(at: result.fileURL)
+    }
+
     private func userMessage(for error: Error) -> String {
         if let permissionError = error as? ScreenCapturePermissionError {
             return permissionError.localizedDescription
@@ -663,5 +1071,21 @@ public final class CaptureCoordinator: ObservableObject {
         }
 
         return selectionError == .cancelled
+    }
+}
+
+private struct ScreenshotContentRevision: Equatable {
+    let documentID: UUID
+    let data: Data?
+    let baseImageData: Data?
+    let renderedImageData: Data?
+    let layers: [EditorLayer]
+
+    init(_ document: EditorDocument) {
+        documentID = document.id
+        data = document.data
+        baseImageData = document.baseImageData
+        renderedImageData = document.renderedImageData
+        layers = document.layers
     }
 }

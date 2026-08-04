@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import MyMacFinder
 
@@ -397,6 +398,397 @@ final class FileTableViewReuseTests: XCTestCase {
         XCTAssertEqual(harness.tableView.selectedRowIndexes, IndexSet(integer: 0))
     }
 
+    func testMountedFileTableRespondsToLateInlineRenameRequest() throws {
+        let entry = makeTableEntry(name: "rename-me.txt")
+        let model = MountedInlineRenameModel(entry: entry)
+        let hostingView = NSHostingView(rootView: MountedInlineRenameView(model: model))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+        }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        model.inlineRenameRequest = InlineRenameRequest(paneID: model.paneID, url: entry.url)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+
+        let tableView = try XCTUnwrap(hostingView.firstDescendant(ofType: NSTableView.self))
+        let coordinator = try XCTUnwrap(tableView.delegate as? FileTableView.Coordinator)
+        XCTAssertEqual(coordinator.parent.inlineRenameRequest?.id, model.inlineRenameRequest?.id)
+        XCTAssertEqual(tableView.numberOfRows, 1)
+        let editor = try XCTUnwrap(hostingView.inlineRenameEditor)
+        XCTAssertEqual(editor.stringValue, "rename-me.txt")
+    }
+
+    func testMountedInlineRenameEscapeRemovesEditorWithoutCommitting() throws {
+        let entry = makeTableEntry(name: "rename-me.txt")
+        let model = MountedInlineRenameModel(entry: entry)
+        let hostingView = NSHostingView(rootView: MountedInlineRenameView(model: model))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+        }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        model.inlineRenameRequest = InlineRenameRequest(paneID: model.paneID, url: entry.url)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        let tableView = try XCTUnwrap(hostingView.firstDescendant(ofType: NSTableView.self))
+        let editor = try XCTUnwrap(hostingView.inlineRenameEditor as? FileTableView.InlineRenameTextField)
+        editor.stringValue = "must-not-commit.txt"
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: "\u{1b}",
+            charactersIgnoringModifiers: "\u{1b}",
+            isARepeat: false,
+            keyCode: 53
+        ))
+
+        editor.keyDown(with: event)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        XCTAssertNil(hostingView.inlineRenameEditor)
+        XCTAssertTrue(model.renamedNames.isEmpty)
+        XCTAssertTrue(window.firstResponder === tableView)
+    }
+
+    func testMountedInlineRenameFieldEditorEscapeCommandRemovesEditorWithoutCommitting() throws {
+        let entry = makeTableEntry(name: "rename-me.txt")
+        let model = MountedInlineRenameModel(entry: entry)
+        let hostingView = NSHostingView(rootView: MountedInlineRenameView(model: model))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+        }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        model.inlineRenameRequest = InlineRenameRequest(paneID: model.paneID, url: entry.url)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        let tableView = try XCTUnwrap(hostingView.firstDescendant(ofType: NSTableView.self))
+        let coordinator = try XCTUnwrap(tableView.delegate as? FileTableView.Coordinator)
+        let editor = try XCTUnwrap(hostingView.inlineRenameEditor as? FileTableView.InlineRenameTextField)
+        let fieldEditor = try XCTUnwrap(editor.currentEditor() as? NSTextView)
+        fieldEditor.string = "must-not-commit.txt"
+
+        let handled = coordinator.control(
+            editor,
+            textView: fieldEditor,
+            doCommandBy: #selector(NSResponder.cancelOperation(_:))
+        )
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        XCTAssertTrue(handled)
+        XCTAssertNil(hostingView.inlineRenameEditor)
+        XCTAssertTrue(model.renamedNames.isEmpty)
+        XCTAssertTrue(window.firstResponder === tableView)
+    }
+
+    func testMountedInlineRenameFieldEditorReturnCommandCommitsAndRemovesEditor() throws {
+        let entry = makeTableEntry(name: "rename-me.txt")
+        let model = MountedInlineRenameModel(entry: entry)
+        let hostingView = NSHostingView(rootView: MountedInlineRenameView(model: model))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+        }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        model.inlineRenameRequest = InlineRenameRequest(paneID: model.paneID, url: entry.url)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        let tableView = try XCTUnwrap(hostingView.firstDescendant(ofType: NSTableView.self))
+        let coordinator = try XCTUnwrap(tableView.delegate as? FileTableView.Coordinator)
+        let editor = try XCTUnwrap(hostingView.inlineRenameEditor as? FileTableView.InlineRenameTextField)
+        let fieldEditor = try XCTUnwrap(editor.currentEditor() as? NSTextView)
+        fieldEditor.string = "renamed.txt"
+
+        let handled = coordinator.control(
+            editor,
+            textView: fieldEditor,
+            doCommandBy: #selector(NSResponder.insertNewline(_:))
+        )
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        XCTAssertTrue(handled)
+        XCTAssertNil(hostingView.inlineRenameEditor)
+        XCTAssertEqual(model.renamedNames, ["renamed.txt"])
+        XCTAssertTrue(window.firstResponder === tableView)
+    }
+
+    func testMountedInlineRenameReturnCommitsAndRestoresTableFocus() throws {
+        let entry = makeTableEntry(name: "rename-me.txt")
+        let model = MountedInlineRenameModel(entry: entry)
+        let hostingView = NSHostingView(rootView: MountedInlineRenameView(model: model))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+        }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        model.inlineRenameRequest = InlineRenameRequest(paneID: model.paneID, url: entry.url)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        let tableView = try XCTUnwrap(hostingView.firstDescendant(ofType: NSTableView.self))
+        let editor = try XCTUnwrap(hostingView.inlineRenameEditor as? FileTableView.InlineRenameTextField)
+        editor.stringValue = "renamed.txt"
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: "\r",
+            charactersIgnoringModifiers: "\r",
+            isARepeat: false,
+            keyCode: 36
+        ))
+
+        editor.keyDown(with: event)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        XCTAssertNil(hostingView.inlineRenameEditor)
+        XCTAssertEqual(model.renamedNames, ["renamed.txt"])
+        XCTAssertTrue(window.firstResponder === tableView)
+    }
+
+    func testMountedInlineRenameCommitsFocusLossDuringEditorPreparation() throws {
+        let entry = makeTableEntry(name: "rename-me.txt")
+        let model = MountedInlineRenameModel(entry: entry)
+        let hostingView = NSHostingView(rootView: MountedInlineRenameView(model: model))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+        }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        model.inlineRenameRequest = InlineRenameRequest(paneID: model.paneID, url: entry.url)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+        let tableView = try XCTUnwrap(hostingView.firstDescendant(ofType: NSTableView.self))
+        let editor = try XCTUnwrap(hostingView.inlineRenameEditor as? FileTableView.InlineRenameTextField)
+        editor.stringValue = "focus-committed.txt"
+        editor.currentEditor()?.string = "focus-committed.txt"
+
+        window.makeFirstResponder(tableView)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+
+        XCTAssertNil(hostingView.inlineRenameEditor)
+        XCTAssertEqual(model.renamedNames, ["focus-committed.txt"])
+        XCTAssertTrue(window.firstResponder === tableView)
+    }
+
+    func testRootViewInlineRenameReturnRestoresTableFocusAfterAsyncRefresh() async throws {
+        let fileManager = FileManager.default
+        let temporaryDirectory = fileManager.temporaryDirectory.appendingPathComponent(
+            "MyMacFinder-RootRenameFocus-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try fileManager.createDirectory(at: temporaryDirectory, withIntermediateDirectories: false)
+        defer {
+            do {
+                try fileManager.removeItem(at: temporaryDirectory)
+                XCTAssertFalse(fileManager.fileExists(atPath: temporaryDirectory.path))
+            } catch {
+                XCTFail("Failed to remove test directory \(temporaryDirectory.path): \(error)")
+            }
+        }
+
+        let originalURL = temporaryDirectory.appendingPathComponent("rename-me.txt")
+        let renamedURL = temporaryDirectory.appendingPathComponent("renamed.txt")
+        try Data().write(to: originalURL)
+        let store = ExplorerStore(initialURL: temporaryDirectory, directoryWatcher: nil)
+        await store.refresh()
+
+        let hostingView = NSHostingView(rootView: RootView().environmentObject(store))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1_200, height: 700),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+        }
+        try await Task.sleep(for: .milliseconds(150))
+
+        store.updateSelection([originalURL.standardizedFileURL])
+        store.requestInlineRenameForSelection()
+        let presentedEditor = await waitForInlineRenameEditor(in: hostingView)
+        let editor = try XCTUnwrap(presentedEditor)
+        let tableView = try XCTUnwrap(hostingView.firstDescendant(ofType: NSTableView.self))
+        editor.stringValue = "renamed.txt"
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: "\r",
+            charactersIgnoringModifiers: "\r",
+            isARepeat: false,
+            keyCode: 36
+        ))
+
+        editor.keyDown(with: event)
+        let didRename = await waitForFile(at: renamedURL, store: store)
+        XCTAssertTrue(didRename)
+
+        XCTAssertFalse(fileManager.fileExists(atPath: originalURL.path))
+        XCTAssertTrue(store.canUndo)
+        XCTAssertTrue(window.firstResponder === tableView)
+    }
+
+    func testRootViewInlineRenameCommitKeepsOriginalTargetAfterSelectionChanges() async throws {
+        let fileManager = FileManager.default
+        let temporaryDirectory = fileManager.temporaryDirectory.appendingPathComponent(
+            "MyMacFinder-RenameTarget-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try fileManager.createDirectory(at: temporaryDirectory, withIntermediateDirectories: false)
+        defer {
+            do {
+                try fileManager.removeItem(at: temporaryDirectory)
+                XCTAssertFalse(fileManager.fileExists(atPath: temporaryDirectory.path))
+            } catch {
+                XCTFail("Failed to remove test directory \(temporaryDirectory.path): \(error)")
+            }
+        }
+
+        let originalTarget = temporaryDirectory.appendingPathComponent("first.txt")
+        let otherFile = temporaryDirectory.appendingPathComponent("second.txt")
+        let renamedTarget = temporaryDirectory.appendingPathComponent("renamed-first.txt")
+        try Data("first".utf8).write(to: originalTarget)
+        try Data("second".utf8).write(to: otherFile)
+        let store = ExplorerStore(initialURL: temporaryDirectory, directoryWatcher: nil)
+        await store.refresh()
+
+        let hostingView = NSHostingView(rootView: RootView().environmentObject(store))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1_200, height: 700),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+        }
+        try await Task.sleep(for: .milliseconds(150))
+
+        store.updateSelection([originalTarget.standardizedFileURL])
+        store.requestInlineRenameForSelection()
+        let presentedEditor = await waitForInlineRenameEditor(in: hostingView)
+        let editor = try XCTUnwrap(presentedEditor)
+        editor.stringValue = "renamed-first.txt"
+        store.updateSelection([otherFile.standardizedFileURL])
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: "\r",
+            charactersIgnoringModifiers: "\r",
+            isARepeat: false,
+            keyCode: 36
+        ))
+
+        editor.keyDown(with: event)
+        let didRenameOriginal = await waitForPathChange(
+            expectedExisting: renamedTarget,
+            expectedMissing: originalTarget
+        )
+
+        XCTAssertTrue(didRenameOriginal)
+        XCTAssertTrue(fileManager.fileExists(atPath: otherFile.path))
+    }
+
+    func testMountedInlineRenameRequestRemovalCancelsEditorWithoutCommitting() throws {
+        let entry = makeTableEntry(name: "rename-me.txt")
+        let model = MountedInlineRenameModel(entry: entry)
+        let hostingView = NSHostingView(rootView: MountedInlineRenameView(model: model))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+        }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        model.inlineRenameRequest = InlineRenameRequest(paneID: model.paneID, url: entry.url)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        let editor = try XCTUnwrap(hostingView.inlineRenameEditor)
+        editor.stringValue = "must-not-commit.txt"
+
+        model.inlineRenameRequest = nil
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        XCTAssertNil(hostingView.inlineRenameEditor)
+        XCTAssertTrue(model.renamedNames.isEmpty)
+    }
+
     func testInlineRenameManagedEditorIgnoresContaminatedReusableCellValue() throws {
         let entry = makeTableEntry(name: "rename-me.txt")
         let harness = makeTableHarness(
@@ -459,7 +851,7 @@ final class FileTableViewReuseTests: XCTestCase {
         )
 
         XCTAssertTrue(harness.coordinator.performCommand(.rename))
-        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         let editor = try XCTUnwrap(harness.tableView.inlineRenameEditor)
         editor.stringValue = "renamed.txt"
         editor.delegate?.controlTextDidEndEditing?(
@@ -467,6 +859,78 @@ final class FileTableViewReuseTests: XCTestCase {
         )
 
         XCTAssertEqual(renamedNames, ["renamed.txt"])
+    }
+
+    func testInlineRenameReturnCommitsEditedName() throws {
+        let entry = makeTableEntry(name: "rename-me.txt")
+        var renamedNames: [String] = []
+        let harness = makeTableHarness(
+            entries: [entry],
+            selectedRowIndexes: IndexSet(integer: 0),
+            canPaste: false,
+            canUndo: false,
+            onRename: { renamedNames.append($0) },
+            onCommand: { _ in }
+        )
+        XCTAssertTrue(harness.coordinator.performCommand(.rename))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        let editor = try XCTUnwrap(harness.tableView.inlineRenameEditor)
+        editor.stringValue = "renamed.txt"
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\r",
+            charactersIgnoringModifiers: "\r",
+            isARepeat: false,
+            keyCode: 36
+        ))
+
+        editor.keyDown(with: event)
+        editor.delegate?.controlTextDidEndEditing?(
+            Notification(name: NSControl.textDidEndEditingNotification, object: editor)
+        )
+
+        XCTAssertEqual(renamedNames, ["renamed.txt"])
+    }
+
+    func testInlineRenameEscapeCancelsWithoutRenaming() throws {
+        let entry = makeTableEntry(name: "rename-me.txt")
+        var renamedNames: [String] = []
+        let harness = makeTableHarness(
+            entries: [entry],
+            selectedRowIndexes: IndexSet(integer: 0),
+            canPaste: false,
+            canUndo: false,
+            onRename: { renamedNames.append($0) },
+            onCommand: { _ in }
+        )
+        XCTAssertTrue(harness.coordinator.performCommand(.rename))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        let editor = try XCTUnwrap(harness.tableView.inlineRenameEditor)
+        editor.stringValue = "must-not-commit.txt"
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\u{1b}",
+            charactersIgnoringModifiers: "\u{1b}",
+            isARepeat: false,
+            keyCode: 53
+        ))
+
+        editor.keyDown(with: event)
+        editor.delegate?.controlTextDidEndEditing?(
+            Notification(name: NSControl.textDidEndEditingNotification, object: editor)
+        )
+
+        XCTAssertTrue(renamedNames.isEmpty)
     }
 
     func testCellsHaveStableReuseIdentifiersPerColumn() {
@@ -1141,13 +1605,20 @@ final class FileTableViewReuseTests: XCTestCase {
         harness.tableView.frame = NSRect(x: 0, y: 0, width: 900, height: 900)
         scrollView.documentView = harness.tableView
 
-        scrollView.contentView.scroll(to: NSPoint(x: 120, y: 80))
-        harness.coordinator.resetScrollIfLocationChanged(in: scrollView)
-        XCTAssertEqual(scrollView.contentView.bounds.origin, .zero)
+        harness.tableView.scrollToBeginningOfDocument(nil)
+        let expectedBeginningOrigin = scrollView.contentView.bounds.origin
+        XCTAssertEqual(expectedBeginningOrigin.x, 0)
+        XCTAssertLessThan(expectedBeginningOrigin.y, 0)
 
         scrollView.contentView.scroll(to: NSPoint(x: 120, y: 80))
         harness.coordinator.resetScrollIfLocationChanged(in: scrollView)
-        XCTAssertEqual(scrollView.contentView.bounds.origin, NSPoint(x: 120, y: 80))
+        let beginningOrigin = scrollView.contentView.bounds.origin
+        XCTAssertEqual(beginningOrigin, expectedBeginningOrigin)
+
+        scrollView.contentView.scroll(to: NSPoint(x: 120, y: 80))
+        let sameLocationOrigin = scrollView.contentView.bounds.origin
+        harness.coordinator.resetScrollIfLocationChanged(in: scrollView)
+        XCTAssertEqual(scrollView.contentView.bounds.origin, sameLocationOrigin)
 
         let updatedHarness = makeTableHarness(
             entries: entries,
@@ -1159,18 +1630,129 @@ final class FileTableViewReuseTests: XCTestCase {
         )
         harness.coordinator.parent = updatedHarness.fileTable
         harness.coordinator.resetScrollIfLocationChanged(in: scrollView)
-        XCTAssertEqual(scrollView.contentView.bounds.origin, .zero)
+        XCTAssertEqual(scrollView.contentView.bounds.origin, beginningOrigin)
+    }
+
+    func testEmptyLocationResetUsesAppKitsDocumentBeginning() {
+        let location = PaneLocation.fileSystem(URL(fileURLWithPath: "/tmp/empty", isDirectory: true))
+        let harness = makeTableHarness(
+            entries: [],
+            selectedRowIndexes: [],
+            canPaste: false,
+            canUndo: false,
+            currentLocation: location,
+            onCommand: { _ in }
+        )
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 240, height: 120))
+        harness.tableView.frame = NSRect(x: 0, y: 0, width: 900, height: 900)
+        scrollView.documentView = harness.tableView
+
+        harness.tableView.scrollToBeginningOfDocument(nil)
+        let expectedBeginningOrigin = scrollView.contentView.bounds.origin
+        XCTAssertLessThan(expectedBeginningOrigin.y, 0)
+        scrollView.contentView.scroll(to: NSPoint(x: 120, y: 80))
+
+        harness.coordinator.resetScrollIfLocationChanged(in: scrollView)
+
+        XCTAssertEqual(scrollView.contentView.bounds.origin, expectedBeginningOrigin)
+    }
+
+    func testSameLocationMetadataReloadKeepsScrollPosition() {
+        let location = PaneLocation.fileSystem(URL(fileURLWithPath: "/tmp/same", isDirectory: true))
+        let originalEntry = makeTableEntry(name: "report.txt", size: 12)
+        let harness = makeTableHarness(
+            entries: [originalEntry],
+            selectedRowIndexes: [],
+            canPaste: false,
+            canUndo: false,
+            currentLocation: location,
+            onCommand: { _ in }
+        )
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 240, height: 120))
+        harness.tableView.frame = NSRect(x: 0, y: 0, width: 900, height: 900)
+        scrollView.documentView = harness.tableView
+        harness.coordinator.reloadDataIfNeeded()
+        harness.coordinator.resetScrollIfLocationChanged(in: scrollView)
+        scrollView.contentView.scroll(to: NSPoint(x: 120, y: 80))
+        let expectedOrigin = scrollView.contentView.bounds.origin
+
+        let updatedHarness = makeTableHarness(
+            entries: [makeTableEntry(name: "report.txt", size: 99)],
+            selectedRowIndexes: [],
+            canPaste: false,
+            canUndo: false,
+            currentLocation: location,
+            onCommand: { _ in }
+        )
+        harness.coordinator.parent = updatedHarness.fileTable
+        harness.coordinator.reloadDataIfNeeded()
+        harness.coordinator.resetScrollIfLocationChanged(in: scrollView)
+
+        XCTAssertEqual(scrollView.contentView.bounds.origin, expectedOrigin)
+    }
+
+    func testRootViewNavigationKeepsFirstReloadedRowVisible() async throws {
+        let fileManager = FileManager.default
+        let temporaryDirectory = fileManager.temporaryDirectory.appendingPathComponent(
+            "MyMacFinder-FirstRow-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let destination = temporaryDirectory.appendingPathComponent("Destination", isDirectory: true)
+        try fileManager.createDirectory(at: destination, withIntermediateDirectories: true)
+        try Data().write(to: destination.appendingPathComponent("alpha.txt"))
+        try Data().write(to: destination.appendingPathComponent("beta.txt"))
+        defer {
+            do {
+                try fileManager.removeItem(at: temporaryDirectory)
+                XCTAssertFalse(fileManager.fileExists(atPath: temporaryDirectory.path))
+            } catch {
+                XCTFail("Failed to remove test directory \(temporaryDirectory.path): \(error)")
+            }
+        }
+
+        let store = ExplorerStore(initialURL: temporaryDirectory, directoryWatcher: nil)
+        await store.refresh()
+        let host = NSHostingView(rootView: RootView().environmentObject(store))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1_200, height: 700),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+        }
+        _ = await waitForTableView(in: host, expectedRowCount: 1)
+
+        await store.open(destination)
+
+        let presentedTableView = await waitForTableView(in: host, expectedRowCount: 2)
+        let tableView = try XCTUnwrap(presentedTableView)
+        let firstRow = tableView.rect(ofRow: 0)
+        let headerView = try XCTUnwrap(tableView.headerView)
+        let firstRowInWindow = tableView.convert(firstRow, to: nil)
+        let headerInWindow = headerView.convert(headerView.bounds, to: nil)
+        XCTAssertTrue(
+            tableView.visibleRect.contains(NSPoint(x: tableView.visibleRect.midX, y: firstRow.midY)),
+            "The first row midpoint must remain visible after a location change reload; "
+                + "visible=\(tableView.visibleRect), firstRow=\(firstRow)"
+        )
+        XCTAssertTrue(tableView.rows(in: tableView.visibleRect).contains(0))
+        XCTAssertFalse(firstRowInWindow.intersects(headerInWindow))
     }
 }
 
-private func makeTableEntry(name: String) -> FileEntry {
+private func makeTableEntry(name: String, size: Int64 = 12) -> FileEntry {
     FileEntry(
         url: URL(fileURLWithPath: "/tmp/\(name)"),
         name: name,
         kind: .file,
         typeDescription: "Text document",
         fileExtension: URL(fileURLWithPath: name).pathExtension,
-        size: 12,
+        size: size,
         dateModified: nil,
         dateCreated: nil,
         dateAccessed: nil,
@@ -1231,11 +1813,12 @@ private func makeTableHarness(
         currentLocation: currentLocation,
         currentSort: EntrySortDescriptor(),
         showsPathColumn: false,
+        paneID: inlineRenameRequest?.paneID ?? PaneID(),
         inlineRenameRequest: inlineRenameRequest,
         onFocus: onFocus,
         onSelectionChange: onSelectionChange,
         onOpen: onOpen,
-        onRename: onRename,
+        onRename: { _, _, newName in onRename(newName) },
         onCommand: onCommand,
         openWithApplications: openWithApplications,
         onOpenWithApplication: onOpenWithApplication,
@@ -1309,7 +1892,118 @@ private func rightClickEvent(at point: NSPoint) -> NSEvent {
 }
 
 @MainActor
+private final class MountedInlineRenameModel: ObservableObject {
+    let paneID = PaneID()
+    let entry: FileEntry
+    @Published var inlineRenameRequest: InlineRenameRequest?
+    var renamedNames: [String] = []
+
+    init(entry: FileEntry) {
+        self.entry = entry
+        self.inlineRenameRequest = nil
+    }
+}
+
+private struct MountedInlineRenameView: View {
+    @ObservedObject var model: MountedInlineRenameModel
+
+    var body: some View {
+        FileTableView(
+            entries: [model.entry],
+            selectedURLs: [model.entry.url],
+            canPaste: false,
+            canUndo: false,
+            canCloseTab: false,
+            currentURL: model.entry.url.deletingLastPathComponent(),
+            currentLocation: .fileSystem(model.entry.url.deletingLastPathComponent()),
+            currentSort: EntrySortDescriptor(),
+            showsPathColumn: false,
+            paneID: model.paneID,
+            inlineRenameRequest: model.inlineRenameRequest,
+            onSelectionChange: { _ in },
+            onOpen: { _ in },
+            onRename: { _, _, newName in model.renamedNames.append(newName) },
+            onCommand: { _ in },
+            onDropItems: { _, _, _ in },
+            onSortChange: { _ in }
+        )
+    }
+}
+
+@MainActor
+private func waitForInlineRenameEditor(
+    in hostingView: NSView,
+    attempts: Int = 50
+) async -> FileTableView.InlineRenameTextField? {
+    for _ in 0..<attempts {
+        if let editor = hostingView.inlineRenameEditor as? FileTableView.InlineRenameTextField {
+            return editor
+        }
+        try? await Task.sleep(for: .milliseconds(20))
+    }
+    return nil
+}
+
+@MainActor
+private func waitForTableView(
+    in hostingView: NSView,
+    expectedRowCount: Int,
+    attempts: Int = 50
+) async -> FileTableView.ContextMenuTableView? {
+    for _ in 0..<attempts {
+        if let tableView = hostingView.firstDescendant(ofType: FileTableView.ContextMenuTableView.self),
+           tableView.numberOfRows == expectedRowCount {
+            return tableView
+        }
+        try? await Task.sleep(for: .milliseconds(20))
+    }
+    return nil
+}
+
+@MainActor
+private func waitForFile(
+    at url: URL,
+    store: ExplorerStore,
+    attempts: Int = 100
+) async -> Bool {
+    for _ in 0..<attempts {
+        if FileManager.default.fileExists(atPath: url.path), store.canUndo {
+            return true
+        }
+        try? await Task.sleep(for: .milliseconds(20))
+    }
+    return false
+}
+
+private func waitForPathChange(
+    expectedExisting: URL,
+    expectedMissing: URL,
+    attempts: Int = 100
+) async -> Bool {
+    for _ in 0..<attempts {
+        if FileManager.default.fileExists(atPath: expectedExisting.path),
+           !FileManager.default.fileExists(atPath: expectedMissing.path) {
+            return true
+        }
+        try? await Task.sleep(for: .milliseconds(20))
+    }
+    return false
+}
+
+@MainActor
 private extension NSView {
+    func firstDescendant<T: NSView>(ofType type: T.Type) -> T? {
+        if let match = self as? T {
+            return match
+        }
+        for subview in subviews {
+            if let match = subview.firstDescendant(ofType: type) {
+                return match
+            }
+        }
+        return nil
+    }
+
     var inlineRenameEditor: NSTextField? {
         if let textField = self as? NSTextField,
            textField.accessibilityIdentifier() == "FileTableInlineRenameField" {

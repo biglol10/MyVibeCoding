@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-public enum EventRecurrence: String, Codable, CaseIterable, Identifiable {
+public enum EventRecurrence: String, Codable, CaseIterable, Identifiable, Sendable {
     case none
     case weekly
     case monthly

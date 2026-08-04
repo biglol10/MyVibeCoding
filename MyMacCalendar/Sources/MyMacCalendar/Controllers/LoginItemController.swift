@@ -1,6 +1,10 @@
 import ServiceManagement
 
 enum LoginItemController {
+    static var isEnabled: Bool {
+        SMAppService.mainApp.status == .enabled
+    }
+
     static func setEnabled(_ isEnabled: Bool) throws {
         if isEnabled {
             if SMAppService.mainApp.status != .enabled {

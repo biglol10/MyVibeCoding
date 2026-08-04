@@ -21,6 +21,33 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertTrue(appState.currentDocument?.isDirty ?? false)
     }
 
+    func testChangingImageLayersClearsOCRThatNoLongerMatchesTheImage() {
+        let appState = AppState()
+        appState.currentDocument = EditorDocument(
+            kind: .screenshot,
+            data: Data([0x89, 0x50, 0x4E, 0x47]),
+            ocrResult: OCRResult(observations: [
+                OCRObservation(
+                    text: "old result",
+                    confidence: 1,
+                    boundingBox: CGRect(x: 1, y: 1, width: 10, height: 4)
+                )
+            ])
+        )
+        let viewModel = EditorViewModel(appState: appState)
+
+        viewModel.addLayer(
+            .rectangle(
+                ShapeLayer(
+                    frame: CGRect(x: 10, y: 20, width: 80, height: 40),
+                    style: LayerStyle(strokeColor: .red, fillColor: .clear, lineWidth: 2)
+                )
+            )
+        )
+
+        XCTAssertNil(appState.currentDocument?.ocrResult)
+    }
+
     func testUndoRestoresPreviousLayerState() {
         let appState = AppState()
         appState.currentDocument = EditorDocument(kind: .screenshot, data: Data([0x89, 0x50, 0x4E, 0x47]))

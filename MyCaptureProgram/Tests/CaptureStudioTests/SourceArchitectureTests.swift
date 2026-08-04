@@ -60,6 +60,29 @@ final class SourceArchitectureTests: XCTestCase {
         XCTAssertTrue(source.contains("presetStore.remove"))
     }
 
+    func testScreenCaptureServicesExcludeTheWholeCurrentApplication() throws {
+        for relativePath in ["Capture/ScreenshotService.swift", "Capture/RecordingService.swift"] {
+            let source = try String(contentsOf: sourceURL(relativePath), encoding: .utf8)
+
+            XCTAssertTrue(
+                source.contains("excludingApplications: excludedApplications"),
+                "\(relativePath) must exclude every current-app window, including windows that appear after content discovery."
+            )
+            XCTAssertTrue(
+                source.contains("onScreenWindowsOnly: false"),
+                "\(relativePath) must discover the current app even while its windows are hidden or being restored."
+            )
+            XCTAssertTrue(
+                source.contains("guard !excludedApplications.isEmpty else"),
+                "\(relativePath) must fail closed rather than capture CaptureStudio itself."
+            )
+            XCTAssertFalse(
+                source.contains("SCContentFilter(display: display, excludingWindows: excludedWindows)"),
+                "\(relativePath) must not rely only on the on-screen window snapshot."
+            )
+        }
+    }
+
     private func sourceURL(_ relativePath: String) -> URL {
         repositoryRoot
             .appendingPathComponent("Sources")
