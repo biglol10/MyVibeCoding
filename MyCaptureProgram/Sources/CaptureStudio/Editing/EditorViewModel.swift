@@ -55,16 +55,16 @@ public final class EditorViewModel: ObservableObject {
             width: abs(end.x - start.x),
             height: abs(end.y - start.y)
         ).standardized
-        guard frame.width >= 2, frame.height >= 2 else {
-            return
-        }
 
         switch tool {
         case .rectangle:
+            guard frame.width >= 2, frame.height >= 2 else { return }
             addLayer(.rectangle(ShapeLayer(frame: frame, style: style)))
         case .ellipse:
+            guard frame.width >= 2, frame.height >= 2 else { return }
             addLayer(.ellipse(ShapeLayer(frame: frame, style: style)))
         case .redaction:
+            guard frame.width >= 2, frame.height >= 2 else { return }
             addLayer(
                 .redaction(
                     RedactionLayer(
@@ -74,6 +74,7 @@ public final class EditorViewModel: ObservableObject {
                 )
             )
         case .arrow:
+            guard hypot(end.x - start.x, end.y - start.y) >= 2 else { return }
             addLayer(.arrow(ArrowLayer(start: start, end: end, style: style)))
         case .select, .pen, .highlighter, .text, .ocr:
             return

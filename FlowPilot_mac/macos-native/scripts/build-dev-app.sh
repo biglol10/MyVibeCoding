@@ -2,12 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-REPO_DIR="$(cd "$ROOT_DIR/.." && pwd)"
 APP_DIR="$ROOT_DIR/.build/FlowPilotNative.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
-ICON_SOURCE="$REPO_DIR/src-tauri/icons/icon.icns"
+ICON_SOURCE="$ROOT_DIR/../src-tauri/icons/icon.icns"
 
 cd "$ROOT_DIR"
 swift build
@@ -15,9 +14,7 @@ swift build
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$ROOT_DIR/.build/debug/FlowPilotNative" "$MACOS_DIR/FlowPilotNative"
-if [[ -f "$ICON_SOURCE" ]]; then
-  cp "$ICON_SOURCE" "$RESOURCES_DIR/icon.icns"
-fi
+cp "$ICON_SOURCE" "$RESOURCES_DIR/icon.icns"
 
 cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

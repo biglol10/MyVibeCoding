@@ -37,7 +37,7 @@ public enum SidebarDestination: String, CaseIterable, Identifiable, Hashable, Se
     public var subtitle: String {
         switch self {
         case .applications:
-            "Review installed apps and related files before permanent deletion."
+            "Review installed apps and related files before moving selected items to Trash."
         case .orphanFiles:
             "Find leftovers from apps that are no longer installed."
         case .deleteHistory:

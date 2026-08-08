@@ -1,7 +1,9 @@
+import AppKit
 import SwiftUI
 
 @main
 struct CaptureStudioApp: App {
+    @NSApplicationDelegateAdaptor(CaptureStudioApplicationDelegate.self) private var applicationDelegate
     @StateObject private var appState: AppState
     @StateObject private var settingsStore: SettingsStore
     @StateObject private var shortcutManager = ShortcutManager()
@@ -41,6 +43,7 @@ struct CaptureStudioApp: App {
                 .environmentObject(historyStore)
                 .environmentObject(presetStore)
                 .onAppear {
+                    applicationDelegate.configure(captureCoordinator: captureCoordinator)
                     globalShortcutController.configure(shortcutManager: shortcutManager, actionHandler: handleShortcutAction)
                 }
         }

@@ -1,5 +1,27 @@
 import Foundation
 
+struct RecordingTrimInput: Equatable, Sendable {
+    let startSeconds: Double
+    let endSeconds: Double?
+}
+
+enum RecordingTrimInputError: LocalizedError, Equatable {
+    case invalidStart
+    case invalidEnd
+    case invalidRange
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidStart:
+            return "Enter a valid start time of zero or more seconds."
+        case .invalidEnd:
+            return "Enter a valid end time, or leave it blank for the end of the recording."
+        case .invalidRange:
+            return "The trim end time must be greater than the start time."
+        }
+    }
+}
+
 public enum MainWindowPresentation {
     public static let mainWindowMinimumWidth: Double = 780
     public static let historySearchPlaceholder = "Search history"
@@ -93,6 +115,30 @@ public enum MainWindowPresentation {
             title: document.fileURL == nil ? "Recording captured" : (document.isDirty ? "Unsaved recording" : "Recording saved"),
             detail: statusMessage ?? "Recording is ready."
         )
+    }
+
+    static func recordingTrimInput(startText: String, endText: String) throws -> RecordingTrimInput {
+        let trimmedStart = startText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let startSeconds = trimmedStart.isEmpty ? 0 : Double(trimmedStart)
+        guard let startSeconds, startSeconds.isFinite, startSeconds >= 0 else {
+            throw RecordingTrimInputError.invalidStart
+        }
+
+        let trimmedEnd = endText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let endSeconds: Double?
+        if trimmedEnd.isEmpty {
+            endSeconds = nil
+        } else {
+            guard let parsedEnd = Double(trimmedEnd), parsedEnd.isFinite else {
+                throw RecordingTrimInputError.invalidEnd
+            }
+            endSeconds = parsedEnd
+        }
+
+        if let endSeconds, endSeconds <= startSeconds {
+            throw RecordingTrimInputError.invalidRange
+        }
+        return RecordingTrimInput(startSeconds: startSeconds, endSeconds: endSeconds)
     }
 
     private static func folderName(from path: String) -> String {

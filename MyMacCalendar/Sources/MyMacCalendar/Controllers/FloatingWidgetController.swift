@@ -55,9 +55,9 @@ final class FloatingWidgetController {
         showWithoutActivating()
     }
 
-    func showDetail(for event: CalendarEvent) {
+    func showDetail(_ detail: EventOccurrenceDetail) {
         if detailWindow == nil {
-            let hosting = NSHostingController(rootView: FloatingEventDetailView(event: event))
+            let hosting = NSHostingController(rootView: FloatingEventDetailView(detail: detail))
             let newWindow = NSWindow(contentViewController: hosting)
             newWindow.title = "일정 상세"
             newWindow.styleMask = [.titled, .closable]
@@ -65,7 +65,8 @@ final class FloatingWidgetController {
             newWindow.setFrame(NSRect(x: 380, y: 600, width: 320, height: 260), display: true)
             detailWindow = newWindow
         } else {
-            (detailWindow?.contentViewController as? NSHostingController<FloatingEventDetailView>)?.rootView = FloatingEventDetailView(event: event)
+            (detailWindow?.contentViewController as? NSHostingController<FloatingEventDetailView>)?.rootView =
+                FloatingEventDetailView(detail: detail)
         }
 
         detailWindow?.level = .floating

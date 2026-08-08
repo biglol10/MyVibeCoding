@@ -20,7 +20,7 @@ extension NSWorkspace: WorkspaceApplicationOpening {}
 
 @MainActor
 public protocol ExternalAppLaunching: AnyObject {
-    func openDefault(_ url: URL)
+    func openDefault(_ url: URL) throws
     func open(_ urls: [URL], with application: OpenWithApplication) async throws
     func openTerminal(at directory: URL) async throws
     func openVSCode(at target: URL) async throws
@@ -95,8 +95,11 @@ public final class AppKitExternalAppLauncher: ExternalAppLaunching {
         self.codeCommandShellURL = (codeCommandShellURL ?? Self.defaultShellURL()).standardizedFileURL
     }
 
-    public func openDefault(_ url: URL) {
-        workspace.open(url)
+    public func openDefault(_ url: URL) throws {
+        let target = url.standardizedFileURL
+        guard workspace.open(target) else {
+            throw ExplorerError.externalCommandFailed("No application could open: \(target.path)")
+        }
     }
 
     public func open(_ urls: [URL], with application: OpenWithApplication) async throws {

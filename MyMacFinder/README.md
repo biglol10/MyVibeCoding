@@ -21,7 +21,7 @@ MyMacFinder는 macOS Finder를 Windows 파일 탐색기와 ForkLift에 가까운
 - 드래그 앤 드롭 기반 복사/이동
 - 충돌 처리 UI: Replace, Keep Both, Skip, Cancel
 - Undo: 생성, 복사, 이동, 이름 변경, 휴지통 이동, 압축 해제/생성 결과 되돌리기
-- ZIP 탐색: 압축 파일 내부 폴더 이동, Quick Look용 임시 추출
+- ZIP 탐색: 압축 파일 내부 폴더 이동, session-owned Quick Look 임시 추출과 안전한 lifecycle cleanup
 - ZIP 작업: 선택 항목 압축, ZIP 압축 해제
 - Finder Tags: 읽기, 표시, 편집, 삭제, 검색/필터
 - 디렉터리 변경 감시: 외부 생성/삭제/수정 후 Refresh/동기화
@@ -49,6 +49,12 @@ MyMacFinder는 macOS Finder를 Windows 파일 탐색기와 ForkLift에 가까운
 - 파일 하나의 metadata 읽기 실패가 폴더 전체 listing 실패로 번지지 않고 해당 항목만 건너뜀
 - ZIP 내부 가상 항목에서는 파일 시스템 변경 명령과 Edit Tags 비노출
 - ZIP 내부 가상 항목은 drag pasteboard에 실제 파일 URL처럼 기록하지 않음
+- ZIP Quick Look 임시 추출물은 session별 UUID owner가 관리하며 panel close, replacement, 준비 실패, cancellation 시 원본 ZIP이나 unrelated 임시 파일을 건드리지 않고 해당 owner만 정리
+- archive cleanup은 descriptor-anchored quarantine/unlink를 사용하고, 비어 있는 owner 또는 기록된 identity와 일치하는 단 하나의 output leaf만 삭제 권한으로 인정합니다. Quick Look/default-open 직전에는 owner와 output device/inode/generation/mode를 다시 확인합니다.
+- Quick Look cleanup retry registry와 24시간 external-open retention registry는 서로 독립적으로 load/save 실패를 처리하고 corrupt/duplicate data를 덮어쓰지 않습니다. ZIP Quick Look은 panel presentation 전에 exact artifact를 durable retry registry에 기록해 비정상 프로세스 종료 후 다음 launch에서 정리할 수 있습니다.
+- ZIP 내부 항목을 기본 앱으로 여는 데 성공하면 외부 앱이 읽을 수 있도록 임시 추출물을 24시간 보존하고, 이후 앱 시작 시 ownership을 다시 검증한 뒤 만료된 owner만 정리
+- macOS 기본 앱 실행이 거부되면 조용히 무시하지 않고 작업 오류를 표시하며, 취소는 사용자 오류 banner 없이 정리
+- selection이 바뀌어 obsolete된 Quick Look thumbnail 요청은 generator까지 취소하고 late completion이 최신 preview를 덮어쓰지 못하게 차단
 - 열려 있는 ZIP의 host 파일이 외부에서 변경되면 watcher가 archive pane을 다시 읽음
 - 잘못된 ZIP 압축 해제나 중간 실패 시 빈/부분 폴더를 남기거나 기존 폴더를 교체하지 않음
 - Sidebar Favorites 추가, 삭제, 이동, 누락 경로 처리
@@ -202,6 +208,9 @@ GitHub Actions CI도 루트 `.github/workflows/ci.yml`에서 `swift test --enabl
 - AppKit table bridge, shared field editor 격리, 기존 파일/폴더 및 새 폴더 inline rename Return commit/Escape cancel, column sizing, location-change scroll reset, supported-column sort affordance, content-aware row whitespace context menu, context menu command availability, responder-chain shortcuts, F5/F6 opposite-pane commands, system pasteboard file copy/paste
 - metadata-based table row icon caching
 - metadata-only table row reload
+- archive preview owner containment/identity/symlink 검증, partial extraction cleanup, corrupt/duplicate retention 및 retry registry fail-closed 처리
+- transactional Quick Look session의 reverse-order cleanup, panel close/replacement one-shot release, stale tab/pane/search/selection completion 차단
+- ZIP default-open retention의 24시간 경계와 startup cleanup, default-open 실패 표시, thumbnail generator cancellation 및 late completion 차단
 - inspector model, thumbnail/Quick Look wiring, folder size background execution
 
 수동 QA 기록:
@@ -223,6 +232,7 @@ docs/qa/regression-audit-2026-06-29.md
 docs/qa/e2e-ui-ux-audit-2026-06-30.md
 docs/qa/2026-07-22-rename-filesystem-safety-verification.md
 docs/qa/2026-08-04-full-feature-audit.md
+docs/qa/2026-08-08-archive-preview-lifecycle-verification.md
 ```
 
 ## 프로젝트 구조
@@ -254,7 +264,8 @@ scripts/package_personal.sh
 - 네트워크 볼륨은 mounted volume으로 탐색할 수 있지만, SMB/NFS 연결을 새로 생성하는 전용 UI는 없습니다.
 - Finder Tags는 macOS resource value 기반이라 파일 시스템이나 볼륨에 따라 지원되지 않을 수 있습니다.
 - Redo, Spotlight index/content 검색, Windows식 접이형 Group By UI는 아직 제공하지 않습니다.
-- ZIP Quick Look 임시 추출물의 lifecycle cleanup은 후속 보강 대상입니다. 상세 검증 경계는 `docs/qa/2026-08-04-full-feature-audit.md`를 참고하세요.
+- 실제 GUI에서 준비 중 tab/pane 전환, 느린 대용량 항목의 generator cancellation, Quick Look panel replacement, 주입된 default-open 실패 표시는 자동 회귀 테스트로 검증했지만 release 앱 수동 재현은 추가 확인 대상입니다. 실제 GUI로는 normal/ZIP Quick Look, panel close cleanup, PDF -> PNG -> text 최종 선택, ZIP default-open/retention, 만료 cleanup, Quick Look 도중 프로세스 종료 후 durable retry를 확인했습니다.
+- AppKit Quick Look과 LaunchServices는 pathname URL을 받으므로 마지막 no-follow identity 검사 직후 framework가 실제 경로를 열기 전까지 같은 사용자 프로세스가 pathname을 교체할 수 있는 잔여 race가 있습니다. 현재 구현은 handoff 직전 mismatch를 차단하지만 handle-based consumer API 없이 이 kernel-level window를 완전히 제거하지는 못합니다.
 
 ## 개발 메모
 
@@ -269,4 +280,4 @@ git diff --check
 ./scripts/package_personal.sh
 ```
 
-2026-08-04 최신 검증에서 `swift test --enable-code-coverage`는 508 tests / 0 failures, `swift build -Xswiftc -warnings-as-errors`는 경고 없이 통과했습니다. release 앱 번들, strict codesign, 아이콘, 개인 설치 ZIP 무결성도 통과했습니다. 별도 QA bundle ID와 UUID 임시 디렉터리에서 navigation, search, tabs, dual pane copy/Undo, inline rename, 새 폴더, context menu, ZIP 탐색, 숨김 파일, Favorites, 외부 변경 watcher, preview를 실제 UI로 확인했습니다. 손상된 bookmark 데이터는 앱 시작 후에도 보존되고 Settings 경고와 명시적 Reset으로만 제거되는 것도 격리된 UserDefaults namespace에서 확인했습니다. 탐색 후 첫 행이 header 뒤에 가려지던 AppKit scroll 문제도 실제 release 앱에서 수정 확인했고, stale bookmark access cleanup은 회귀 테스트로 보강했습니다. QA fixture와 앱 번들은 전부 제거했습니다. 같은 release를 `/Applications/MyMacFinder.app`에 안전 교체한 뒤 서명, 실행 파일 해시, 실제 실행 경로까지 재확인했습니다. 전체 기능별 자동/수동 검증 경계와 남은 위험은 `docs/qa/2026-08-04-full-feature-audit.md`에 기록되어 있습니다.
+2026-08-09 최신 archive preview lifecycle 검증에서 `swift test --enable-code-coverage`는 591 tests / 0 failures, `swift build -Xswiftc -warnings-as-errors`는 경고 없이 통과했습니다. 새 release 앱과 개인 설치 패키지의 strict codesign/ZIP 무결성을 확인했고 build, packaged, installed 실행 파일 SHA-256은 `64cb9376df0e1ca922a11c6cfbb1469563a92a3a873370fba244d43883ba024f`, ZIP SHA-256은 `9daf4f28fe0dc5797165f989ef31e539d495d426e90952b14cca3e49a0f6075c`입니다. 별도 QA bundle ID와 bare-UUID 임시 root에서 실제 ZIP panel close cleanup, external-open retention/expiry, 열린 Quick Look 도중 exact QA PID 종료 후 durable launch retry를 exact owner/record condition polling으로 확인했습니다. QA process, defaults domain, app, root, exact preview owners는 모두 제거했습니다. 같은 release를 UUID staging/rollback backup으로 `/Applications/MyMacFinder.app`에 안전 교체했으며 현재 PID `94702`, 실행 경로 `/Applications/MyMacFinder.app/Contents/MacOS/MyMacFinder`를 확인했습니다. 실제 GUI와 자동 검증의 정확한 경계는 `docs/qa/2026-08-08-archive-preview-lifecycle-verification.md`에 기록되어 있습니다.

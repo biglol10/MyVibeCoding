@@ -8,13 +8,13 @@ final class ArchiveBrowsingServiceTests: XCTestCase {
 
     override func setUpWithError() throws {
         tempDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("MyMacFinderArchive-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
     }
 
     override func tearDownWithError() throws {
         if let tempDirectory {
-            try? FileManager.default.removeItem(at: tempDirectory)
+            try FileManager.default.removeItem(at: tempDirectory)
         }
     }
 
@@ -56,14 +56,303 @@ final class ArchiveBrowsingServiceTests: XCTestCase {
         XCTAssertEqual(hiddenOn.map(\.name), [".secret"])
     }
 
-    func testTemporaryExtractReturnsReadableFile() async throws {
+    func testTemporaryExtractReturnsOwnedArtifactAndReleaseRemovesOnlyOwnerDirectory() async throws {
         let archiveURL = try makeArchive()
-        let service = ArchiveBrowsingService()
-        let extracted = try await service.temporaryExtract(
+        let root = tempDirectory.appendingPathComponent("preview-root", isDirectory: true)
+        let sentinel = root.appendingPathComponent("unrelated.txt")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("keep".utf8).write(to: sentinel)
+        let service = ArchiveBrowsingService(extractionRoot: root)
+
+        let artifact = try await service.temporaryExtract(
             ArchiveLocation(archiveURL: archiveURL, internalPath: "docs/readme.txt")
         )
+        XCTAssertEqual(try String(contentsOf: artifact.url, encoding: .utf8), "hello")
+        try await service.releaseTemporaryArtifact(artifact)
 
-        XCTAssertEqual(try String(contentsOf: extracted, encoding: .utf8), "hello")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: artifact.ownerDirectoryURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: archiveURL.path))
+        XCTAssertEqual(try String(contentsOf: sentinel, encoding: .utf8), "keep")
+    }
+
+    func testTemporaryExtractDoesNotFollowOwnerSymlinkInstalledBeforeDestinationOpen() async throws {
+        let archiveURL = try makeArchive()
+        let originalArchiveData = try Data(contentsOf: archiveURL)
+        let root = tempDirectory.appendingPathComponent("preview-root", isDirectory: true)
+        let outside = tempDirectory.appendingPathComponent("outside", isDirectory: true)
+        let outsideSentinel = outside.appendingPathComponent("sentinel.txt")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: false)
+        try "keep".write(to: outsideSentinel, atomically: true, encoding: .utf8)
+        let service = ArchiveBrowsingService(
+            extractionRoot: root,
+            fileSystemHooks: ArchiveTemporaryFileSystemHooks(beforeOutputOwnerOpen: { artifact in
+                let owner = artifact.ownerDirectoryURL
+                let originalOwner = root.appendingPathComponent("original-owner", isDirectory: true)
+                try FileManager.default.moveItem(at: owner, to: originalOwner)
+                try FileManager.default.createSymbolicLink(atPath: owner.path, withDestinationPath: outside.path)
+            })
+        )
+
+        do {
+            _ = try await service.temporaryExtract(
+                ArchiveLocation(archiveURL: archiveURL, internalPath: "docs/readme.txt")
+            )
+            XCTFail("Expected the owner symlink swap to prevent extraction")
+        } catch {
+        }
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: outside.appendingPathComponent("readme.txt").path))
+        XCTAssertEqual(try String(contentsOf: outsideSentinel, encoding: .utf8), "keep")
+        XCTAssertEqual(try Data(contentsOf: archiveURL), originalArchiveData)
+    }
+
+    func testTemporaryExtractDoesNotFollowLeafSymlinkInstalledBeforeDestinationOpen() async throws {
+        let archiveURL = try makeArchive()
+        let originalArchiveData = try Data(contentsOf: archiveURL)
+        let root = tempDirectory.appendingPathComponent("preview-root", isDirectory: true)
+        let outside = tempDirectory.appendingPathComponent("outside.txt")
+        try "keep".write(to: outside, atomically: true, encoding: .utf8)
+        let service = ArchiveBrowsingService(
+            extractionRoot: root,
+            fileSystemHooks: ArchiveTemporaryFileSystemHooks(beforeOutputLeafOpen: { artifact in
+                try FileManager.default.createSymbolicLink(
+                    atPath: artifact.url.path,
+                    withDestinationPath: outside.path
+                )
+            })
+        )
+
+        do {
+            _ = try await service.temporaryExtract(
+                ArchiveLocation(archiveURL: archiveURL, internalPath: "docs/readme.txt")
+            )
+            XCTFail("Expected the leaf symlink swap to prevent extraction")
+        } catch {
+        }
+
+        XCTAssertEqual(try String(contentsOf: outside, encoding: .utf8), "keep")
+        XCTAssertEqual(try Data(contentsOf: archiveURL), originalArchiveData)
+        let preservedEntries = try FileManager.default.contentsOfDirectory(atPath: root.path)
+        XCTAssertEqual(preservedEntries.count, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    func testTemporaryExtractRejectsOwnerReplacementAfterPublicationDescriptorOpen() async throws {
+        let archiveURL = try makeArchive()
+        let root = tempDirectory.appendingPathComponent("preview-root", isDirectory: true)
+        let originalOwnerBackup = tempDirectory.appendingPathComponent("publication-owner-backup", isDirectory: true)
+        let replacementOutput = BrowsingURLRecorder()
+        let service = ArchiveBrowsingService(
+            extractionRoot: root,
+            fileSystemHooks: ArchiveTemporaryFileSystemHooks(afterPublishedOutputOwnerOpen: { artifact in
+                replacementOutput.record(artifact.url)
+                try FileManager.default.moveItem(at: artifact.ownerDirectoryURL, to: originalOwnerBackup)
+                try FileManager.default.createDirectory(at: artifact.ownerDirectoryURL, withIntermediateDirectories: false)
+                try "keep publication replacement".write(
+                    to: artifact.url,
+                    atomically: true,
+                    encoding: .utf8
+                )
+            })
+        )
+
+        do {
+            let artifact = try await service.temporaryExtract(
+                ArchiveLocation(archiveURL: archiveURL, internalPath: "docs/readme.txt")
+            )
+            try? await service.releaseTemporaryArtifact(artifact)
+            XCTFail("Expected publication owner replacement to fail extraction")
+        } catch let error as ExplorerError {
+            XCTAssertTrue(error.localizedDescription.contains("identity changed"))
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: originalOwnerBackup.path))
+        XCTAssertNotNil(replacementOutput.value)
+        if let replacementOutput = replacementOutput.value {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: replacementOutput.path))
+            XCTAssertEqual(
+                try String(contentsOf: replacementOutput, encoding: .utf8),
+                "keep publication replacement"
+            )
+        }
+    }
+
+    func testExtractionFailureRemovesPartialOwnerDirectory() async throws {
+        let archiveURL = try makeArchive()
+        let root = tempDirectory.appendingPathComponent("preview-root", isDirectory: true)
+        let service = ArchiveBrowsingService(
+            extractionRoot: root,
+            extractionHandler: { _, _, _, consumer in
+                try consumer(Data("partial".utf8))
+                throw InjectedExtractionFailure()
+            }
+        )
+
+        do {
+            _ = try await service.temporaryExtract(
+                ArchiveLocation(archiveURL: archiveURL, internalPath: "docs/readme.txt")
+            )
+            XCTFail("Expected extraction to fail")
+        } catch is InjectedExtractionFailure {
+        }
+
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: root.path).isEmpty)
+    }
+
+    func testTemporaryExtractUsesInjectedFileManagerForArtifactAllocation() async throws {
+        let archiveURL = try makeArchive()
+        let root = tempDirectory.appendingPathComponent("preview-root", isDirectory: true)
+        let service = ArchiveBrowsingService(
+            fileManager: FailingArtifactAllocationFileManager(),
+            extractionRoot: root
+        )
+
+        do {
+            _ = try await service.temporaryExtract(
+                ArchiveLocation(archiveURL: archiveURL, internalPath: "docs/readme.txt")
+            )
+            XCTFail("Expected injected file manager to reject artifact allocation")
+        } catch is InjectedArtifactAllocationFailure {
+        }
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    func testCancelledExtractionRethrowsCancellationErrorAndRemovesPartialOwnerDirectory() async throws {
+        let archiveURL = try makeArchive()
+        let root = tempDirectory.appendingPathComponent("preview-root", isDirectory: true)
+        let probe = ExtractionCancellationProbe()
+        let service = ArchiveBrowsingService(
+            extractionRoot: root,
+            extractionHandler: { _, _, progress, consumer in
+                try consumer(Data("partial".utf8))
+                probe.markStarted()
+                while !progress.isCancelled {
+                    Thread.sleep(forTimeInterval: 0.01)
+                }
+                throw InjectedExtractionFailure()
+            }
+        )
+
+        let task = Task {
+            try await service.temporaryExtract(
+                ArchiveLocation(archiveURL: archiveURL, internalPath: "docs/readme.txt")
+            )
+        }
+        try await waitForExtractionToStart(probe)
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            XCTFail("Expected extraction cancellation")
+        } catch is CancellationError {
+        }
+
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: root.path).isEmpty)
+    }
+
+    func testCancelledExtractionPersistsPartialOutputIdentityForCleanupRetryAfterRestart() async throws {
+        let archiveURL = try makeArchive()
+        let root = tempDirectory.appendingPathComponent("preview-root", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        let sentinel = root.appendingPathComponent("unrelated-sentinel.txt")
+        try "keep".write(to: sentinel, atomically: true, encoding: .utf8)
+        let probe = ExtractionCancellationProbe()
+        let suiteName = "MyMacFinderArchiveArtifactRegistry-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let cleanupRegistry = ArchiveTemporaryArtifactCleanupRegistry(userDefaults: defaults)
+        let service = ArchiveBrowsingService(
+            extractionRoot: root,
+            cleanupRegistry: cleanupRegistry,
+            fileSystemHooks: ArchiveTemporaryFileSystemHooks(afterOwnerQuarantine: { _ in
+                throw InjectedArtifactCleanupFailure()
+            }),
+            extractionHandler: { _, _, progress, consumer in
+                try consumer(Data("partial".utf8))
+                probe.markStarted()
+                while !progress.isCancelled {
+                    Thread.sleep(forTimeInterval: 0.01)
+                }
+                throw InjectedExtractionFailure()
+            }
+        )
+
+        let task = Task {
+            try await service.temporaryExtract(
+                ArchiveLocation(archiveURL: archiveURL, internalPath: "docs/readme.txt")
+            )
+        }
+        try await waitForExtractionToStart(probe)
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            XCTFail("Expected extraction cancellation")
+        } catch is CancellationError {
+        } catch {
+            XCTFail("Expected CancellationError, got \(error)")
+        }
+
+        let records = try cleanupRegistry.load()
+        XCTAssertEqual(records.count, 1)
+        let record = try XCTUnwrap(records.first)
+        let outputIdentity = try XCTUnwrap(
+            FileSystemPathIdentity.entryIdentity(URL(fileURLWithPath: record.urlPath))
+        )
+        XCTAssertEqual(record.expectedOutputDevice, outputIdentity.device)
+        XCTAssertEqual(record.expectedOutputInode, outputIdentity.inode)
+        XCTAssertEqual(record.expectedOutputGeneration, outputIdentity.generation)
+        XCTAssertEqual(record.expectedOutputMode, outputIdentity.mode)
+
+        let restartedStore = ArchiveTemporaryArtifactStore(
+            extractionRoot: root,
+            cleanupRegistry: cleanupRegistry
+        )
+        try await restartedStore.retryPendingCleanup()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: record.ownerDirectoryPath))
+        XCTAssertEqual(try String(contentsOf: sentinel, encoding: .utf8), "keep")
+        XCTAssertTrue(try cleanupRegistry.load().isEmpty)
+    }
+
+    func testCancelledExtractionRethrowsCancellationErrorWhenCleanupRetryCannotBeScheduled() async throws {
+        let archiveURL = try makeArchive()
+        let root = tempDirectory.appendingPathComponent("preview-root", isDirectory: true)
+        let probe = ExtractionCancellationProbe()
+        let service = ArchiveBrowsingService(
+            extractionRoot: root,
+            cleanupRegistry: FailingArtifactCleanupRegistry(),
+            fileSystemHooks: ArchiveTemporaryFileSystemHooks(afterOwnerQuarantine: { _ in
+                throw InjectedArtifactCleanupFailure()
+            }),
+            extractionHandler: { _, _, progress, consumer in
+                try consumer(Data("partial".utf8))
+                probe.markStarted()
+                while !progress.isCancelled {
+                    Thread.sleep(forTimeInterval: 0.01)
+                }
+                throw InjectedExtractionFailure()
+            }
+        )
+
+        let task = Task {
+            try await service.temporaryExtract(
+                ArchiveLocation(archiveURL: archiveURL, internalPath: "docs/readme.txt")
+            )
+        }
+        try await waitForExtractionToStart(probe)
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            XCTFail("Expected extraction cancellation")
+        } catch is CancellationError {
+        } catch {
+            XCTFail("Expected CancellationError, got \(error)")
+        }
     }
 
     func testInvalidZipThrowsReadableExplorerError() async throws {
@@ -145,5 +434,72 @@ final class ArchiveBrowsingServiceTests: XCTestCase {
             }
         }
         return archiveURL
+    }
+
+    private func waitForExtractionToStart(_ probe: ExtractionCancellationProbe) async throws {
+        for _ in 0..<100 {
+            if probe.hasStarted {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail("Timed out waiting for extraction to start")
+    }
+}
+
+private struct InjectedExtractionFailure: Error {}
+private struct InjectedArtifactAllocationFailure: Error {}
+
+private final class BrowsingURLRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedValue: URL?
+
+    var value: URL? {
+        lock.withLock { recordedValue }
+    }
+
+    func record(_ value: URL) {
+        lock.withLock {
+            recordedValue = value
+        }
+    }
+}
+
+private final class FailingArtifactAllocationFileManager: FileManager, @unchecked Sendable {
+    override func createDirectory(
+        at url: URL,
+        withIntermediateDirectories createIntermediates: Bool,
+        attributes: [FileAttributeKey: Any]? = nil
+    ) throws {
+        throw InjectedArtifactAllocationFailure()
+    }
+}
+
+private struct InjectedArtifactCleanupFailure: Error {}
+
+private final class FailingArtifactCleanupRegistry: ArchiveTemporaryArtifactCleanupPersisting, @unchecked Sendable {
+    func load() throws -> [PendingArchiveTemporaryArtifactCleanup] {
+        []
+    }
+
+    func save(_ records: [PendingArchiveTemporaryArtifactCleanup]) throws {
+        throw InjectedArtifactCleanupFailure()
+    }
+}
+
+private final class ExtractionCancellationProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var started = false
+
+    var hasStarted: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return started
+    }
+
+    func markStarted() {
+        lock.lock()
+        started = true
+        lock.unlock()
     }
 }

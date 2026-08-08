@@ -37,9 +37,12 @@ public struct NotificationPlanner {
             guard offsets.isEmpty == false else { continue }
             let maximumOffset = offsets.max() ?? 0
             let expansionStart = calendar.startOfDay(for: now)
+            let (horizonWithOffset, offsetOverflowed) = horizonDays.addingReportingOverflow(maximumOffset)
+            let (expansionDays, paddingOverflowed) = horizonWithOffset.addingReportingOverflow(1)
+            guard offsetOverflowed == false, paddingOverflowed == false else { continue }
             guard let expansionEnd = calendar.date(
                 byAdding: .day,
-                value: horizonDays + maximumOffset + 1,
+                value: expansionDays,
                 to: expansionStart
             ) else {
                 continue

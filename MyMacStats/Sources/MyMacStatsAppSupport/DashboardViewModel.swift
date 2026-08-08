@@ -39,7 +39,9 @@ public final class DashboardViewModel: ObservableObject {
     @Published public var sortAscending: Bool {
         didSet { saveSelectedSortPreference() }
     }
-    @Published public var refreshInterval: RefreshInterval
+    @Published public var refreshInterval: RefreshInterval {
+        didSet { userDefaults.set(refreshInterval.rawValue, forKey: Self.refreshIntervalDefaultsKey) }
+    }
     @Published public var historyRange: HistoryRange
     @Published public var selectedProcessID: Int32?
     @Published public private(set) var pendingTerminationProcess: ProcessMetric?
@@ -50,6 +52,7 @@ public final class DashboardViewModel: ObservableObject {
     private let service: SystemMetricsService
     private let healthAlertController: HealthAlertController
     private let applicationTerminator: ApplicationTerminating
+    private let userDefaults: UserDefaults
     private var terminator: ProcessTerminator
     private var terminationMessageProcessID: Int32?
     private var forceQuitCandidateGroupID: String?
@@ -67,18 +70,20 @@ public final class DashboardViewModel: ObservableObject {
         service: SystemMetricsService = SystemMetricsService(),
         healthAlertController: HealthAlertController = HealthAlertController(),
         terminator: ProcessTerminator = ProcessTerminator(),
-        applicationTerminator: ApplicationTerminating = RunningApplicationTerminator()
+        applicationTerminator: ApplicationTerminating = RunningApplicationTerminator(),
+        userDefaults: UserDefaults = .standard
     ) {
         self.snapshot = snapshot
         self.service = service
         self.healthAlertController = healthAlertController
         self.applicationTerminator = applicationTerminator
+        self.userDefaults = userDefaults
         self.terminator = terminator
         self.selectedKind = .cpu
         self.searchText = ""
         self.sortKey = .cpu
         self.sortAscending = false
-        self.refreshInterval = .oneSecond
+        self.refreshInterval = Self.loadRefreshInterval(from: userDefaults)
         self.historyRange = .oneMinute
         self.selectedProcessID = nil
         self.selectedProcessGroupID = nil
@@ -90,6 +95,13 @@ public final class DashboardViewModel: ObservableObject {
         self.forceQuitCandidateGroupID = nil
         self.sortPreferences = MetricKind.defaultProcessSortPreferences
         self.isApplyingSortPreference = false
+    }
+
+    private static let refreshIntervalDefaultsKey = "Dashboard.refreshInterval"
+
+    private static func loadRefreshInterval(from userDefaults: UserDefaults) -> RefreshInterval {
+        let rawValue = userDefaults.integer(forKey: refreshIntervalDefaultsKey)
+        return RefreshInterval(rawValue: rawValue) ?? .oneSecond
     }
 
     public var summaries: [MetricSummary] {

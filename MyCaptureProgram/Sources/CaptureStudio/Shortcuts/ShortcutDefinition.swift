@@ -80,6 +80,10 @@ public struct ShortcutBinding: Codable, Equatable, Hashable, Sendable {
 
         return eventModifiers
     }
+
+    public var isSafeForGlobalUse: Bool {
+        modifiers.contains(.command) || modifiers.contains(.option) || modifiers.contains(.control)
+    }
 }
 
 public extension ShortcutModifier {

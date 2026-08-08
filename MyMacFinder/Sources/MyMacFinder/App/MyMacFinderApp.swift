@@ -20,6 +20,7 @@ struct MyMacFinderApp: App {
             RootView()
                 .environmentObject(explorerStore)
                 .task {
+                    await explorerStore.cleanupExpiredArchiveArtifacts()
                     await explorerStore.loadInitialDirectory()
                 }
         }

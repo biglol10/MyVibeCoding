@@ -67,11 +67,26 @@ final class SystemMetricsServiceTests: XCTestCase {
         )
 
         let snapshot = await service.refresh(now: now)
+        let secondSnapshot = await service.refresh(now: now.addingTimeInterval(1))
 
         XCTAssertEqual(snapshot.summary(for: .cpu)?.health, .unavailable)
         XCTAssertEqual(snapshot.summary(for: .memory)?.valueText, "Unavailable")
-        XCTAssertEqual(snapshot.summary(for: .network)?.health, .unavailable)
+        XCTAssertEqual(snapshot.summary(for: .network)?.health, .warning)
+        XCTAssertEqual(secondSnapshot.summary(for: .network)?.health, .unavailable)
         XCTAssertEqual(snapshot.summary(for: .battery)?.valueText, "Unavailable")
+    }
+
+    func testSingleNetworkSamplingFailureIsWarningBeforeBecomingUnavailable() async {
+        let service = SystemMetricsService(
+            sampler: MockSystemSampler(),
+            evaluator: HealthEvaluator(debounceSamples: 1)
+        )
+
+        let first = await service.refresh(now: Date(timeIntervalSince1970: 0))
+        let second = await service.refresh(now: Date(timeIntervalSince1970: 1))
+
+        XCTAssertEqual(first.summary(for: .network)?.health, .warning)
+        XCTAssertEqual(second.summary(for: .network)?.health, .unavailable)
     }
 
     func testCPUHistoryRetainsFiveMinutesOfTimestampedSamples() async {

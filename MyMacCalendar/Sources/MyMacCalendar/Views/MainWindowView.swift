@@ -4,6 +4,7 @@ import SwiftData
 import MyMacCalendarCore
 
 struct MainWindowView: View {
+    @Environment(\.modelContext) private var modelContext
     @Query(sort: \CalendarEvent.startDate) private var events: [CalendarEvent]
     @Query(sort: \HolidayRecord.date) private var holidays: [HolidayRecord]
     @Query private var settingsRows: [AppSettings]
@@ -13,6 +14,8 @@ struct MainWindowView: View {
     @State private var searchQuery = ""
     @FocusState private var isSearchFocused: Bool
     @State private var notificationRefreshEpoch = 0
+    @State private var holidayRefreshEpoch = 0
+    @State private var attemptedAutomaticHolidayYears = Set<Int>()
     private let notificationRefreshTimer = Timer.publish(
         every: 12 * 60 * 60,
         on: .main,
@@ -104,8 +107,15 @@ struct MainWindowView: View {
                 defaultMinute: settings.defaultReminderMinute
             )
         }
+        .task(id: automaticHolidayRefreshToken) {
+            await refreshCurrentYearHolidaysIfNeeded()
+        }
         .onReceive(notificationRefreshTimer) { _ in
             notificationRefreshEpoch &+= 1
+            holidayRefreshEpoch &+= 1
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in
+            holidayRefreshEpoch &+= 1
         }
         .onReceive(NotificationCenter.default.publisher(for: .openQuickAddSheet)) { _ in
             activeSheet = .quickAdd
@@ -284,6 +294,46 @@ struct MainWindowView: View {
             ].joined(separator: "|")
         }.joined(separator: ";")
         return "\(notificationRefreshEpoch)::\(settingsToken)::\(eventsToken)"
+    }
+
+    private var automaticHolidayRefreshToken: String {
+        let year = Calendar.current.component(.year, from: Date())
+        return "\(holidayRefreshEpoch)::\(year)"
+    }
+
+    @MainActor
+    private func refreshCurrentYearHolidaysIfNeeded() async {
+        let year = Calendar.current.component(.year, from: Date())
+        let existingAPIYears = Set(holidays.filter { $0.source == .api }.map(\.year))
+        guard HolidayAutoRefreshPolicy().shouldFetch(
+            year: year,
+            existingAPIYears: existingAPIYears,
+            attemptedYears: attemptedAutomaticHolidayYears
+        ) else {
+            return
+        }
+
+        attemptedAutomaticHolidayYears.insert(year)
+        do {
+            let imports = try await HolidayService().fetchKoreanHolidays(year: year)
+            try Task.checkCancellation()
+            let currentHolidays = try modelContext.fetch(FetchDescriptor<HolidayRecord>())
+            let newRecords = HolidayImportPlanner().newRecords(
+                imports: imports,
+                existing: currentHolidays,
+                year: year
+            )
+            for holiday in newRecords {
+                modelContext.insert(holiday)
+            }
+            if newRecords.isEmpty == false {
+                try PersistenceTransaction.save(context: modelContext)
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            // Manual refresh remains available in Settings after a background failure.
+        }
     }
 }
 

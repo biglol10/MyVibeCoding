@@ -15,7 +15,9 @@ rm -rf "$PACKAGE_ROOT" "$FINAL_ZIP"
 mkdir -p "$PACKAGE_ROOT"
 
 echo "Building personal-use app package..."
-CAPTURE_STUDIO_CODE_SIGN_IDENTITY="-" "$ROOT_DIR/scripts/install_app.sh" "$PACKAGE_ROOT"
+CAPTURE_STUDIO_CODE_SIGN_IDENTITY="-" \
+CAPTURE_STUDIO_SKIP_LSREGISTER=1 \
+  "$ROOT_DIR/scripts/install_app.sh" "$PACKAGE_ROOT"
 
 xattr -cr "$APP_BUNDLE" 2>/dev/null || true
 codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null

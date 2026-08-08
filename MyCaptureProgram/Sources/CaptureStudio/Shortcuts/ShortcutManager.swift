@@ -5,6 +5,7 @@ import SwiftUI
 public final class ShortcutManager: ObservableObject {
     public enum ShortcutError: Error, Equatable {
         case duplicateBinding(existingAction: ShortcutAction)
+        case unsafeModifiers
     }
 
     @Published public private(set) var bindings: [ShortcutAction: ShortcutBinding]
@@ -26,7 +27,9 @@ public final class ShortcutManager: ObservableObject {
         if let data = defaults.data(forKey: storageKey),
            let decoded = try? JSONDecoder().decode([ShortcutAction: ShortcutBinding].self, from: data) {
             let supportedActions = Set(ShortcutDefinition.customizableActions)
-            let filteredDecoded = decoded.filter { supportedActions.contains($0.key) }
+            let filteredDecoded = decoded.filter {
+                supportedActions.contains($0.key) && $0.value.isSafeForGlobalUse
+            }
             self.bindings = ShortcutDefinition.defaultBindings.merging(filteredDecoded) { _, custom in custom }
         } else {
             self.bindings = ShortcutDefinition.defaultBindings
@@ -34,6 +37,9 @@ public final class ShortcutManager: ObservableObject {
     }
 
     public func setBinding(_ binding: ShortcutBinding, for action: ShortcutAction) throws {
+        guard binding.isSafeForGlobalUse else {
+            throw ShortcutError.unsafeModifiers
+        }
         if let duplicate = bindings.first(where: { $0.key != action && $0.value == binding })?.key {
             throw ShortcutError.duplicateBinding(existingAction: duplicate)
         }

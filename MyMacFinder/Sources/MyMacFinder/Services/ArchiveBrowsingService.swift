@@ -26,20 +26,63 @@ public struct ArchiveEntry: Equatable, Sendable {
 public protocol ArchiveBrowsing: Sendable {
     func canOpen(_ url: URL) -> Bool
     func list(_ location: ArchiveLocation, showHiddenFiles: Bool) async throws -> [ArchiveEntry]
-    func temporaryExtract(_ location: ArchiveLocation) async throws -> URL
+    func temporaryExtract(_ location: ArchiveLocation) async throws -> TemporaryArchiveArtifact
+    func releaseTemporaryArtifact(_ artifact: TemporaryArchiveArtifact) async throws
+    func scheduleTemporaryArtifactCleanupRetry(_ artifact: TemporaryArchiveArtifact) async throws
+    func retainTemporaryArtifactForExternalOpen(_ artifact: TemporaryArchiveArtifact, openedAt: Date) async throws
+    func validateTemporaryArtifactForHandoff(_ artifact: TemporaryArchiveArtifact) async throws
+    func cleanupExpiredTemporaryArtifacts(now: Date, retentionInterval: TimeInterval) async throws
+}
+
+public extension ArchiveBrowsing {
+    func releaseTemporaryArtifact(_ artifact: TemporaryArchiveArtifact) async throws {}
+
+    func scheduleTemporaryArtifactCleanupRetry(_ artifact: TemporaryArchiveArtifact) async throws {}
+
+    func retainTemporaryArtifactForExternalOpen(_ artifact: TemporaryArchiveArtifact, openedAt: Date) async throws {}
+
+    func validateTemporaryArtifactForHandoff(_ artifact: TemporaryArchiveArtifact) async throws {}
+
+    func cleanupExpiredTemporaryArtifacts(now: Date, retentionInterval: TimeInterval) async throws {}
 }
 
 public struct ArchiveBrowsingService: ArchiveBrowsing, @unchecked Sendable {
-    private let fileManager: FileManager
-    private let extractionRoot: URL
+    typealias ExtractionHandler = (Archive, Entry, Progress, Consumer) throws -> Void
+
+    private let artifactStore: ArchiveTemporaryArtifactStore
+    private let extractionHandler: ExtractionHandler
 
     public init(
         fileManager: FileManager = .default,
         extractionRoot: URL = FileManager.default.temporaryDirectory
             .appendingPathComponent("MyMacFinderArchivePreview", isDirectory: true)
     ) {
-        self.fileManager = fileManager
-        self.extractionRoot = extractionRoot
+        self.artifactStore = ArchiveTemporaryArtifactStore(
+            fileManagerReference: ArchiveArtifactFileManagerReference(fileManager),
+            extractionRoot: extractionRoot
+        )
+        self.extractionHandler = { archive, entry, progress, consumer in
+            _ = try archive.extract(entry, progress: progress, consumer: consumer)
+        }
+    }
+
+    init(
+        fileManager: FileManager = .default,
+        extractionRoot: URL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MyMacFinderArchivePreview", isDirectory: true),
+        cleanupRegistry: any ArchiveTemporaryArtifactCleanupPersisting = ArchiveTemporaryArtifactCleanupRegistry(),
+        fileSystemHooks: ArchiveTemporaryFileSystemHooks = .none,
+        extractionHandler: @escaping ExtractionHandler = { archive, entry, progress, consumer in
+            _ = try archive.extract(entry, progress: progress, consumer: consumer)
+        }
+    ) {
+        self.artifactStore = ArchiveTemporaryArtifactStore(
+            fileManagerReference: ArchiveArtifactFileManagerReference(fileManager),
+            extractionRoot: extractionRoot,
+            cleanupRegistry: cleanupRegistry,
+            fileSystemHooks: fileSystemHooks
+        )
+        self.extractionHandler = extractionHandler
     }
 
     public func canOpen(_ url: URL) -> Bool {
@@ -114,23 +157,104 @@ public struct ArchiveBrowsingService: ArchiveBrowsing, @unchecked Sendable {
         }.value
     }
 
-    public func temporaryExtract(_ location: ArchiveLocation) async throws -> URL {
-        try await Task.detached(priority: .userInitiated) {
-            try ArchivePathSafety.validateEntryPath(location.internalPath)
-            let archive = try self.openArchive(location.archiveURL)
-            guard let entry = archive[location.internalPath], entry.type != .directory else {
-                throw ExplorerError.readFailed("ZIP entry cannot be previewed: \(location.displayPath)")
-            }
+    public func temporaryExtract(_ location: ArchiveLocation) async throws -> TemporaryArchiveArtifact {
+        try ArchivePathSafety.validateEntryPath(location.internalPath)
+        let artifact = try await artifactStore.allocate(fileName: location.internalPath)
+        let artifactState = ArchiveExtractionArtifactState(artifact)
+        let progress = Progress(totalUnitCount: 0)
 
-            try self.fileManager.createDirectory(at: self.extractionRoot, withIntermediateDirectories: true)
-            let targetFolder = self.extractionRoot
-                .appendingPathComponent(location.archiveURL.deletingPathExtension().lastPathComponent, isDirectory: true)
-                .appendingPathComponent(UUID().uuidString, isDirectory: true)
-            try self.fileManager.createDirectory(at: targetFolder, withIntermediateDirectories: true)
-            let destination = targetFolder.appendingPathComponent(URL(fileURLWithPath: location.internalPath).lastPathComponent)
-            _ = try archive.extract(entry, to: destination)
-            return destination
-        }.value
+        do {
+            try await withTaskCancellationHandler(operation: {
+                try await Task.detached(priority: .userInitiated) { [self, progress] in
+                    guard !progress.isCancelled else {
+                        throw CancellationError()
+                    }
+                    let archive = try self.openArchive(location.archiveURL)
+                    guard let entry = archive[location.internalPath], entry.type != .directory else {
+                        throw ExplorerError.readFailed("ZIP entry cannot be previewed: \(location.displayPath)")
+                    }
+                    let output = try await self.artifactStore.openOutputFile(for: artifact)
+                    let completedArtifact = artifact.recordingOutputIdentity(output.identity)
+                    artifactState.update(completedArtifact)
+                    do {
+                        try self.extractionHandler(archive, entry, progress) { data in
+                            try output.write(data)
+                        }
+                        try output.close()
+                    } catch let extractionError {
+                        do {
+                            try output.close()
+                        } catch let closeError {
+                            throw ExplorerError.operationFailed(
+                                "ZIP temporary extraction failed (\(extractionError.localizedDescription)) and output close "
+                                    + "also failed: \(closeError.localizedDescription)"
+                            )
+                        }
+                        throw extractionError
+                    }
+                    try await self.artifactStore.validatePublishedOutput(
+                        completedArtifact
+                    )
+                    guard !progress.isCancelled else {
+                        throw CancellationError()
+                    }
+                }.value
+            }, onCancel: {
+                progress.cancel()
+            })
+            return artifactState.value
+        } catch {
+            let extractionError: Error = progress.isCancelled || Task.isCancelled
+                ? CancellationError()
+                : error
+            do {
+                try await artifactStore.release(artifactState.value)
+            } catch {
+                if extractionError is CancellationError {
+                    do {
+                        try await artifactStore.scheduleCleanupRetry(artifactState.value)
+                    } catch {
+                        NSLog(
+                            "MyMacFinder could not schedule cancelled archive preview cleanup for %@: %@",
+                            artifact.ownerDirectoryURL.path,
+                            error.localizedDescription
+                        )
+                    }
+                    throw CancellationError()
+                }
+                throw ExplorerError.operationFailed(
+                    "ZIP temporary extraction failed (\(extractionError.localizedDescription)) and temporary artifact cleanup "
+                        + "failed at \(artifact.ownerDirectoryURL.path): \(error.localizedDescription)"
+                )
+            }
+            throw extractionError
+        }
+    }
+
+    public func releaseTemporaryArtifact(_ artifact: TemporaryArchiveArtifact) async throws {
+        try await artifactStore.release(artifact)
+    }
+
+    public func scheduleTemporaryArtifactCleanupRetry(_ artifact: TemporaryArchiveArtifact) async throws {
+        try await artifactStore.scheduleCleanupRetry(artifact)
+    }
+
+    public func retainTemporaryArtifactForExternalOpen(
+        _ artifact: TemporaryArchiveArtifact,
+        openedAt: Date
+    ) async throws {
+        try await artifactStore.registerExternalOpen(artifact, openedAt: openedAt)
+    }
+
+    public func validateTemporaryArtifactForHandoff(_ artifact: TemporaryArchiveArtifact) async throws {
+        try await artifactStore.validateHandoff(artifact)
+    }
+
+    public func cleanupExpiredTemporaryArtifacts(
+        now: Date,
+        retentionInterval: TimeInterval
+    ) async throws {
+        try await artifactStore.cleanupExpired(now: now, retentionInterval: retentionInterval)
     }
 
     private func openArchive(_ url: URL) throws -> Archive {
@@ -138,6 +262,25 @@ public struct ArchiveBrowsingService: ArchiveBrowsing, @unchecked Sendable {
             return try Archive(url: url, accessMode: .read)
         } catch {
             throw ExplorerError.readFailed("ZIP archive could not be read: \(url.path)")
+        }
+    }
+}
+
+private final class ArchiveExtractionArtifactState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var artifact: TemporaryArchiveArtifact
+
+    init(_ artifact: TemporaryArchiveArtifact) {
+        self.artifact = artifact
+    }
+
+    var value: TemporaryArchiveArtifact {
+        lock.withLock { artifact }
+    }
+
+    func update(_ artifact: TemporaryArchiveArtifact) {
+        lock.withLock {
+            self.artifact = artifact
         }
     }
 }

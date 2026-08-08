@@ -404,13 +404,7 @@ struct SettingsView: View {
     }
 
     private func applyHolidayImports(_ imports: [HolidayImport], year: Int) {
-        let existingProviderKeys = Set(holidays.filter { $0.source == .api }.map(\.providerKey))
-        let merged = HolidayMerger().merge(imports: imports, existing: holidays, year: year)
-        let newRecords = merged.filter { holiday in
-            holiday.source == .api &&
-                holiday.isHidden == false &&
-                existingProviderKeys.contains(holiday.providerKey) == false
-        }
+        let newRecords = HolidayImportPlanner().newRecords(imports: imports, existing: holidays, year: year)
 
         for holiday in newRecords {
             modelContext.insert(holiday)

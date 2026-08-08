@@ -124,6 +124,23 @@ final class NotificationPlanningTests: XCTestCase {
         XCTAssertEqual(plans.map { calendar.component(.day, from: $0.fireDate) }, [10, 17])
     }
 
+    func testExtremePositiveOffsetIsIgnoredWithoutOverflowing() throws {
+        let event = snapshot(
+            id: "60000000-0000-0000-0000-000000000001",
+            title: "Corrupted offset",
+            start: try date(2026, 7, 10),
+            recurrence: .none,
+            offsets: [Int.max]
+        )
+
+        let plans = planner.plans(
+            for: [event], defaultHour: 9, defaultMinute: 0,
+            now: try date(2026, 7, 1), horizonDays: 90, maximumPlans: 10, batchID: "overflow"
+        )
+
+        XCTAssertTrue(plans.isEmpty)
+    }
+
     private var planner: NotificationPlanner {
         NotificationPlanner(calendar: calendar)
     }

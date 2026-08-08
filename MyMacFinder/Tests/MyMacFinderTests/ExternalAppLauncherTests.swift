@@ -4,16 +4,41 @@ import UniformTypeIdentifiers
 import XCTest
 @testable import MyMacFinder
 
-@MainActor
 final class ExternalAppLauncherTests: XCTestCase {
+    private var tempDirectory: URL!
+
+    override func setUpWithError() throws {
+        tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: false)
+    }
+
+    override func tearDownWithError() throws {
+        let root = try XCTUnwrap(tempDirectory)
+        try FileManager.default.removeItem(at: root)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+        tempDirectory = nil
+    }
+
+    @MainActor
+    func testOpenDefaultThrowsWhenWorkspaceRejectsURL() {
+        let workspace = DefaultOpenWorkspaceOpener(result: false)
+        let launcher = AppKitExternalAppLauncher(workspace: workspace)
+        let file = URL(fileURLWithPath: "/tmp/unopenable.fixture")
+
+        XCTAssertThrowsError(try launcher.openDefault(file)) { error in
+            XCTAssertEqual(
+                error as? ExplorerError,
+                .externalCommandFailed("No application could open: /tmp/unopenable.fixture")
+            )
+        }
+    }
+
+    @MainActor
     func testOpenTerminalDoesNotWaitForWorkspaceCompletionCallbacks() async throws {
         let workspace = DuplicateCompletionWorkspaceOpener()
-        let terminalURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FakeTerminal-\(UUID().uuidString).app", isDirectory: true)
+        let terminalURL = tempDirectory.appendingPathComponent("FakeTerminal.app", isDirectory: true)
         try FileManager.default.createDirectory(at: terminalURL, withIntermediateDirectories: true)
-        defer {
-            try? FileManager.default.removeItem(at: terminalURL)
-        }
         let directory = URL(fileURLWithPath: "/Users/example/Project", isDirectory: true)
         let launcher = AppKitExternalAppLauncher(
             workspace: workspace,
@@ -26,14 +51,11 @@ final class ExternalAppLauncherTests: XCTestCase {
         XCTAssertEqual(workspace.openCalls.map(\.applicationURL), [terminalURL.standardizedFileURL])
     }
 
+    @MainActor
     func testOpenTerminalDoesNotSurfaceWorkspaceCompletionErrors() async throws {
         let workspace = CompletionErrorWorkspaceOpener()
-        let terminalURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FakeTerminal-\(UUID().uuidString).app", isDirectory: true)
+        let terminalURL = tempDirectory.appendingPathComponent("FakeTerminal.app", isDirectory: true)
         try FileManager.default.createDirectory(at: terminalURL, withIntermediateDirectories: true)
-        defer {
-            try? FileManager.default.removeItem(at: terminalURL)
-        }
         let directory = URL(fileURLWithPath: "/Users/example/Project", isDirectory: true)
         let launcher = AppKitExternalAppLauncher(
             workspace: workspace,
@@ -46,6 +68,7 @@ final class ExternalAppLauncherTests: XCTestCase {
         XCTAssertEqual(workspace.openCalls.map(\.applicationURL), [terminalURL.standardizedFileURL])
     }
 
+    @MainActor
     func testOpenWithIgnoresDuplicateWorkspaceCompletionCallbacks() async throws {
         let workspace = DuplicateCompletionWorkspaceOpener()
         let file = URL(fileURLWithPath: "/Users/example/report.pdf")
@@ -62,6 +85,7 @@ final class ExternalAppLauncherTests: XCTestCase {
         XCTAssertEqual(workspace.openCalls.map(\.applicationURL), [preview.url])
     }
 
+    @MainActor
     func testOpenVSCodeAppIgnoresDuplicateWorkspaceCompletionCallbacks() async throws {
         let vscodeURL = URL(fileURLWithPath: "/Applications/Visual Studio Code.app", isDirectory: true)
         let workspace = DuplicateCompletionWorkspaceOpener(applicationURLsByBundleIdentifier: [
@@ -76,6 +100,7 @@ final class ExternalAppLauncherTests: XCTestCase {
         XCTAssertEqual(workspace.openCalls.map(\.applicationURL), [vscodeURL.standardizedFileURL])
     }
 
+    @MainActor
     func testOpenVSCodeFallsBackToCodeCommandThroughUserShell() async throws {
         let workspace = DuplicateCompletionWorkspaceOpener()
         let commandRunner = RecordingExternalCommandRunner()
@@ -107,10 +132,10 @@ final class ExternalAppLauncherTests: XCTestCase {
         )
     }
 
+    @MainActor
     func testMissingTerminalIsNotReportedAsReadFailure() async throws {
         let workspace = DuplicateCompletionWorkspaceOpener()
-        let missingTerminalURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("MissingTerminal-\(UUID().uuidString).app", isDirectory: true)
+        let missingTerminalURL = tempDirectory.appendingPathComponent("MissingTerminal.app", isDirectory: true)
         let directory = URL(fileURLWithPath: "/Users/example/Project", isDirectory: true)
         let launcher = AppKitExternalAppLauncher(
             workspace: workspace,
@@ -131,6 +156,34 @@ private final class RecordingExternalCommandRunner: ExternalCommandRunning {
 
     func run(_ invocation: ExternalCommandInvocation) async throws {
         invocations.append(invocation)
+    }
+}
+
+@MainActor
+private final class DefaultOpenWorkspaceOpener: WorkspaceApplicationOpening {
+    private let result: Bool
+
+    init(result: Bool) {
+        self.result = result
+    }
+
+    func open(_ url: URL) -> Bool {
+        result
+    }
+
+    func open(
+        _ urls: [URL],
+        withApplicationAt applicationURL: URL,
+        configuration: NSWorkspace.OpenConfiguration,
+        completionHandler: ((NSRunningApplication?, (any Error)?) -> Void)?
+    ) {}
+
+    func urlForApplication(withBundleIdentifier bundleIdentifier: String) -> URL? {
+        nil
+    }
+
+    func urlsForApplications(toOpen contentType: UTType) -> [URL] {
+        []
     }
 }
 

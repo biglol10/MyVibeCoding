@@ -20,6 +20,18 @@ final class ProcessSortingTests: XCTestCase {
         XCTAssertEqual(result.map(\.name), ["Safari", "Xcode", "Finder"])
     }
 
+    func testDescendingResourceSortsUseNameAndPIDAsStableTieBreakers() {
+        let tiedProcesses = [
+            ProcessMetric(pid: 30, name: "Xcode", cpuPercent: 50, memoryBytes: 900, path: nil, bundleIdentifier: nil),
+            ProcessMetric(pid: 20, name: "Safari", cpuPercent: 50, memoryBytes: 900, path: nil, bundleIdentifier: nil),
+            ProcessMetric(pid: 10, name: "Safari", cpuPercent: 50, memoryBytes: 900, path: nil, bundleIdentifier: nil)
+        ]
+
+        let result = ProcessSorting.filtered(tiedProcesses, searchText: "", sortKey: .cpu)
+
+        XCTAssertEqual(result.map(\.pid), [10, 20, 30])
+    }
+
     func testSortsByNameAscendingAndPIDAscending() {
         XCTAssertEqual(ProcessSorting.filtered(fixtures, searchText: "", sortKey: .name, ascending: true).map(\.name), ["Finder", "Safari", "Xcode"])
         XCTAssertEqual(ProcessSorting.filtered(fixtures, searchText: "", sortKey: .pid, ascending: true).map(\.pid), [10, 20, 30])

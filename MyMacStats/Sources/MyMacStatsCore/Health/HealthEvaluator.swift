@@ -86,8 +86,8 @@ public struct HealthEvaluator: Sendable {
     }
 
     public func networkHealth(snapshot: NetworkSnapshot?, consecutiveFailures: Int) -> HealthState {
-        guard consecutiveFailures < 2, let snapshot else {
-            return .unavailable
+        guard let snapshot else {
+            return consecutiveFailures >= 2 ? .unavailable : .warning
         }
         if snapshot.interfaceName == nil || !snapshot.isConnected || consecutiveFailures == 1 {
             return .warning

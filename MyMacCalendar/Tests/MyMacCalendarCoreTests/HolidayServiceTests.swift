@@ -18,6 +18,26 @@ final class HolidayServiceTests: XCTestCase {
         XCTAssertTrue(visible.isEmpty)
     }
 
+    func testHiddenApiHolidayDateStaysHiddenWhenProviderRenamesIt() throws {
+        let renamed = HolidayImport(
+            date: try date(2026, 1, 1),
+            title: "Renamed New Year",
+            providerKey: "2026-01-01-Renamed New Year"
+        )
+        let hidden = HolidayRecord(
+            date: try date(2026, 1, 1),
+            title: "Old New Year",
+            source: .api,
+            providerKey: "2026-01-01-Old New Year",
+            isHidden: true,
+            year: 2026
+        )
+
+        let visible = HolidayMerger().merge(imports: [renamed], existing: [hidden], year: 2026)
+
+        XCTAssertTrue(visible.isEmpty)
+    }
+
     func testManualHolidayOverridesApiOnSameDate() throws {
         let api = HolidayImport(date: try date(2026, 5, 5), title: "Children's Day", providerKey: "2026-05-05-Children's Day")
         let manual = HolidayRecord(date: try date(2026, 5, 5), title: "어린이날 직접수정", source: .manual, year: 2026)
@@ -27,6 +47,44 @@ final class HolidayServiceTests: XCTestCase {
         XCTAssertEqual(visible.count, 1)
         XCTAssertEqual(visible[0].title, "어린이날 직접수정")
         XCTAssertEqual(visible[0].source, .manual)
+    }
+
+    func testImportPlannerReturnsOnlyNewApiDatesWithoutResponseDuplicates() throws {
+        let existing = HolidayRecord(
+            date: try date(2026, 1, 1),
+            title: "새해",
+            source: .api,
+            providerKey: "2026-01-01-새해",
+            year: 2026
+        )
+        let newHoliday = HolidayImport(
+            date: try date(2026, 3, 1),
+            title: "삼일절",
+            providerKey: "2026-03-01-삼일절"
+        )
+        let imports = [
+            HolidayImport(date: try date(2026, 1, 1), title: "New Year renamed", providerKey: "2026-01-01-New Year renamed"),
+            newHoliday,
+            newHoliday
+        ]
+
+        let records = HolidayImportPlanner(calendar: calendar).newRecords(
+            imports: imports,
+            existing: [existing],
+            year: 2026
+        )
+
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records.first?.providerKey, "2026-03-01-삼일절")
+    }
+
+    func testAutomaticRefreshPolicyFetchesOnlyMissingUnattemptedYear() {
+        let policy = HolidayAutoRefreshPolicy()
+
+        XCTAssertTrue(policy.shouldFetch(year: 2027, existingAPIYears: [2026], attemptedYears: []))
+        XCTAssertFalse(policy.shouldFetch(year: 2027, existingAPIYears: [2027], attemptedYears: []))
+        XCTAssertFalse(policy.shouldFetch(year: 2027, existingAPIYears: [], attemptedYears: [2027]))
+        XCTAssertFalse(policy.shouldFetch(year: 0, existingAPIYears: [], attemptedYears: []))
     }
 
     func testNagerDecodeMapsLocalNameAndProviderKey() throws {
@@ -39,6 +97,31 @@ final class HolidayServiceTests: XCTestCase {
         XCTAssertEqual(imports.count, 1)
         XCTAssertEqual(imports[0].title, "새해")
         XCTAssertEqual(imports[0].providerKey, "2026-01-01-새해")
+    }
+
+    func testDecoderRejectsEntirePayloadWhenOneDateIsInvalid() throws {
+        let data = """
+        [
+          {"date":"2026-01-01","localName":"새해"},
+          {"date":"not-a-date","localName":"손상된 휴일"}
+        ]
+        """.data(using: .utf8)!
+
+        XCTAssertThrowsError(try NagerHolidayDecoder().decode(data: data, calendar: calendar)) { error in
+            XCTAssertEqual(error as? HolidayServiceError, .invalidResponse)
+        }
+    }
+
+    func testMergerIgnoresImportsOutsideRequestedYear() throws {
+        let imports = [
+            HolidayImport(date: try date(2026, 1, 1), title: "새해", providerKey: "2026-01-01-새해"),
+            HolidayImport(date: try date(2027, 1, 1), title: "다음 해", providerKey: "2027-01-01-다음 해")
+        ]
+
+        let records = HolidayMerger().merge(imports: imports, existing: [], year: 2026)
+
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records.first?.providerKey, "2026-01-01-새해")
     }
 
     func testFetchRejectsHTTPErrorStatus() async throws {

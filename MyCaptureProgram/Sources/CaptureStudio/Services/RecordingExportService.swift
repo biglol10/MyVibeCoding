@@ -41,6 +41,45 @@ enum RecordingTrimRangeResolver {
     }
 }
 
+struct RecordingGIFPlan: Equatable, Sendable {
+    let durationSeconds: Double
+    let frameIntervalSeconds: Double
+    let frameCount: Int
+}
+
+enum RecordingGIFPlanResolver {
+    private static let maximumFrameCount = 3_600
+
+    static func resolve(
+        assetDurationSeconds: Double,
+        maxDurationSeconds: Double?
+    ) throws -> RecordingGIFPlan {
+        guard assetDurationSeconds.isFinite, assetDurationSeconds > 0 else {
+            throw RecordingExportError.invalidMediaDuration
+        }
+        if let maxDurationSeconds {
+            guard maxDurationSeconds.isFinite, maxDurationSeconds > 0 else {
+                throw RecordingExportError.invalidGIFDurationLimit
+            }
+        }
+
+        let duration = min(assetDurationSeconds, maxDurationSeconds ?? assetDurationSeconds)
+        let frameInterval = 0.2
+        let rawFrameCount = ceil(duration / frameInterval)
+        guard rawFrameCount.isFinite else {
+            throw RecordingExportError.invalidMediaDuration
+        }
+        guard rawFrameCount <= Double(maximumFrameCount) else {
+            throw RecordingExportError.gifTooLong
+        }
+        return RecordingGIFPlan(
+            durationSeconds: duration,
+            frameIntervalSeconds: frameInterval,
+            frameCount: max(1, Int(rawFrameCount))
+        )
+    }
+}
+
 public struct RecordingExportResult: Equatable, Sendable {
     public let fileURL: URL
     public let fileIdentity: CaptureFileIdentity?
@@ -53,6 +92,9 @@ public struct RecordingExportResult: Equatable, Sendable {
 
 public enum RecordingExportError: LocalizedError, Equatable {
     case invalidTimeRange
+    case invalidMediaDuration
+    case invalidGIFDurationLimit
+    case gifTooLong
     case cannotCreateExporter
     case exportFailed(String)
     case gifDestinationFailed
@@ -63,6 +105,12 @@ public enum RecordingExportError: LocalizedError, Equatable {
         switch self {
         case .invalidTimeRange:
             return "Choose a trim end time greater than the start time."
+        case .invalidMediaDuration:
+            return "The recording duration could not be read."
+        case .invalidGIFDurationLimit:
+            return "The GIF duration limit is invalid."
+        case .gifTooLong:
+            return "The recording is too long to export as a GIF."
         case .cannotCreateExporter:
             return "The recording could not be prepared for export."
         case .exportFailed(let reason):
@@ -133,14 +181,14 @@ public struct AVFoundationRecordingExportService: RecordingExportServicing {
 
             let assetDuration = try await asset.load(.duration)
             let assetDurationSeconds = CMTimeGetSeconds(assetDuration)
-            let durationLimit = maxDurationSeconds.map { max(0.2, $0) } ?? assetDurationSeconds
-            let duration = max(0.2, min(assetDurationSeconds, durationLimit))
-            let frameInterval = 0.2
-            let frameCount = max(1, Int(duration / frameInterval))
+            let plan = try RecordingGIFPlanResolver.resolve(
+                assetDurationSeconds: assetDurationSeconds,
+                maxDurationSeconds: maxDurationSeconds
+            )
             guard let destination = CGImageDestinationCreateWithURL(
                 workspace.outputURL as CFURL,
                 UTType.gif.identifier as CFString,
-                frameCount,
+                plan.frameCount,
                 nil
             ) else {
                 throw RecordingExportError.gifDestinationFailed
@@ -154,14 +202,14 @@ public struct AVFoundationRecordingExportService: RecordingExportServicing {
             CGImageDestinationSetProperties(destination, gifProperties)
 
             var didAddFrame = false
-            for index in 0..<frameCount {
+            for index in 0..<plan.frameCount {
                 try Task.checkCancellation()
-                let seconds = Double(index) * frameInterval
+                let seconds = Double(index) * plan.frameIntervalSeconds
                 let time = CMTime(seconds: seconds, preferredTimescale: 600)
                 if let generatedImage = try? await generator.image(at: time) {
                     let frameProperties = [
                         kCGImagePropertyGIFDictionary: [
-                            kCGImagePropertyGIFDelayTime: frameInterval
+                            kCGImagePropertyGIFDelayTime: plan.frameIntervalSeconds
                         ]
                     ] as CFDictionary
                     CGImageDestinationAddImage(destination, generatedImage.image, frameProperties)

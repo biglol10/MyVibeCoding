@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct FileTableColumnDefinition {
     let key: String
@@ -24,39 +23,7 @@ struct FileTableIconResolver {
     }
 
     static let live = FileTableIconResolver { entry in
-        defaultIcon(for: entry)
-    }
-
-    @MainActor
-    private static func defaultIcon(for entry: FileEntry) -> NSImage {
-        switch entry.kind {
-        case .folder, .volume, .zipVirtualFolder:
-            return NSImage(named: NSImage.folderName)
-                ?? NSImage(systemSymbolName: "folder.fill", accessibilityDescription: "Folder")
-                ?? typeIcon(for: nil)
-        case .package:
-            return NSImage(named: NSImage.applicationIconName)
-                ?? NSImage(systemSymbolName: "app", accessibilityDescription: "Package")
-                ?? NSWorkspace.shared.icon(for: .applicationBundle)
-        case .symlink:
-            return NSImage(systemSymbolName: "arrowshape.turn.up.right", accessibilityDescription: "Alias")
-                ?? typeIcon(for: entry.fileExtension)
-        case .file, .zipVirtualFile, .other:
-            if !entry.fileExtension.isEmpty {
-                return typeIcon(for: entry.fileExtension)
-            }
-            return NSImage(named: NSImage.multipleDocumentsName)
-                ?? NSImage(systemSymbolName: "doc", accessibilityDescription: "File")
-                ?? typeIcon(for: nil)
-        }
-    }
-
-    @MainActor
-    private static func typeIcon(for fileExtension: String?) -> NSImage {
-        let contentType = fileExtension
-            .flatMap { UTType(filenameExtension: $0) }
-            ?? .data
-        return NSWorkspace.shared.icon(for: contentType)
+        FileEntryIconResolver.icon(for: entry, size: NSSize(width: 16, height: 16))
     }
 
     @MainActor

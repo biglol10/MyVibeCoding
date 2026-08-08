@@ -273,6 +273,131 @@ final class CaptureCoordinatorDocumentSafetyTests: XCTestCase {
     }
 
     @MainActor
+    func testTerminationCancelPreservesDirtyDocument() async {
+        let original = makeDirtyScreenshot()
+        let appState = AppState(currentDocument: original)
+        let authorizer = SafetyDocumentReplacementAuthorizer(decision: .cancel)
+        let coordinator = makeCoordinator(
+            appState: appState,
+            selectionService: SafetySelectionService(),
+            authorizer: authorizer
+        )
+
+        let shouldTerminate = await coordinator.prepareForTermination()
+
+        XCTAssertFalse(shouldTerminate)
+        XCTAssertEqual(authorizer.requestCount, 1)
+        XCTAssertEqual(appState.currentDocument, original)
+        XCTAssertEqual(appState.statusMessage, "Quit cancelled. Current document was preserved.")
+    }
+
+    @MainActor
+    func testTerminationUsesQuitSpecificAuthorization() async {
+        let appState = AppState(currentDocument: makeDirtyScreenshot())
+        let authorizer = SafetyTerminationDocumentAuthorizer()
+        let coordinator = makeCoordinator(
+            appState: appState,
+            selectionService: SafetySelectionService(),
+            authorizer: authorizer
+        )
+
+        _ = await coordinator.prepareForTermination()
+
+        XCTAssertEqual(authorizer.terminationRequestCount, 1)
+        XCTAssertEqual(authorizer.replacementRequestCount, 0)
+    }
+
+    @MainActor
+    func testTerminationDiscardRemovesOwnedUnsavedRecording() async throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("termination-unsaved-\(UUID().uuidString).mp4")
+        try Data("recording".utf8).write(to: fileURL)
+        let document = EditorDocument(
+            kind: .recording,
+            fileURL: fileURL,
+            fileIdentity: try CaptureFileIdentity.existingFile(at: fileURL),
+            isDirty: true
+        )
+        let appState = AppState(currentDocument: document)
+        let coordinator = makeCoordinator(
+            appState: appState,
+            selectionService: SafetySelectionService(),
+            replacementDecision: .discard
+        )
+
+        let shouldTerminate = await coordinator.prepareForTermination()
+
+        XCTAssertTrue(shouldTerminate)
+        XCTAssertNil(appState.currentDocument)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+    }
+
+    @MainActor
+    func testTerminationIsBlockedWhileCaptureOperationIsActive() async {
+        let appState = AppState()
+        let selection = SafetySuspendingSelectionService()
+        let coordinator = makeCoordinator(appState: appState, selectionService: selection)
+        let captureTask = Task { @MainActor in
+            await coordinator.startScreenshotCapture()
+        }
+        await selection.waitUntilStarted()
+
+        let shouldTerminate = await coordinator.prepareForTermination()
+
+        XCTAssertFalse(shouldTerminate)
+        XCTAssertEqual(appState.statusMessage, "Finish or cancel the active operation before quitting.")
+        selection.cancel()
+        await captureTask.value
+    }
+
+    @MainActor
+    func testCaptureCannotStartWhileTerminationDecisionIsPending() async {
+        let appState = AppState(currentDocument: makeDirtyScreenshot())
+        let selection = SafetySelectionService()
+        let authorizer = SafetySuspendingTerminationDocumentAuthorizer()
+        let coordinator = makeCoordinator(
+            appState: appState,
+            selectionService: selection,
+            authorizer: authorizer
+        )
+        let terminationTask = Task { @MainActor in
+            await coordinator.prepareForTermination()
+        }
+        await authorizer.waitUntilTerminationRequested()
+
+        await coordinator.startScreenshotCapture()
+
+        XCTAssertEqual(selection.selectionCallCount, 0)
+        XCTAssertEqual(appState.statusMessage, "Quit confirmation is in progress.")
+        authorizer.resolveTermination(with: .cancel)
+        let shouldTerminate = await terminationTask.value
+        XCTAssertFalse(shouldTerminate)
+    }
+
+    @MainActor
+    func testTerminationRechecksActiveWorkAfterDecision() async {
+        let appState = AppState(currentDocument: makeDirtyScreenshot())
+        let authorizer = SafetySuspendingTerminationDocumentAuthorizer()
+        let coordinator = makeCoordinator(
+            appState: appState,
+            selectionService: SafetySelectionService(),
+            authorizer: authorizer
+        )
+        let terminationTask = Task { @MainActor in
+            await coordinator.prepareForTermination()
+        }
+        await authorizer.waitUntilTerminationRequested()
+        appState.isCaptureOperationInProgress = true
+
+        authorizer.resolveTermination(with: .discard)
+        let shouldTerminate = await terminationTask.value
+
+        XCTAssertFalse(shouldTerminate)
+        XCTAssertEqual(appState.statusMessage, "Finish or cancel the active operation before quitting.")
+        appState.isCaptureOperationInProgress = false
+    }
+
+    @MainActor
     private func makeCoordinator(
         appState: AppState,
         selectionService: SelectionServicing,
@@ -353,6 +478,59 @@ private final class SafetyDocumentReplacementAuthorizer: DocumentReplacementAuth
         let index = min(requestCount, max(0, decisions.count - 1))
         requestCount += 1
         return decisions[index]
+    }
+}
+
+@MainActor
+private final class SafetyTerminationDocumentAuthorizer: DocumentReplacementAuthorizing {
+    private(set) var replacementRequestCount = 0
+    private(set) var terminationRequestCount = 0
+
+    func replacementDecision(for document: EditorDocument) async -> DocumentReplacementDecision {
+        replacementRequestCount += 1
+        return .cancel
+    }
+
+    func terminationDecision(for document: EditorDocument) async -> DocumentReplacementDecision {
+        terminationRequestCount += 1
+        return .cancel
+    }
+}
+
+@MainActor
+private final class SafetySuspendingTerminationDocumentAuthorizer: DocumentReplacementAuthorizing {
+    private var terminationContinuation: CheckedContinuation<DocumentReplacementDecision, Never>?
+    private var requestWaiters: [CheckedContinuation<Void, Never>] = []
+    private var terminationRequestCount = 0
+
+    func replacementDecision(for document: EditorDocument) async -> DocumentReplacementDecision {
+        .discard
+    }
+
+    func terminationDecision(for document: EditorDocument) async -> DocumentReplacementDecision {
+        terminationRequestCount += 1
+        guard terminationRequestCount == 1 else {
+            return .cancel
+        }
+        requestWaiters.forEach { $0.resume() }
+        requestWaiters.removeAll()
+        return await withCheckedContinuation { continuation in
+            terminationContinuation = continuation
+        }
+    }
+
+    func waitUntilTerminationRequested() async {
+        if terminationRequestCount > 0 {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            requestWaiters.append(continuation)
+        }
+    }
+
+    func resolveTermination(with decision: DocumentReplacementDecision) {
+        terminationContinuation?.resume(returning: decision)
+        terminationContinuation = nil
     }
 }
 

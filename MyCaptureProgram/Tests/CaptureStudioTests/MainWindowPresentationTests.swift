@@ -164,4 +164,46 @@ final class MainWindowPresentationTests: XCTestCase {
         XCTAssertEqual(preview.detail, "Recording is ready.")
         XCTAssertFalse(preview.canPlay)
     }
+
+    func testTrimInputUsesZeroAndMediaEndForBlankFields() throws {
+        let input = try MainWindowPresentation.recordingTrimInput(
+            startText: "  ",
+            endText: ""
+        )
+
+        XCTAssertEqual(input, RecordingTrimInput(startSeconds: 0, endSeconds: nil))
+    }
+
+    func testTrimInputRejectsInvalidStartInsteadOfSilentlyUsingZero() {
+        XCTAssertThrowsError(
+            try MainWindowPresentation.recordingTrimInput(
+                startText: "beginning",
+                endText: "10"
+            )
+        ) { error in
+            XCTAssertEqual(error as? RecordingTrimInputError, .invalidStart)
+        }
+    }
+
+    func testTrimInputRejectsInvalidEndInsteadOfUsingMediaEnd() {
+        XCTAssertThrowsError(
+            try MainWindowPresentation.recordingTrimInput(
+                startText: "1",
+                endText: "finish"
+            )
+        ) { error in
+            XCTAssertEqual(error as? RecordingTrimInputError, .invalidEnd)
+        }
+    }
+
+    func testTrimInputRejectsNonFiniteAndReversedRanges() {
+        XCTAssertThrowsError(
+            try MainWindowPresentation.recordingTrimInput(startText: "nan", endText: "10")
+        )
+        XCTAssertThrowsError(
+            try MainWindowPresentation.recordingTrimInput(startText: "5", endText: "5")
+        ) { error in
+            XCTAssertEqual(error as? RecordingTrimInputError, .invalidRange)
+        }
+    }
 }

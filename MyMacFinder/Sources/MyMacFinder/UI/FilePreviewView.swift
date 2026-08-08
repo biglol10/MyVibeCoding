@@ -39,7 +39,7 @@ struct FilePreviewView: View {
                         .padding(.horizontal, 12)
                         .padding(.top, 12)
                 } else {
-                    Image(nsImage: NSWorkspace.shared.icon(forFile: entry.url.path))
+                    Image(nsImage: FileEntryIconResolver.icon(for: entry, size: NSSize(width: 64, height: 64)))
                         .resizable()
                         .scaledToFit()
                         .padding(.horizontal, 32)

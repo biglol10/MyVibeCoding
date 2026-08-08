@@ -7,6 +7,7 @@ BUNDLE_ID="${CAPTURE_STUDIO_BUNDLE_ID:-com.capturestudio.mac}"
 CONFIGURATION="${CONFIGURATION:-release}"
 DESTINATION="${1:-/Applications}"
 SIGN_IDENTITY="${CAPTURE_STUDIO_CODE_SIGN_IDENTITY:-}"
+SKIP_LSREGISTER="${CAPTURE_STUDIO_SKIP_LSREGISTER:-0}"
 
 if [[ "$EUID" -eq 0 ]]; then
   echo "Do not run this entire script with sudo." >&2
@@ -172,7 +173,7 @@ cleanup_staging
 trap - EXIT
 
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-if [[ -x "$LSREGISTER" ]]; then
+if [[ "$SKIP_LSREGISTER" != "1" && -x "$LSREGISTER" ]]; then
   "$LSREGISTER" -f "$APP_BUNDLE" >/dev/null 2>&1 || true
 fi
 

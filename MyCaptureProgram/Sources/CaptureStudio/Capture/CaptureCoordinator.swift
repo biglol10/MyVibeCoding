@@ -24,6 +24,7 @@ public final class CaptureCoordinator: ObservableObject {
     private let recordingExportService: RecordingExportServicing
     private let documentReplacementAuthorizer: DocumentReplacementAuthorizing
     private var screenshotSaveGenerationByDocumentID: [UUID: UInt64] = [:]
+    private var isTerminationPreparationInProgress = false
 
     public init(
         appState: AppState,
@@ -251,6 +252,41 @@ public final class CaptureCoordinator: ObservableObject {
 
         appState.statusMessage = "Stopping recording..."
         await recordingService.stopRecording()
+    }
+
+    public var needsTerminationPreparation: Bool {
+        appState.isInteractionBlocked
+            || appState.isRecordingInProgress
+            || appState.currentDocument?.isDirty == true
+    }
+
+    public func prepareForTermination() async -> Bool {
+        guard !isTerminationPreparationInProgress else {
+            return false
+        }
+        guard !appState.isInteractionBlocked, !appState.isRecordingInProgress else {
+            appState.statusMessage = "Finish or cancel the active operation before quitting."
+            return false
+        }
+        isTerminationPreparationInProgress = true
+        defer { isTerminationPreparationInProgress = false }
+
+        guard let replacement = await authorizeDocumentReplacementIfNeeded(
+            cancelStatusMessage: "Quit cancelled. Current document was preserved.",
+            forTermination: true
+        ) else {
+            return false
+        }
+        guard !appState.isInteractionBlocked, !appState.isRecordingInProgress else {
+            appState.statusMessage = "Finish or cancel the active operation before quitting."
+            return false
+        }
+
+        if replacement.shouldDiscardUnsavedRecording {
+            discardSupersededTemporaryRecordingIfNeeded(replacement)
+            appState.currentDocument = nil
+        }
+        return true
     }
 
     public func saveCurrentDocument() async {
@@ -531,10 +567,16 @@ public final class CaptureCoordinator: ObservableObject {
             currentDocument.fileIdentity = try? CaptureFileIdentity.existingFile(at: trimmedURL)
             currentDocument.createdAt = Date()
             currentDocument.isDirty = false
+            let removedTemporarySource = discardTemporaryRecordingIfOwned(
+                document,
+                identity: sourceIdentity
+            )
             appState.currentDocument = currentDocument
             addHistoryItem(for: currentDocument)
             revealIfNeeded(trimmedURL, settings: settingsStore.settings)
-            appState.statusMessage = "Recording trimmed."
+            appState.statusMessage = removedTemporarySource
+                ? "Recording trimmed."
+                : "Recording trimmed, but the temporary original could not be removed."
         } catch {
             if let producedResult {
                 discardExportResultIfOwned(producedResult)
@@ -830,6 +872,10 @@ public final class CaptureCoordinator: ObservableObject {
     }
 
     private func beginCaptureOperation() -> Bool {
+        guard !isTerminationPreparationInProgress else {
+            appState.statusMessage = "Quit confirmation is in progress."
+            return false
+        }
         guard !appState.isFileOperationInProgress else {
             appState.statusMessage = "A file operation is already in progress."
             return false
@@ -898,7 +944,8 @@ public final class CaptureCoordinator: ObservableObject {
     }
 
     private func authorizeDocumentReplacementIfNeeded(
-        cancelStatusMessage: String = "Capture cancelled. Current document was preserved."
+        cancelStatusMessage: String = "Capture cancelled. Current document was preserved.",
+        forTermination: Bool = false
     ) async -> ReplacementAuthorization? {
         while true {
             guard let document = appState.currentDocument, document.isDirty else {
@@ -908,7 +955,9 @@ public final class CaptureCoordinator: ObservableObject {
                 )
             }
 
-            let decision = await documentReplacementAuthorizer.replacementDecision(for: document)
+            let decision = forTermination
+                ? await documentReplacementAuthorizer.terminationDecision(for: document)
+                : await documentReplacementAuthorizer.replacementDecision(for: document)
             guard appState.currentDocument == document else {
                 continue
             }
@@ -1020,25 +1069,38 @@ public final class CaptureCoordinator: ObservableObject {
             return
         }
 
-        try? FileManager.default.removeItem(at: fileURL)
+        _ = try? ExclusiveFilePublisher.discardFileIfStillOwned(fileURL, identity: fileIdentity)
     }
 
     private func discardRecordingResultIfOwned(_ result: RecordingResult) {
-        guard let fileIdentity = result.fileIdentity,
-              fileIdentity.matchesExistingFile(at: result.fileURL)
-        else {
+        guard let fileIdentity = result.fileIdentity else {
             return
         }
-        try? FileManager.default.removeItem(at: result.fileURL)
+        _ = try? ExclusiveFilePublisher.discardFileIfStillOwned(result.fileURL, identity: fileIdentity)
     }
 
     private func discardExportResultIfOwned(_ result: RecordingExportResult) {
-        guard let fileIdentity = result.fileIdentity,
-              fileIdentity.matchesExistingFile(at: result.fileURL)
-        else {
+        guard let fileIdentity = result.fileIdentity else {
             return
         }
-        try? FileManager.default.removeItem(at: result.fileURL)
+        _ = try? ExclusiveFilePublisher.discardFileIfStillOwned(result.fileURL, identity: fileIdentity)
+    }
+
+    private func discardTemporaryRecordingIfOwned(
+        _ document: EditorDocument,
+        identity: CaptureFileIdentity
+    ) -> Bool {
+        guard document.kind == .recording,
+              document.isDirty,
+              let fileURL = document.fileURL,
+              fileURL.standardizedFileURL.path.hasPrefix(
+                FileManager.default.temporaryDirectory.standardizedFileURL.path + "/"
+              )
+        else {
+            return true
+        }
+
+        return (try? ExclusiveFilePublisher.discardFileIfStillOwned(fileURL, identity: identity)) == true
     }
 
     private func userMessage(for error: Error) -> String {

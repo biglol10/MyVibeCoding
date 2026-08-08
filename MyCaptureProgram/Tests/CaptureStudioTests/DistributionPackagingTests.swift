@@ -59,11 +59,17 @@ final class DistributionPackagingTests: XCTestCase {
         XCTAssertFalse(script.contains("rm -rf \"$APP_DEST\""))
         XCTAssertTrue(script.contains("APP_BACKUP"))
         XCTAssertTrue(script.contains("APP_INSTALLING"))
-        XCTAssertTrue(script.contains("run_install_command"))
-        XCTAssertFalse(script.contains("PRIVILEGED[@]"))
         XCTAssertTrue(script.contains("Save any open capture or recording"))
         XCTAssertFalse(script.contains("tell application \"CaptureStudio\" to quit"))
         XCTAssertFalse(script.contains("pkill -x CaptureStudio"))
+    }
+
+    func testPersonalPackagingDoesNotRegisterItsStagingBundleWithLaunchServices() throws {
+        let installScript = try String(contentsOf: installScriptURL, encoding: .utf8)
+        let personalScript = try String(contentsOf: personalScriptURL, encoding: .utf8)
+
+        XCTAssertTrue(installScript.contains("CAPTURE_STUDIO_SKIP_LSREGISTER"))
+        XCTAssertTrue(personalScript.contains("CAPTURE_STUDIO_SKIP_LSREGISTER=1"))
     }
 
     func testLocalInstallBuildsWithoutRootAndReplacesTheAppTransactionally() throws {
@@ -74,9 +80,18 @@ final class DistributionPackagingTests: XCTestCase {
         XCTAssertFalse(script.contains("rm -rf \"$APP_BUNDLE\""))
         XCTAssertTrue(script.contains("APP_BACKUP"))
         XCTAssertTrue(script.contains("APP_INSTALLING"))
-        XCTAssertTrue(script.contains("run_install_command"))
-        XCTAssertFalse(script.contains("PRIVILEGED[@]"))
         XCTAssertTrue(script.contains("trap cleanup_staging EXIT"))
+    }
+
+    func testInstallScriptsAvoidEmptyPrivilegeArraysUnderMacOSBashNounset() throws {
+        for scriptURL in [installScriptURL, personalScriptURL] {
+            let script = try String(contentsOf: scriptURL, encoding: .utf8)
+
+            XCTAssertTrue(script.contains("run_install_command()"), scriptURL.lastPathComponent)
+            XCTAssertTrue(script.contains("USE_SUDO="), scriptURL.lastPathComponent)
+            XCTAssertFalse(script.contains("PRIVILEGED=("), scriptURL.lastPathComponent)
+            XCTAssertFalse(script.contains("${PRIVILEGED[@]}"), scriptURL.lastPathComponent)
+        }
     }
 
     func testRepositoryDefinesSwiftPackageCIWorkflow() throws {

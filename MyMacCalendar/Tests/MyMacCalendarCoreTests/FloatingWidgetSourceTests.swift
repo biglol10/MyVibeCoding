@@ -49,9 +49,11 @@ final class FloatingWidgetSourceTests: XCTestCase {
         XCTAssertTrue(viewSource.contains(".frame(width: FloatingWidgetConstants.width, height: FloatingWidgetConstants.height, alignment: .topLeading)"))
         XCTAssertTrue(viewSource.contains(".truncationMode(.tail)"))
         XCTAssertTrue(controllerSource.contains("private var detailWindow: NSWindow?"))
-        XCTAssertTrue(controllerSource.contains("showDetail(for event: CalendarEvent)"))
+        XCTAssertTrue(viewSource.contains("let detail: EventOccurrenceDetail"))
+        XCTAssertTrue(controllerSource.contains("showDetail(_ detail: EventOccurrenceDetail)"))
         XCTAssertTrue(coordinatorSource.contains("onSelect: { [weak self] occurrence in"))
         XCTAssertTrue(coordinatorSource.contains("currentEvents.first(where: { $0.id == occurrence.eventID })"))
+        XCTAssertTrue(coordinatorSource.contains("EventOccurrenceDetail(event: event, occurrence: occurrence)"))
         XCTAssertTrue(occurrenceSource.contains("var occurrenceID: String"))
     }
 

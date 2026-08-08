@@ -1,5 +1,7 @@
 # MyMacCalendar 전체 기능 점검표
 
+> 2026-08-08 이후 변경 사항은 [정확성 후속 점검](2026-08-08-correctness-audit.md)에서 확인할 수 있습니다. 이 문서는 2026-08-04 당시의 검증 기록을 보존합니다.
+
 - 점검일: 2026-08-04
 - 점검 브랜치: `codex/mymaccalendar-stability-fixes`
 - 범위: 현재 README, SwiftPM 패키지, 전체 Sources/Tests, 앱 번들, 개인 배포 패키지, 격리된 실제 앱 UI

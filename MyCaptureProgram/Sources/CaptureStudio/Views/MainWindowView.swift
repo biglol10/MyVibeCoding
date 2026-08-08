@@ -598,12 +598,7 @@ struct MainWindowView: View {
                 .frame(width: 72)
                 .multilineTextAlignment(.trailing)
             Button {
-                Task {
-                    await captureCoordinator.trimCurrentRecording(
-                        startSeconds: Double(trimStartText) ?? 0,
-                        endSeconds: Double(trimEndText)
-                    )
-                }
+                trimCurrentRecording()
             } label: {
                 Label("Trim Copy", systemImage: "scissors")
             }
@@ -622,6 +617,23 @@ struct MainWindowView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    private func trimCurrentRecording() {
+        do {
+            let input = try MainWindowPresentation.recordingTrimInput(
+                startText: trimStartText,
+                endText: trimEndText
+            )
+            Task {
+                await captureCoordinator.trimCurrentRecording(
+                    startSeconds: input.startSeconds,
+                    endSeconds: input.endSeconds
+                )
+            }
+        } catch {
+            appState.statusMessage = error.localizedDescription
+        }
     }
 
     private func recordingFallbackPreview(title: String, detail: String) -> some View {

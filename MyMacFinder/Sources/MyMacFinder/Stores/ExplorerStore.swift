@@ -33,6 +33,16 @@ public final class ExplorerStore: ObservableObject {
         var explicitTagQuery: String
     }
 
+    private struct QuickLookContext: Sendable {
+        var tabID: ExplorerTabID
+        var paneID: PaneID
+        var paneLocation: PaneLocation
+        var selectedURLs: Set<URL>
+        var searchScope: SearchScope
+        var ordinaryQuery: String
+        var explicitTagQuery: String
+    }
+
     private struct OwnedUndoSource: Sendable {
         var url: URL
         var expectedIdentity: FileSystemPathIdentity.FileSystemEntryIdentity?
@@ -463,6 +473,18 @@ public final class ExplorerStore: ObservableObject {
         await reloadAllPanes()
     }
 
+    public func cleanupExpiredArchiveArtifacts(now: Date = Date()) async {
+        do {
+            try await archiveBrowser.cleanupExpiredTemporaryArtifacts(
+                now: now,
+                retentionInterval: 24 * 60 * 60
+            )
+        } catch is CancellationError {
+        } catch {
+            present(.operationFailed("Temporary preview cleanup failed: \(error.localizedDescription)"))
+        }
+    }
+
     public func refreshMountedVolumes() async {
         do {
             mountedVolumes = MountedVolume.sortedForSidebar(try await volumeService.mountedVolumes())
@@ -706,18 +728,95 @@ public final class ExplorerStore: ObservableObject {
             } else if entry.isDirectoryLike {
                 await navigate(to: .fileSystem(entry.url))
             } else {
-                externalAppLauncher.openDefault(entry.url)
+                do {
+                    try externalAppLauncher.openDefault(entry.url)
+                } catch is CancellationError {
+                } catch let error as ExplorerError {
+                    present(error)
+                } catch {
+                    visibleError = .operationFailed(error.localizedDescription)
+                }
             }
         case .archive(let location):
             if entry.isDirectoryLike {
                 await navigate(to: .archive(location))
             } else {
                 do {
-                    externalAppLauncher.openDefault(try await archiveBrowser.temporaryExtract(location))
+                    try Task.checkCancellation()
+                    let artifact = try await archiveBrowser.temporaryExtract(location)
+                    do {
+                        try Task.checkCancellation()
+                        try await archiveBrowser.retainTemporaryArtifactForExternalOpen(artifact, openedAt: Date())
+                        try Task.checkCancellation()
+                        try await archiveBrowser.validateTemporaryArtifactForHandoff(artifact)
+                        try Task.checkCancellation()
+                        try externalAppLauncher.openDefault(artifact.url)
+                    } catch is CancellationError {
+                        do {
+                            try await archiveBrowser.releaseTemporaryArtifact(artifact)
+                        } catch {
+                            do {
+                                try await archiveBrowser.scheduleTemporaryArtifactCleanupRetry(artifact)
+                            } catch {
+                                NSLog(
+                                    "MyMacFinder could not schedule cancelled archive preview cleanup for %@: %@",
+                                    artifact.ownerDirectoryURL.path,
+                                    error.localizedDescription
+                                )
+                            }
+                        }
+                        throw CancellationError()
+                    } catch {
+                        let originalError = error
+                        do {
+                            try await archiveBrowser.releaseTemporaryArtifact(artifact)
+                        } catch {
+                            throw archiveOpenFailure(
+                                originalError,
+                                cleanupFailure: error,
+                                artifact: artifact
+                            )
+                        }
+                        throw originalError
+                    }
+                } catch is CancellationError {
+                } catch let error as ExplorerError {
+                    present(error)
                 } catch {
-                    visibleError = .readFailed(error.localizedDescription)
+                    visibleError = .operationFailed(error.localizedDescription)
                 }
             }
+        }
+    }
+
+    private func archiveOpenFailure(
+        _ originalError: Error,
+        cleanupFailure: Error,
+        artifact: TemporaryArchiveArtifact
+    ) -> ExplorerError {
+        let cleanupDetail = "; temporary artifact cleanup failed at \(artifact.ownerDirectoryURL.path): "
+            + cleanupFailure.localizedDescription
+        guard let originalError = originalError as? ExplorerError else {
+            return .operationFailed("Archive preview open failed (\(originalError.localizedDescription))\(cleanupDetail)")
+        }
+
+        switch originalError {
+        case .invalidPath(let value):
+            return .invalidPath(value + cleanupDetail)
+        case .pathDoesNotExist(let value):
+            return .pathDoesNotExist(value + cleanupDetail)
+        case .notDirectory(let value):
+            return .notDirectory(value + cleanupDetail)
+        case .permissionDenied(let value):
+            return .permissionDenied(value + cleanupDetail)
+        case .readFailed(let value):
+            return .readFailed(value + cleanupDetail)
+        case .operationFailed(let value):
+            return .operationFailed(value + cleanupDetail)
+        case .archiveFailed(let value):
+            return .archiveFailed(value + cleanupDetail)
+        case .externalCommandFailed(let value):
+            return .externalCommandFailed(value + cleanupDetail)
         }
     }
 
@@ -750,9 +849,10 @@ public final class ExplorerStore: ObservableObject {
             case .openVSCode(let target):
                 try await externalAppLauncher.openVSCode(at: target)
             case .openDefault(let target):
-                externalAppLauncher.openDefault(target)
+                try externalAppLauncher.openDefault(target)
             }
             requestToolbarFocusClear()
+        } catch is CancellationError {
         } catch let error as ExplorerError {
             present(error)
         } catch {
@@ -2976,22 +3076,109 @@ public final class ExplorerStore: ObservableObject {
     }
 
     private func quickLookSelected() async throws {
-        let urls = try await selectedPreviewURLs()
-        try quickLookService?.preview(urls)
+        try Task.checkCancellation()
+        guard let quickLookService else {
+            return
+        }
+
+        let context = currentQuickLookContext()
+        let selectedEntries = activeSelectedEntries
+        var urls: [URL] = []
+        var artifacts: [TemporaryArchiveArtifact] = []
+        urls.reserveCapacity(selectedEntries.count)
+        artifacts.reserveCapacity(selectedEntries.count)
+
+        do {
+            for entry in selectedEntries {
+                switch entry.source {
+                case .fileSystem:
+                    urls.append(entry.url)
+                case .archive(let location):
+                    let artifact = try await archiveBrowser.temporaryExtract(location)
+                    artifacts.append(artifact)
+                    try Task.checkCancellation()
+                    urls.append(artifact.url)
+                }
+            }
+        } catch {
+            await Self.releaseTemporaryArchiveArtifacts(artifacts, using: archiveBrowser)
+            throw error
+        }
+
+        guard isCurrentQuickLookContext(context) else {
+            await Self.releaseTemporaryArchiveArtifacts(artifacts, using: archiveBrowser)
+            return
+        }
+
+        do {
+            for artifact in artifacts {
+                try await archiveBrowser.scheduleTemporaryArtifactCleanupRetry(artifact)
+            }
+            try Task.checkCancellation()
+
+            for artifact in artifacts {
+                try await archiveBrowser.validateTemporaryArtifactForHandoff(artifact)
+            }
+            try Task.checkCancellation()
+
+            let archiveBrowser = archiveBrowser
+            let session = QuickLookPreviewSession(urls: urls) {
+                Task {
+                    await Self.releaseTemporaryArchiveArtifacts(artifacts, using: archiveBrowser)
+                }
+            }
+            try Task.checkCancellation()
+            try quickLookService.preview(session)
+        } catch {
+            await Self.releaseTemporaryArchiveArtifacts(artifacts, using: archiveBrowser)
+            throw error
+        }
     }
 
-    private func selectedPreviewURLs() async throws -> [URL] {
-        var urls: [URL] = []
-        urls.reserveCapacity(activeSelectedEntries.count)
-        for entry in activeSelectedEntries {
-            switch entry.source {
-            case .fileSystem:
-                urls.append(entry.url)
-            case .archive(let location):
-                urls.append(try await archiveBrowser.temporaryExtract(location))
+    private func currentQuickLookContext() -> QuickLookContext {
+        QuickLookContext(
+            tabID: activeTab.id,
+            paneID: activePane.id,
+            paneLocation: activePane.location,
+            selectedURLs: activePane.selectedURLs,
+            searchScope: searchOptions.scope,
+            ordinaryQuery: searchQuery,
+            explicitTagQuery: searchOptions.finderTagQuery
+        )
+    }
+
+    private func isCurrentQuickLookContext(_ context: QuickLookContext) -> Bool {
+        guard tabs.indices.contains(activeTabIndex), panes.indices.contains(activePaneIndex) else {
+            return false
+        }
+        return activeTab.id == context.tabID
+            && activePane.id == context.paneID
+            && activePane.location == context.paneLocation
+            && activePane.selectedURLs == context.selectedURLs
+            && searchOptions.scope == context.searchScope
+            && searchQuery == context.ordinaryQuery
+            && searchOptions.finderTagQuery == context.explicitTagQuery
+    }
+
+    private nonisolated static func releaseTemporaryArchiveArtifacts(
+        _ artifacts: [TemporaryArchiveArtifact],
+        using archiveBrowser: any ArchiveBrowsing
+    ) async {
+        for artifact in artifacts.reversed() {
+            do {
+                try await archiveBrowser.releaseTemporaryArtifact(artifact)
+            } catch {
+                do {
+                    try await archiveBrowser.scheduleTemporaryArtifactCleanupRetry(artifact)
+                } catch {
+                    NSLog(
+                        "MyMacFinder could not schedule archive preview cleanup for %@: %@",
+                        artifact.ownerDirectoryURL.path,
+                        error.localizedDescription
+                    )
+                }
             }
         }
-        return urls
     }
 
 #if DEBUG
@@ -3012,6 +3199,31 @@ public final class ExplorerStore: ObservableObject {
         panes[activePaneIndex].entries = entries
         panes[activePaneIndex].selectedURLs = selectedURLs
         pathInput = location.displayPath
+    }
+
+    public func replaceActiveTabIDForTesting() {
+        let tab = activeTab
+        tabs[activeTabIndex] = ExplorerTab(
+            id: ExplorerTabID(),
+            panes: tab.panes,
+            activePaneIndex: tab.activePaneIndex,
+            pathInput: tab.pathInput,
+            searchQuery: tab.searchQuery,
+            searchOptions: tab.searchOptions
+        )
+    }
+
+    public func replaceActivePaneIDForTesting() {
+        let pane = activePane
+        var replacement = PaneState(location: pane.location, sort: pane.sort)
+        replacement.entries = pane.entries
+        replacement.selectedURLs = pane.selectedURLs
+        replacement.backStack = pane.backStack
+        replacement.forwardStack = pane.forwardStack
+        replacement.group = pane.group
+        replacement.isLoading = pane.isLoading
+        replacement.error = pane.error
+        panes[activePaneIndex] = replacement
     }
 #endif
 }

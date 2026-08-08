@@ -208,6 +208,14 @@ enum ExclusiveFilePublisher {
     }
 
     @discardableResult
+    static func discardFileIfStillOwned(
+        _ url: URL,
+        identity: CaptureFileIdentity
+    ) throws -> Bool {
+        try removeFileIfStillOwned(url, identity: identity)
+    }
+
+    @discardableResult
     private static func removeFileIfStillOwned(
         _ url: URL,
         identity: CaptureFileIdentity,

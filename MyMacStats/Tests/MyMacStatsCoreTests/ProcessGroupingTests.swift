@@ -47,4 +47,15 @@ final class ProcessGroupingTests: XCTestCase {
         XCTAssertEqual(ProcessGrouping.groups(processes, searchText: "safari", sortKey: .cpu).map(\.name), ["Safari"])
         XCTAssertEqual(ProcessGrouping.groups(processes, searchText: "30", sortKey: .cpu).map(\.name), ["Notes"])
     }
+
+    func testDescendingResourceGroupSortsUseNameAsStableTieBreaker() {
+        let processes = [
+            ProcessMetric(pid: 30, name: "Xcode", cpuPercent: 50, memoryBytes: 900, path: "/Applications/Xcode.app/Contents/MacOS/Xcode", bundleIdentifier: "com.apple.dt.Xcode"),
+            ProcessMetric(pid: 20, name: "Safari", cpuPercent: 50, memoryBytes: 900, path: "/Applications/Safari.app/Contents/MacOS/Safari", bundleIdentifier: "com.apple.Safari")
+        ]
+
+        let groups = ProcessGrouping.groups(processes, searchText: "", sortKey: .cpu)
+
+        XCTAssertEqual(groups.map(\.name), ["Safari", "Xcode"])
+    }
 }

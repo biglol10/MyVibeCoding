@@ -138,6 +138,28 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertEqual(layer.frame, CGRect(x: 10, y: 20, width: 80, height: 40))
     }
 
+    func testCreateHorizontalArrowLayerFromDrag() throws {
+        let appState = AppState()
+        appState.currentDocument = EditorDocument(kind: .screenshot, data: Data([0x89, 0x50, 0x4E, 0x47]))
+        let viewModel = EditorViewModel(appState: appState)
+
+        viewModel.addLayer(for: .arrow, from: CGPoint(x: 10, y: 20), to: CGPoint(x: 90, y: 20))
+
+        let layer = try XCTUnwrap(appState.currentDocument?.layers.first)
+        XCTAssertEqual(layer.frame, CGRect(x: 10, y: 20, width: 80, height: 0))
+    }
+
+    func testCreateVerticalArrowLayerFromDrag() throws {
+        let appState = AppState()
+        appState.currentDocument = EditorDocument(kind: .screenshot, data: Data([0x89, 0x50, 0x4E, 0x47]))
+        let viewModel = EditorViewModel(appState: appState)
+
+        viewModel.addLayer(for: .arrow, from: CGPoint(x: 40, y: 10), to: CGPoint(x: 40, y: 90))
+
+        let layer = try XCTUnwrap(appState.currentDocument?.layers.first)
+        XCTAssertEqual(layer.frame, CGRect(x: 40, y: 10, width: 0, height: 80))
+    }
+
     func testCreateFreehandAndHighlighterLayers() {
         let appState = AppState()
         appState.currentDocument = EditorDocument(kind: .screenshot, data: Data([0x89, 0x50, 0x4E, 0x47]))

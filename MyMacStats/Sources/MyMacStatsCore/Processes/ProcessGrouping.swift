@@ -42,23 +42,31 @@ public enum ProcessGrouping {
 
         let filteredGroups = filter(appGroups, searchText: searchText)
         return filteredGroups.sorted { lhs, rhs in
-            let orderedBefore: Bool
             switch sortKey {
             case .cpu:
-                orderedBefore = lhs.cpuPercent == rhs.cpuPercent
-                    ? lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-                    : lhs.cpuPercent < rhs.cpuPercent
+                if lhs.cpuPercent != rhs.cpuPercent {
+                    return ascending ? lhs.cpuPercent < rhs.cpuPercent : lhs.cpuPercent > rhs.cpuPercent
+                }
+                return orderedByNameThenID(lhs, rhs)
             case .memory:
-                orderedBefore = lhs.memoryBytes == rhs.memoryBytes
-                    ? lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-                    : lhs.memoryBytes < rhs.memoryBytes
+                if lhs.memoryBytes != rhs.memoryBytes {
+                    return ascending ? lhs.memoryBytes < rhs.memoryBytes : lhs.memoryBytes > rhs.memoryBytes
+                }
+                return orderedByNameThenID(lhs, rhs)
             case .name:
                 let nameOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
-                orderedBefore = nameOrder == .orderedSame ? lhs.id < rhs.id : nameOrder == .orderedAscending
+                if nameOrder != .orderedSame {
+                    return ascending ? nameOrder == .orderedAscending : nameOrder == .orderedDescending
+                }
+                return lhs.id < rhs.id
             case .pid:
-                orderedBefore = minimumPID(lhs) < minimumPID(rhs)
+                let lhsPID = minimumPID(lhs)
+                let rhsPID = minimumPID(rhs)
+                if lhsPID != rhsPID {
+                    return ascending ? lhsPID < rhsPID : lhsPID > rhsPID
+                }
+                return lhs.id < rhs.id
             }
-            return ascending ? orderedBefore : !orderedBefore
         }
     }
 
@@ -78,6 +86,14 @@ public enum ProcessGrouping {
 
     private static func minimumPID(_ group: ProcessAppGroup) -> Int32 {
         group.processes.map(\.pid).min() ?? 0
+    }
+
+    private static func orderedByNameThenID(_ lhs: ProcessAppGroup, _ rhs: ProcessAppGroup) -> Bool {
+        let nameOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+        if nameOrder != .orderedSame {
+            return nameOrder == .orderedAscending
+        }
+        return lhs.id < rhs.id
     }
 
     private static func groupIdentity(for process: ProcessMetric) -> ProcessGroupIdentity {

@@ -1,7 +1,8 @@
 # MyMacStats 기능 검증 체크리스트
 
 - 작성일: 2026-08-04
-- 기준 커밋: `8e93341`
+- 최근 갱신: 2026-08-08
+- 최초 기준 커밋: `8e93341`
 - 검증 대상: 현재 `MyMacStats` Swift Package, SwiftUI 앱, 테스트, 번들/zip 생성 스크립트
 - 검증 방식: README 주장 대조, 소스 직접 확인, XCTest 실행, release build, 앱 번들 생성, 개인 배포 zip 설치 검증, 실제 앱 실행/화면 캡처 스모크
 
@@ -15,6 +16,13 @@
 - TCC 로그로 media library 권한 팝업의 실제 원인이 `du`의 넓은 `~/Library/Caches` 스캔임을 확인했고, 기본 자동 디스크 후보에서 broad Caches를 제거했다.
 - Settings의 `Menu Bar Metric` 오해 가능 문구를 `Menu Bar Display: CPU + RAM`으로 바꿨다.
 
+2026-08-08 후속 점검에서 추가로 반영한 사항:
+
+- CPU/RAM resource sort의 동률 항목은 이름/PID 기준으로 안정 정렬되도록 수정했다.
+- process group sort도 resource 동률 시 이름/ID 기준으로 안정 정렬되도록 수정했다.
+- Network 측정 실패는 첫 실패 warning, 연속 실패 unavailable로 표시해 순간 실패로 인한 회색 깜빡임을 줄였다.
+- Settings에서 바꾼 refresh interval은 UserDefaults에 저장되고 다음 ViewModel 생성 시 복원된다.
+
 ## 판정 기준
 
 - `[x] 확인됨`: 구현이 있고, 소스/테스트/실행 중 하나 이상으로 확인했다.
@@ -24,7 +32,7 @@
 ## 이번에 실제로 실행한 검증
 
 - [x] `swift test`
-  - 결과: 79 tests, 0 failures.
+  - 결과: 83 tests, 0 failures.
   - 확인 범위: health 판정, CPU/RAM/Network/Disk 핵심 sampler, process 검색/정렬/grouping/termination, dashboard view model, 원인 요약, RAM critical 알림 controller, 메뉴바 lifecycle source check, 패키징 script source check.
 - [x] `swift build -c release`
   - 결과: release build 성공.
@@ -61,8 +69,8 @@
 ## 2. 전체 데이터 갱신 파이프라인
 
 - [x] `SystemMetricsService.refresh()`가 CPU/RAM/Disk/Network/Battery/Processes 샘플을 모아 하나의 snapshot을 만든다.
-- [x] sampler 실패 시 앱 전체가 죽지 않고 해당 summary가 unavailable로 표시되는 흐름이 있다.
-  - 근거: `DefaultSystemSampler`가 `try?`로 실패를 nil 처리하고, summary builder가 unavailable summary를 만든다.
+- [x] sampler 실패 시 앱 전체가 죽지 않고 해당 summary가 warning 또는 unavailable로 표시되는 흐름이 있다.
+  - 근거: `DefaultSystemSampler`가 `try?`로 실패를 nil 처리한다. Network는 첫 실패 warning, 연속 실패 unavailable이고 나머지 주요 summary는 실패 시 unavailable이다.
 - [x] CPU history는 최근 300초 샘플을 보관한다.
 - [x] 디스크 공간 후보 스캔은 별도 task로 돌며 일반 refresh를 막지 않는다.
 - [!] 원래 기획의 metric별 갱신 주기는 완전히 분리되어 있지 않다.
@@ -133,6 +141,7 @@
 - [x] 이전 샘플 대비 실제 증가량이 있는 interface를 우선 선택한다.
 - [x] interface 변경 시 speed가 reset되는 테스트가 있다.
 - [x] network health는 높은 트래픽을 위험으로 보지 않고, interface 없음/연결 실패 중심으로 판단한다.
+- [x] Network 측정이 한 번 실패하면 warning, 연속 실패하면 unavailable로 전환된다.
 - [!] 첫 network speed 샘플은 이전 counter가 없어 0으로 표시될 수 있다.
 - [ ] 프로세스별 네트워크 사용량은 없다.
   - README 현재 제한과 일치한다.
@@ -171,9 +180,9 @@
   - 임의 executable/framework/private bundle 경로에 `Bundle(path:)`를 호출하지 않는다.
   - 비앱 bundle executable은 bundle identifier 해석 대상에서 제외하는 테스트가 있다.
   - 최초에는 이 경로를 의심했으나, TCC 로그상 실제 media library prompt 원인은 broad Caches `du` 스캔이었다.
-- [!] sort comparator가 완전한 strict weak ordering이라고 보기 어렵다.
-  - CPU/RAM/name/PID가 완전히 같은 값인 경우 descending에서 동등 항목도 `true`가 될 수 있다.
-  - 일반 사용에서 큰 문제를 만들 가능성은 낮지만, 정렬 안정성 테스트가 추가되는 편이 낫다.
+- [x] resource sort comparator는 동률 항목을 이름/PID 기준으로 안정 정렬한다.
+  - CPU/RAM 동률에서 이름/PID tie-breaker를 검증하는 테스트가 있다.
+  - process group도 이름/ID tie-breaker를 검증한다.
 
 ## 9. 프로세스 Quit / Force Quit
 
@@ -228,8 +237,8 @@
 - [x] refresh interval 선택 UI가 있다.
   - 선택지는 `RefreshInterval.allCases` 기반이다.
 - [x] refresh interval 변경은 view model의 refresh loop sleep 간격에 반영된다.
-- [!] refresh interval은 앱 재시작 후 유지되지 않는다.
-  - UserDefaults persistence가 없다.
+- [x] refresh interval은 UserDefaults에 저장되고 다음 ViewModel 생성 시 복원된다.
+  - 독립 UserDefaults suite를 사용한 단위 테스트가 있다.
 - [x] Settings의 메뉴바 표시 문구는 실제 동작과 맞다.
   - 현재는 `Menu Bar Display: CPU + RAM`으로 표시한다.
   - 메뉴바 표시 항목 커스터마이징은 아직 없다.
@@ -258,14 +267,14 @@
 
 ## 15. 테스트 커버리지
 
-- [x] 총 79개 XCTest가 통과한다.
+- [x] 총 83개 XCTest가 통과한다.
 - [x] CPU sampler: tick delta, kernel sampling, first sample behavior.
 - [x] Memory sampler: host stats, pressure mapping, swap.
 - [x] Network sampler: 64-bit counters, active interface, speed reset.
 - [x] Disk sampler: I/O delta, volume fallback.
 - [x] Disk candidate scanner: target restriction, timeout fallback.
 - [x] HealthEvaluator: CPU/RAM/Disk/Network/Battery/debounce.
-- [x] Process sorting/grouping: search and ordering basics.
+- [x] Process sorting/grouping: search, ordering basics, resource 동률 안정 정렬.
 - [x] Process termination: signal, protection, group behavior, stale PID identity recheck, app quit fallback.
 - [x] DashboardViewModel: selection, sort/search, history, termination state.
 - [x] Cause summary: CPU/RAM/Disk summary behavior.
@@ -282,8 +291,8 @@
 - [x] README의 주요 기능 대부분은 현재 구현과 일치한다.
 - [x] 개인 배포 zip/설치 안내는 현재 스크립트와 일치한다.
 - [x] 현재 제한 목록은 대체로 실제 미구현 범위와 일치한다.
-- [!] `RAM critical 상태가 30초 이상 지속되면 macOS 알림 전송`은 표현이 강하다.
-  - 실제로는 "전송 시도"에 가깝고, 권한 거부/전달 실패는 UI에 표시되지 않는다.
+- [x] README의 RAM critical 알림 표현은 "전송 시도"로 조정됐다.
+  - 권한 거부/전달 실패는 아직 UI에 표시되지 않으므로 기능 자체에는 남은 제한이 있다.
 - [x] `Menu Bar Metric` 오해 가능 문구는 `Menu Bar Display: CPU + RAM`으로 수정됐다.
 - [!] CPU 10초 sustained 설명에는 debounce로 인한 추가 지연 가능성이 빠져 있다.
 
@@ -293,11 +302,10 @@
 2. metric별 refresh cadence를 원래 기획대로 분리하거나 README/기획에서 현재 정책으로 명확히 정리.
 3. BatterySampler fixture parsing 테스트 추가.
 4. UI interaction/snapshot smoke test 추가.
-5. process sort comparator tie 안정성 보강.
-6. 메뉴바 표시 항목 커스터마이징을 실제 기능으로 추가할지 결정.
+5. 메뉴바 표시 항목 커스터마이징을 실제 기능으로 추가할지 결정.
 
 ## 현재 종합 판단
 
 - 핵심 MVP 기능인 CPU/RAM/Disk/Network/Battery/Processes 표시, 자동 갱신, 검색/정렬, 3-column UI, 메뉴바 기본 통합, 개인 배포 zip은 구현되어 있고 이번 점검에서 대체로 확인됐다.
-- 최초 점검에서 최우선으로 잡은 프로세스 종료 안전성, media library 권한 팝업 원인, Quit App UX는 후속 수정으로 보강됐다.
+- 최초 점검에서 최우선으로 잡은 프로세스 종료 안전성, media library 권한 팝업 원인, Quit App UX, process sort 안정성은 후속 수정으로 보강됐다.
 - 다음 기능 개발 전에 남은 주요 리스크는 RAM 알림 delivery 상태 노출, metric별 refresh cadence, BatterySampler fixture 검증, UI interaction 자동화다.

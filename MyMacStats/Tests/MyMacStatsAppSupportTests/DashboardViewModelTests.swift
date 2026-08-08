@@ -153,6 +153,19 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.refreshInterval.seconds, 5)
     }
 
+    func testRefreshIntervalPersistsAcrossViewModelInstances() {
+        let suiteName = "MyMacStatsTests.refreshInterval.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let firstViewModel = DashboardViewModel(snapshot: snapshot, userDefaults: defaults)
+        firstViewModel.refreshInterval = .tenSeconds
+
+        let secondViewModel = DashboardViewModel(snapshot: snapshot, userDefaults: defaults)
+
+        XCTAssertEqual(secondViewModel.refreshInterval, .tenSeconds)
+    }
+
     func testCPUHistoryRangeFiltersOneMinuteOrFiveMinutes() {
         let now = Date(timeIntervalSince1970: 500)
         let viewModel = DashboardViewModel(

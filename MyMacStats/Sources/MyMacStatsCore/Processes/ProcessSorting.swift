@@ -21,23 +21,35 @@ public enum ProcessSorting {
         }
 
         return filteredProcesses.sorted { lhs, rhs in
-            let orderedBefore: Bool
             switch sortKey {
             case .cpu:
-                orderedBefore = lhs.cpuPercent == rhs.cpuPercent
-                    ? lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-                    : lhs.cpuPercent < rhs.cpuPercent
+                if lhs.cpuPercent != rhs.cpuPercent {
+                    return ascending ? lhs.cpuPercent < rhs.cpuPercent : lhs.cpuPercent > rhs.cpuPercent
+                }
+                return orderedByNameThenPID(lhs, rhs)
             case .memory:
-                orderedBefore = lhs.memoryBytes == rhs.memoryBytes
-                    ? lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-                    : lhs.memoryBytes < rhs.memoryBytes
+                if lhs.memoryBytes != rhs.memoryBytes {
+                    return ascending ? lhs.memoryBytes < rhs.memoryBytes : lhs.memoryBytes > rhs.memoryBytes
+                }
+                return orderedByNameThenPID(lhs, rhs)
             case .name:
                 let nameOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
-                orderedBefore = nameOrder == .orderedSame ? lhs.pid < rhs.pid : nameOrder == .orderedAscending
+                if nameOrder != .orderedSame {
+                    return ascending ? nameOrder == .orderedAscending : nameOrder == .orderedDescending
+                }
+                return lhs.pid < rhs.pid
             case .pid:
-                orderedBefore = lhs.pid < rhs.pid
+                guard lhs.pid != rhs.pid else { return false }
+                return ascending ? lhs.pid < rhs.pid : lhs.pid > rhs.pid
             }
-            return ascending ? orderedBefore : !orderedBefore
         }
+    }
+
+    private static func orderedByNameThenPID(_ lhs: ProcessMetric, _ rhs: ProcessMetric) -> Bool {
+        let nameOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+        if nameOrder != .orderedSame {
+            return nameOrder == .orderedAscending
+        }
+        return lhs.pid < rhs.pid
     }
 }

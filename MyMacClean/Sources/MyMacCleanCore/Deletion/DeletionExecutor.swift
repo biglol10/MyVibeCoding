@@ -21,14 +21,14 @@ public struct DeletionFileRemover: Sendable {
         self.removeHandler = remove
     }
 
-    public func trash(_ url: URL) throws {
+    public func trash(_ url: URL, allowsFallback: Bool = true) throws {
         do {
             try trashHandler(url)
         } catch {
             if !FileManager.default.fileExists(atPath: url.path) {
                 return
             }
-            guard let fallbackTrashHandler else {
+            guard allowsFallback, let fallbackTrashHandler else {
                 throw error
             }
             do {
@@ -173,7 +173,7 @@ public struct DeletionExecutor: Sendable {
                 }
                 switch mode {
                 case .moveToTrash:
-                    try fileRemover.trash(candidate.url)
+                    try fileRemover.trash(candidate.url, allowsFallback: allowsTrashFallback(for: candidate))
                 case .permanent:
                     try fileRemover.remove(candidate.url)
                 }
@@ -233,5 +233,9 @@ public struct DeletionExecutor: Sendable {
             [.posixPermissions: currentPermissions | writablePermissions],
             ofItemAtPath: url.path
         )
+    }
+
+    private func allowsTrashFallback(for candidate: RelatedFileCandidate) -> Bool {
+        candidate.kind == .appBundle && candidate.url.pathExtension.lowercased() == "app"
     }
 }

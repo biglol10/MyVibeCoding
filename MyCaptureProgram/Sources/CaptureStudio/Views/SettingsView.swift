@@ -427,6 +427,8 @@ struct SettingsView: View {
             switch error {
             case .duplicateBinding(let existingAction):
                 shortcutErrorMessage = "Shortcut already used by \(existingAction.title)."
+            case .unsafeModifiers:
+                shortcutErrorMessage = "Use Command, Option, or Control so normal typing is not captured."
             }
         } catch {
             shortcutErrorMessage = "Shortcut could not be saved."

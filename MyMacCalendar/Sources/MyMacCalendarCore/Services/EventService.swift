@@ -23,7 +23,7 @@ public struct EventService {
     }
 
     public func upcomingOccurrences(from startDate: Date, events: [CalendarEvent], limit: Int, horizonDays: Int = 90) -> [EventOccurrence] {
-        guard limit > 0 else { return [] }
+        guard limit > 0, horizonDays >= 0 else { return [] }
         let start = calendar.startOfDay(for: startDate)
         let end = calendar.date(byAdding: .day, value: horizonDays, to: start) ?? start
         let interval = DateInterval(start: start, end: end)

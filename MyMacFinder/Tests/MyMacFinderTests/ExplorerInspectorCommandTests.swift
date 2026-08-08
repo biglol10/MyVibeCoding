@@ -154,8 +154,8 @@ private final class ThreadRecordingFolderSizeService: FolderSizeCalculating, @un
 private final class SpyQuickLookService: QuickLooking {
     var previewedURLs: [URL] = []
 
-    func preview(_ urls: [URL]) throws {
-        previewedURLs = urls
+    func preview(_ session: QuickLookPreviewSession) throws {
+        previewedURLs = session.urls
     }
 }
 

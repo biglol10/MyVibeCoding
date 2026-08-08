@@ -77,6 +77,7 @@ final class HealthEvaluatorTests: XCTestCase {
     func testNetworkHealthTreatsMissingOrDisconnectedInterfaceAsUnavailableOrWarning() {
         let evaluator = HealthEvaluator()
 
+        XCTAssertEqual(evaluator.networkHealth(snapshot: nil, consecutiveFailures: 1), .warning)
         XCTAssertEqual(evaluator.networkHealth(snapshot: nil, consecutiveFailures: 2), .unavailable)
         XCTAssertEqual(evaluator.networkHealth(snapshot: NetworkSnapshot(interfaceName: "en0", downloadBytesPerSecond: 0, uploadBytesPerSecond: 0, receivedBytes: 0, sentBytes: 0, isConnected: false), consecutiveFailures: 0), .warning)
         XCTAssertEqual(evaluator.networkHealth(snapshot: NetworkSnapshot(interfaceName: "en0", downloadBytesPerSecond: 10, uploadBytesPerSecond: 5, receivedBytes: 10, sentBytes: 5, isConnected: true), consecutiveFailures: 0), .normal)

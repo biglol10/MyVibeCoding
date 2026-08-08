@@ -4,6 +4,8 @@ import XCTest
 final class SidebarDestinationTests: XCTestCase {
     func testDestinationsExposeDistinctTitlesAndActions() {
         XCTAssertEqual(SidebarDestination.applications.title, "Applications")
+        XCTAssertEqual(SidebarDestination.applications.subtitle, "Review installed apps and related files before moving selected items to Trash.")
+        XCTAssertFalse(SidebarDestination.applications.subtitle.lowercased().contains("permanent"))
         XCTAssertEqual(SidebarDestination.applications.primaryActionTitle, "Scan Selected")
         XCTAssertEqual(SidebarDestination.orphanFiles.title, "Orphan Files")
         XCTAssertEqual(SidebarDestination.orphanFiles.primaryActionTitle, "Scan Leftovers")

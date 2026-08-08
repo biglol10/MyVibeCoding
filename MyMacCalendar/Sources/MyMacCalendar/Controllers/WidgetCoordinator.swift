@@ -6,7 +6,7 @@ final class WidgetCoordinator {
     static let shared = WidgetCoordinator()
 
     private let controller = FloatingWidgetController()
-    private var manualVisibilityOverride: Bool?
+    private var visibilityState = WidgetVisibilityState(configuredEnabled: true)
     private var currentEvents: [CalendarEvent] = []
     private var currentSettings = WidgetSettingsSnapshot()
     private var refreshTimer: Timer?
@@ -22,17 +22,17 @@ final class WidgetCoordinator {
     func update(events: [CalendarEvent], settings: AppSettings?) {
         currentEvents = events
         currentSettings = WidgetSettingsSnapshot(settings: settings)
+        visibilityState.updateConfiguredEnabled(currentSettings.isEnabled)
         render()
     }
 
     func toggleVisibility() {
-        let currentlyVisible = manualVisibilityOverride ?? currentSettings.isEnabled
-        manualVisibilityOverride = !currentlyVisible
+        visibilityState.toggleManually()
         render()
     }
 
     private func render() {
-        let shouldShow = manualVisibilityOverride ?? currentSettings.isEnabled
+        let shouldShow = visibilityState.isVisible
         guard shouldShow else {
             controller.hide()
             return
@@ -52,7 +52,8 @@ final class WidgetCoordinator {
                       let event = self.currentEvents.first(where: { $0.id == occurrence.eventID }) else {
                     return
                 }
-                self.controller.showDetail(for: event)
+                let detail = EventOccurrenceDetail(event: event, occurrence: occurrence)
+                self.controller.showDetail(detail)
             }
         )
     }

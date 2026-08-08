@@ -9,6 +9,13 @@ public enum DocumentReplacementDecision: Equatable, Sendable {
 @MainActor
 public protocol DocumentReplacementAuthorizing {
     func replacementDecision(for document: EditorDocument) async -> DocumentReplacementDecision
+    func terminationDecision(for document: EditorDocument) async -> DocumentReplacementDecision
+}
+
+public extension DocumentReplacementAuthorizing {
+    func terminationDecision(for document: EditorDocument) async -> DocumentReplacementDecision {
+        await replacementDecision(for: document)
+    }
 }
 
 @MainActor
@@ -16,9 +23,26 @@ public struct AppKitDocumentReplacementAuthorizer: DocumentReplacementAuthorizin
     public init() {}
 
     public func replacementDecision(for document: EditorDocument) async -> DocumentReplacementDecision {
+        decision(
+            for: document,
+            messageText: "Save changes before replacing the current result?"
+        )
+    }
+
+    public func terminationDecision(for document: EditorDocument) async -> DocumentReplacementDecision {
+        decision(
+            for: document,
+            messageText: "Save changes before quitting CaptureStudio?"
+        )
+    }
+
+    private func decision(
+        for document: EditorDocument,
+        messageText: String
+    ) -> DocumentReplacementDecision {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Save changes before replacing the current result?"
+        alert.messageText = messageText
         alert.informativeText = document.kind == .recording
             ? "This recording has not been saved."
             : "This screenshot has unsaved changes."

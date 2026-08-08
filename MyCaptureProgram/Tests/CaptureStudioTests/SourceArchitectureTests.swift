@@ -54,6 +54,20 @@ final class SourceArchitectureTests: XCTestCase {
         XCTAssertFalse(source.contains("shortcutBinding(for: .newRecording).keyEquivalent"))
     }
 
+    func testAppRoutesTerminationThroughDirtyDocumentPreparation() throws {
+        let appSource = try String(contentsOf: sourceURL("CaptureStudioApp.swift"), encoding: .utf8)
+        let delegateSource = try String(
+            contentsOf: sourceURL("App/CaptureStudioApplicationDelegate.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(appSource.contains("@NSApplicationDelegateAdaptor(CaptureStudioApplicationDelegate.self)"))
+        XCTAssertTrue(appSource.contains("applicationDelegate.configure(captureCoordinator:"))
+        XCTAssertTrue(delegateSource.contains("applicationShouldTerminate"))
+        XCTAssertTrue(delegateSource.contains("prepareForTermination"))
+        XCTAssertTrue(delegateSource.contains("reply(toApplicationShouldTerminate:"))
+    }
+
     func testQuickOptionsExposeUserPresetDeletion() throws {
         let source = try String(contentsOf: sourceURL("Views/MainWindowView.swift"), encoding: .utf8)
 

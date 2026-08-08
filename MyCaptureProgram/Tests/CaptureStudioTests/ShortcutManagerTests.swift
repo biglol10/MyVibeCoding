@@ -33,6 +33,48 @@ final class ShortcutManagerTests: XCTestCase {
     }
 
     @MainActor
+    func testBindingWithoutPrimaryModifierIsRejected() {
+        let manager = ShortcutManager(defaults: isolatedDefaults("noPrimaryModifier"))
+
+        XCTAssertThrowsError(
+            try manager.setBinding(
+                ShortcutBinding(key: "S", modifiers: []),
+                for: .newScreenshot
+            )
+        )
+        XCTAssertEqual(manager.bindings[.newScreenshot], ShortcutDefinition.defaultBinding(for: .newScreenshot))
+    }
+
+    @MainActor
+    func testShiftOnlyBindingIsRejected() {
+        let manager = ShortcutManager(defaults: isolatedDefaults("shiftOnly"))
+
+        XCTAssertThrowsError(
+            try manager.setBinding(
+                ShortcutBinding(key: "S", modifiers: [.shift]),
+                for: .newScreenshot
+            )
+        )
+        XCTAssertEqual(manager.bindings[.newScreenshot], ShortcutDefinition.defaultBinding(for: .newScreenshot))
+    }
+
+    @MainActor
+    func testUnsafePersistedBindingFallsBackToDefault() throws {
+        let defaults = isolatedDefaults("unsafePersisted")
+        let unsafeBindings = [
+            ShortcutAction.newScreenshot: ShortcutBinding(key: "A", modifiers: [])
+        ]
+        defaults.set(
+            try JSONEncoder().encode(unsafeBindings),
+            forKey: "CaptureStudio.ShortcutBindings.v1"
+        )
+
+        let manager = ShortcutManager(defaults: defaults)
+
+        XCTAssertEqual(manager.bindings[.newScreenshot], ShortcutDefinition.defaultBinding(for: .newScreenshot))
+    }
+
+    @MainActor
     func testResetOneShortcutRestoresDefault() throws {
         let manager = ShortcutManager(defaults: isolatedDefaults("resetOne"))
 

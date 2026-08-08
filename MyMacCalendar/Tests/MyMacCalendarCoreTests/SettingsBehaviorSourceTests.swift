@@ -29,7 +29,7 @@ final class SettingsBehaviorSourceTests: XCTestCase {
         XCTAssertTrue(settingsSource.contains("isFetchingHolidays"))
         XCTAssertTrue(settingsSource.contains("fetchOnlineHolidays()"))
         XCTAssertTrue(settingsSource.contains("HolidayService().fetchKoreanHolidays"))
-        XCTAssertTrue(settingsSource.contains("HolidayMerger().merge"))
+        XCTAssertTrue(settingsSource.contains("HolidayImportPlanner().newRecords"))
         XCTAssertTrue(settingsSource.contains("applyHolidayImports"))
     }
 

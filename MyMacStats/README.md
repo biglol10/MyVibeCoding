@@ -64,10 +64,11 @@ swift run MyMacStatsApp
 - Disk 메인 볼륨 정보, 읽기/쓰기 속도, 공간 후보 표시
 - Network 활성 인터페이스, 다운로드/업로드 속도, 누적 전송량 표시
 - Battery 충전 상태, 전원 소스, 사이클 수 표시 시도
-- Processes 검색 및 CPU/RAM/Name/PID 정렬
+- Processes 검색 및 CPU/RAM/Name/PID 정렬, 동률 항목 이름/PID 기준 안정 정렬
 - 프로세스 또는 앱 그룹 단위 Quit / Force Quit 2단계 종료 흐름
 - 보호 프로세스 종료 차단
-- RAM critical 상태가 30초 이상 지속되면 macOS 알림 전송
+- RAM critical 상태가 30초 이상 지속되면 macOS 알림 전송 시도
+- refresh interval 설정 저장 및 다음 실행 시 복원
 - 전체 사이드바 row 클릭 영역 지원
 
 ## 신뢰성 점검 항목
@@ -78,6 +79,7 @@ swift run MyMacStatsApp
 - RAM pressure는 `kern.memorystatus_vm_pressure_level` 값을 사용합니다. `vm.memory_pressure`는 표시값 의미가 달라 health 판정에 사용하지 않습니다.
 - CPU/RAM sampler는 `mach_host_self()`로 얻은 send right를 해제합니다.
 - Network 카운터는 `NET_RT_IFLIST2`의 64-bit byte counter를 사용하고, 두 번째 샘플부터는 누적 총량이 아니라 현재 증가량이 있는 인터페이스를 우선 선택합니다.
+- Network 측정이 한 번 실패하면 warning으로 표시하고, 연속 실패하면 unavailable로 전환해 순간 실패로 인한 회색 깜빡임을 줄입니다.
 - Disk 읽기/쓰기 속도는 IOKit block storage counter delta로 계산하고, 볼륨명 fallback은 하드코딩된 `Macintosh HD`가 아니라 mount point 이름을 사용합니다.
 - 디스크 공간 후보 스캔의 `du` 호출은 timeout 후 fallback scan으로 전환하며, UI refresh를 막지 않습니다.
 - 기본 자동 디스크 후보 스캔은 넓은 `~/Library/Caches` 전체를 훑지 않습니다. macOS가 media library 등 개인정보 보호 권한 프롬프트를 띄울 수 있어 Xcode DerivedData처럼 범위가 좁은 개발자 캐시만 기본 후보로 둡니다.
@@ -270,4 +272,4 @@ MyMacStats/
 - Dock 아이콘 숨김 설정은 아직 없습니다.
 - 알림센터 위젯과 iCloud 동기화는 없습니다.
 - 프로세스별 네트워크 사용량은 아직 표시하지 않습니다.
-- 시스템 API가 값을 제공하지 않거나 권한상 읽을 수 없는 항목은 unavailable로 표시됩니다.
+- 시스템 API가 값을 계속 제공하지 않거나 권한상 읽을 수 없는 항목은 unavailable로 표시됩니다. Network는 첫 측정 실패를 warning으로 한 번 거친 뒤 unavailable로 전환합니다.

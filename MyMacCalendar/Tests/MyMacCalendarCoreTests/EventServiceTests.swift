@@ -35,6 +35,20 @@ final class EventServiceTests: XCTestCase {
         XCTAssertEqual(occurrences.map { calendar.component(.day, from: $0.startDate) }, [29, 6])
     }
 
+    func testNegativeOccurrenceHorizonReturnsEmpty() throws {
+        let date = try date(2026, 6, 25)
+        let event = CalendarEvent(title: "Invalid horizon", startDate: date, endDate: date)
+
+        let occurrences = EventService(calendar: calendar).upcomingOccurrences(
+            from: date,
+            events: [event],
+            limit: 3,
+            horizonDays: -1
+        )
+
+        XCTAssertTrue(occurrences.isEmpty)
+    }
+
     func testSearchMatchesTitleAndNotes() throws {
         let events = [
             CalendarEvent(title: "Doctor", startDate: try date(2026, 6, 26), endDate: try date(2026, 6, 26), notes: "Gangnam"),

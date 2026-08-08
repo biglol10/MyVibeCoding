@@ -13,8 +13,14 @@ private final class TestArchiveBrowser: ArchiveBrowsing, @unchecked Sendable {
         entriesByLocation[location] ?? []
     }
 
-    func temporaryExtract(_ location: ArchiveLocation) async throws -> URL {
-        URL(fileURLWithPath: "/tmp/extracted-\(location.nameForTemporaryFile)")
+    func temporaryExtract(_ location: ArchiveLocation) async throws -> TemporaryArchiveArtifact {
+        let ownerDirectoryURL = URL(fileURLWithPath: "/tmp", isDirectory: true)
+        return TemporaryArchiveArtifact(
+            url: URL(fileURLWithPath: "/tmp/extracted-\(location.nameForTemporaryFile)"),
+            ownerDirectoryURL: ownerDirectoryURL,
+            ownerIdentifier: UUID(),
+            expectedOwnerIdentity: try XCTUnwrap(FileSystemPathIdentity.entryIdentity(ownerDirectoryURL))
+        )
     }
 }
 
@@ -23,14 +29,15 @@ final class ExplorerArchiveNavigationTests: XCTestCase {
 
     override func setUpWithError() throws {
         tempDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("MyMacFinderArchiveStore-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: false)
     }
 
     override func tearDownWithError() throws {
-        if let tempDirectory {
-            try? FileManager.default.removeItem(at: tempDirectory)
-        }
+        let root = try XCTUnwrap(tempDirectory)
+        try FileManager.default.removeItem(at: root)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+        tempDirectory = nil
     }
 
     @MainActor

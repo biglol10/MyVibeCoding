@@ -6,11 +6,11 @@
 
 | 프로그램 | 설명 | 소스 | 다운로드 |
 | --- | --- | --- | --- |
-| MyCaptureProgram | 사각형/윈도우/전체 화면 캡처와 녹화, 편집, OCR, 빠른 가리기, 히스토리/프리셋을 제공하는 macOS 앱 | [MyCaptureProgram](./MyCaptureProgram) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyCaptureProgram/CaptureStudio-personal-mac.zip) |
-| MyMacClean | 앱 삭제, 고아 파일, 대용량 파일, 개발 캐시, 시작 항목을 권한 안내와 삭제 실패 로그까지 검토 후 정리하는 SwiftUI 유틸리티 | [MyMacClean](./MyMacClean) | [개인 설치 DMG](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacClean/MyMacClean-dev.dmg) |
-| MyMacFinder | 듀얼 패널, 경로/빈 영역 Terminal 명령, Smart 프리뷰, 안전한 파일 작업/Undo를 갖춘 SwiftUI/AppKit 로컬 파일 관리자 | [MyMacFinder](./MyMacFinder) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacFinder/MyMacFinder-personal-mac.zip) |
-| MyMacStats | CPU, RAM, Disk I/O, Network, Battery, Processes 상태와 RAM 알림을 보여주는 SwiftUI 시스템 모니터 | [MyMacStats](./MyMacStats) | [MyMacStats-test-build.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacStats/MyMacStats-test-build.zip) |
-| MyMacCalendar | 로컬 우선 일정 관리, 반복 일정, 검색, 알림, 휴일, 메뉴바/플로팅 위젯을 제공하는 SwiftUI 캘린더 | [MyMacCalendar](./MyMacCalendar) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacCalendar/MyMacCalendar-personal-mac.zip) |
+| MyCaptureProgram | 사각형/윈도우/전체 화면 캡처와 녹화, 편집, OCR, 빠른 가리기, 히스토리/프리셋, 안전한 종료 확인을 제공하는 macOS 앱 | [MyCaptureProgram](./MyCaptureProgram) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyCaptureProgram/CaptureStudio-personal-mac.zip) |
+| MyMacClean | 앱 삭제, 고아 파일, 대용량 파일, 개발 캐시, 시작 항목을 권한 안내, 경로 확인, Trash 이동 로그까지 검토 후 정리하는 SwiftUI 유틸리티 | [MyMacClean](./MyMacClean) | [개인 설치 DMG](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacClean/MyMacClean-dev.dmg) |
+| MyMacFinder | 듀얼 패널, 경로/빈 영역 Terminal 명령, Smart/ZIP 프리뷰 lifecycle, 안전한 파일 작업/Undo를 갖춘 SwiftUI/AppKit 로컬 파일 관리자 | [MyMacFinder](./MyMacFinder) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacFinder/MyMacFinder-personal-mac.zip) |
+| MyMacStats | CPU, RAM, Disk I/O, Network, Battery, Processes 상태, refresh 설정 저장, RAM 알림을 보여주는 SwiftUI 시스템 모니터 | [MyMacStats](./MyMacStats) | [MyMacStats-test-build.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacStats/MyMacStats-test-build.zip) |
+| MyMacCalendar | 로컬 우선 일정 관리, 반복 일정, 검색, 알림, 자동 휴일 가져오기, 메뉴바/플로팅 위젯을 제공하는 SwiftUI 캘린더 | [MyMacCalendar](./MyMacCalendar) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacCalendar/MyMacCalendar-personal-mac.zip) |
 | FlowPilot_mac | SwiftUI 네이티브 macOS 활동 추적 앱, 기존 Tauri/Windows 소스 포함 | [FlowPilot_mac](./FlowPilot_mac) | [Swift Native zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.zip), [Swift Native DMG](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.dmg) |
 
 ## 클론

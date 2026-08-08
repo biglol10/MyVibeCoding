@@ -36,6 +36,16 @@ final class FloatingOnlyModeSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("window.isVisible"))
     }
 
+    func testWidgetCoordinatorClearsMenuOverrideWhenPersistedSettingChanges() throws {
+        let source = try String(contentsOfFile: sourcePath("Sources/MyMacCalendar/Controllers/WidgetCoordinator.swift"), encoding: .utf8)
+
+        XCTAssertTrue(source.contains("WidgetVisibilityState(configuredEnabled: true)"))
+        XCTAssertTrue(source.contains("visibilityState.updateConfiguredEnabled(currentSettings.isEnabled)"))
+        XCTAssertTrue(source.contains("visibilityState.toggleManually()"))
+        XCTAssertTrue(source.contains("let shouldShow = visibilityState.isVisible"))
+        XCTAssertFalse(source.contains("manualVisibilityOverride"))
+    }
+
     private func sourcePath(_ relativePath: String) -> String {
         let testFile = URL(fileURLWithPath: #filePath)
         return testFile

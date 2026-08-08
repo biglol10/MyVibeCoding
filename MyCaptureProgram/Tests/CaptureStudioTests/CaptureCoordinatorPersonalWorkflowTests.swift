@@ -129,6 +129,33 @@ final class CaptureCoordinatorPersonalWorkflowTests: XCTestCase {
     }
 
     @MainActor
+    func testTrimmingUnsavedTemporaryRecordingRemovesOwnedSource() async throws {
+        let sourceURL = temporaryFile(name: "unsaved-source.mp4", data: Data("original".utf8))
+        let sourceIdentity = try CaptureFileIdentity.existingFile(at: sourceURL)
+        let appState = AppState(
+            currentDocument: EditorDocument(
+                kind: .recording,
+                fileURL: sourceURL,
+                fileIdentity: sourceIdentity,
+                isDirty: true
+            )
+        )
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: makeSettingsStore("trimUnsavedSourceCleanup"),
+            screenshotService: MockPersonalScreenshotService(),
+            selectionService: MockPersonalSelectionService(),
+            recordingExportService: MockRecordingExportService()
+        )
+
+        await coordinator.trimCurrentRecording(startSeconds: 0, endSeconds: 1)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sourceURL.path))
+        XCTAssertEqual(appState.currentDocument?.isDirty, false)
+        XCTAssertEqual(appState.statusMessage, "Recording trimmed.")
+    }
+
+    @MainActor
     func testExportCurrentRecordingAsGIFUsesExporterAndLeavesRecordingOpen() async throws {
         let sourceURL = temporaryFile(name: "source-gif.mp4", data: Data([0x00, 0x00, 0x00, 0x18]))
         let appState = AppState(

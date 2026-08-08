@@ -7,13 +7,13 @@ final class ExplorerStorePathInputCommandTests: XCTestCase {
 
     override func setUpWithError() throws {
         tempDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("MyMacFinderPathInputCommandTests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
     }
 
     override func tearDownWithError() throws {
         if let tempDirectory {
-            try? FileManager.default.removeItem(at: tempDirectory)
+            try FileManager.default.removeItem(at: tempDirectory)
         }
     }
 
@@ -121,6 +121,57 @@ final class ExplorerStorePathInputCommandTests: XCTestCase {
         XCTAssertEqual(launcher.openedApplications.map(\.urls), [[file.standardizedFileURL]])
         XCTAssertEqual(launcher.openedApplications.map(\.application), [application])
     }
+
+    @MainActor
+    func testOpenPathCommandPresentsDefaultOpenFailure() async {
+        let launcher = SpyExternalAppLauncher()
+        launcher.defaultOpenError = ExplorerError.externalCommandFailed("No application could open: \(tempDirectory.path)/missing.txt")
+        let store = ExplorerStore(
+            initialURL: tempDirectory,
+            directoryWatcher: nil,
+            externalAppLauncher: launcher
+        )
+
+        await store.resolveAndNavigate("open missing.txt")
+
+        XCTAssertEqual(
+            store.visibleError,
+            .externalCommandFailed("No application could open: \(tempDirectory.path)/missing.txt")
+        )
+    }
+
+    @MainActor
+    func testOpenPathCommandCancellationDoesNotShowError() async {
+        let launcher = SpyExternalAppLauncher()
+        launcher.defaultOpenError = CancellationError()
+        let store = ExplorerStore(
+            initialURL: tempDirectory,
+            directoryWatcher: nil,
+            externalAppLauncher: launcher
+        )
+
+        await store.resolveAndNavigate("open missing.txt")
+
+        XCTAssertNil(store.visibleError)
+    }
+
+    @MainActor
+    func testOpeningNormalFileCancellationDoesNotShowError() async throws {
+        let file = tempDirectory.appendingPathComponent("note.txt")
+        try "note".write(to: file, atomically: true, encoding: .utf8)
+        let launcher = SpyExternalAppLauncher()
+        launcher.defaultOpenError = CancellationError()
+        let store = ExplorerStore(
+            initialURL: tempDirectory,
+            directoryWatcher: nil,
+            externalAppLauncher: launcher
+        )
+        await store.refresh()
+
+        await store.open(file.standardizedFileURL)
+
+        XCTAssertNil(store.visibleError)
+    }
 }
 
 @MainActor
@@ -130,9 +181,13 @@ private final class SpyExternalAppLauncher: ExternalAppLaunching {
     var vsCodeTargets: [URL] = []
     var openedApplications: [(urls: [URL], application: OpenWithApplication)] = []
     var applications: [OpenWithApplication] = []
+    var defaultOpenError: Error?
 
-    func openDefault(_ url: URL) {
+    func openDefault(_ url: URL) throws {
         defaultOpenedURLs.append(url.standardizedFileURL)
+        if let defaultOpenError {
+            throw defaultOpenError
+        }
     }
 
     func open(_ urls: [URL], with application: OpenWithApplication) async throws {

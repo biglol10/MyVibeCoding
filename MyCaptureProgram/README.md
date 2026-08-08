@@ -111,12 +111,12 @@ After a screenshot is captured, the editor toolbar can annotate, OCR, and redact
 - Rectangle, window, and full-screen recording with countdown delay, duration control, and stop handling
 - Multi-display selection overlay support
 - Persistent Settings window for output, capture, recording, shortcuts, and advanced options
-- Customizable shortcuts with per-action reset and reset-all defaults
+- Customizable shortcuts with per-action reset and reset-all defaults; global shortcuts require Command, Option, or Control so ordinary typing is never captured
 - Configurable output folders, clipboard behavior, and automatic/manual save mode
 - Smart filenames using active app/window context when available
 - Screenshot annotation tools: pen, highlighter, arrow, rectangle, ellipse, text, solid redaction, OCR, undo/redo, copy, save, delete
 - Quick Redact for detected sensitive text
-- Recording preview, trim-copy export, and GIF export; a blank trim end uses the media's actual duration
+- Recording preview, trim-copy export, and GIF export; a blank trim end uses the media's actual duration, while invalid or reversed times are rejected with an explanation
 - Capture history with thumbnails, search, open, per-item delete, and Clear History that keeps capture files
 - Floating pinned screenshot preview
 - Presets for quickly switching common workflows
@@ -126,7 +126,8 @@ After a screenshot is captured, the editor toolbar can annotate, OCR, and redact
 
 - macOS screen recording permission is tied to the installed app bundle and code signature. If permission prompts keep appearing after reinstalling, remove the old `CaptureStudio` entry from System Settings and add `/Applications/CaptureStudio.app` again.
 - Starting a new capture or opening a history item while the current screenshot or recording has unsaved changes asks whether to Save, Discard Changes, or Cancel.
+- Quitting with unsaved work asks whether to Save, Discard Changes, or Cancel. CaptureStudio also refuses to quit while a capture, recording, export, or file operation is still active.
 - If a configured output folder is missing or not writable, CaptureStudio does not silently fall back to Desktop. The new result stays open as unsaved so you can choose another folder and save it.
 - Quick Redact adds editable redaction layers. It does not alter an already saved original or the current clipboard; use Save or Copy to create the redacted version.
 - Integration tests that touch live screen capture require macOS permissions and are run with `CAPTURE_STUDIO_RUN_INTEGRATION=1`.
-- The detailed current-source verification matrix is in `docs/qa/2026-08-04-feature-verification-checklist.md`.
+- The latest hardening verification is in `docs/qa/2026-08-08-follow-up-hardening.md`. The broader feature matrix is in `docs/qa/2026-08-04-feature-verification-checklist.md`.

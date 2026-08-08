@@ -602,6 +602,8 @@ struct ContentView: View {
 
                         Spacer()
 
+                        filePathActionButtons(for: candidate.url)
+
                         Text(candidate.kind.rawValue)
                             .font(.callout.weight(.medium))
                             .foregroundStyle(.secondary)
@@ -704,6 +706,8 @@ struct ContentView: View {
                                     }
 
                                     Spacer()
+
+                                    filePathActionButtons(for: candidate.url)
 
                                     Text(candidate.safety.title)
                                         .font(.callout.weight(.semibold))
@@ -1225,6 +1229,10 @@ struct ContentView: View {
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
+                                HStack(spacing: 8) {
+                                    Spacer()
+                                    filePathActionButtons(for: candidate.url)
+                                }
                             }
                             .padding(12)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1626,6 +1634,30 @@ struct ContentView: View {
 
     private func startupActionHelp(for item: StartupItem) -> String {
         StartupItemActionPresentation(item: item).helpText
+    }
+
+    private func filePathActionButtons(for url: URL) -> some View {
+        HStack(spacing: 6) {
+            Button {
+                revealInFinder(url)
+            } label: {
+                Label("Reveal in Finder", systemImage: "folder")
+                    .labelStyle(.iconOnly)
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .help("Reveal in Finder")
+
+            Button {
+                copyToPasteboard(url.path)
+            } label: {
+                Label("Copy Path", systemImage: "doc.on.doc")
+                    .labelStyle(.iconOnly)
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .help("Copy Path")
+        }
     }
 
     private func startupDetailRow(

@@ -56,6 +56,38 @@ final class DeletionExecutorTests: XCTestCase {
     func testExecutorFallsBackToSecondaryTrashHandlerWhenPrimaryTrashFails() async throws {
         let root = try TestFixtures.temporaryDirectory(named: "executor-trash-fallback")
         let appURL = root.appendingPathComponent("Figma.app", isDirectory: true)
+        let cacheURL = root.appendingPathComponent("Library/Caches/Figma Helper.app", isDirectory: true)
+        try FileManager.default.createDirectory(at: appURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: cacheURL, withIntermediateDirectories: true)
+
+        let app = InstalledApp(displayName: "Figma", bundleIdentifier: "com.figma.Desktop", version: nil, executableName: "Figma", bundleURL: appURL, iconIdentifier: nil, bundleSize: 0, lastOpenedAt: nil)
+        let candidate = RelatedFileCandidate(url: cacheURL, kind: .appBundle, size: 0, matchReason: "test", confidence: .high, defaultSelected: true, requiresManualReview: false, isProtected: false)
+        let plan = DeletionPlan(app: app, candidates: [candidate], createdAt: Date(timeIntervalSince1970: 0))
+        let fallbackRecorder = RemovalRecorder()
+        let fileRemover = DeletionFileRemover(
+            trash: { _ in throw CocoaError(.fileWriteNoPermission) },
+            fallbackTrash: { url in
+                fallbackRecorder.recordTrash(url)
+                try FileManager.default.removeItem(at: url)
+            },
+            remove: { url in
+                try FileManager.default.removeItem(at: url)
+            }
+        )
+
+        let results = await DeletionExecutor(
+            fileRemover: fileRemover,
+            protectionPolicy: ProtectionPolicy(homeDirectory: root)
+        ).execute(plan: plan, confirmation: "DELETE")
+
+        XCTAssertEqual(results, [DeletionItemResult(path: cacheURL.path, success: true, errorMessage: nil)])
+        XCTAssertEqual(fallbackRecorder.trashedURLs, [cacheURL])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL.path))
+    }
+
+    func testExecutorDoesNotUseSecondaryTrashHandlerForNonAppBundleFailures() async throws {
+        let root = try TestFixtures.temporaryDirectory(named: "executor-trash-fallback-non-app")
+        let appURL = root.appendingPathComponent("Figma.app", isDirectory: true)
         let cacheURL = root.appendingPathComponent("Library/Caches/com.figma.Desktop", isDirectory: true)
         try FileManager.default.createDirectory(at: appURL, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: cacheURL, withIntermediateDirectories: true)
@@ -80,9 +112,10 @@ final class DeletionExecutorTests: XCTestCase {
             protectionPolicy: ProtectionPolicy(homeDirectory: root)
         ).execute(plan: plan, confirmation: "DELETE")
 
-        XCTAssertEqual(results, [DeletionItemResult(path: cacheURL.path, success: true, errorMessage: nil)])
-        XCTAssertEqual(fallbackRecorder.trashedURLs, [cacheURL])
-        XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL.path))
+        XCTAssertEqual(results.count, 1)
+        XCTAssertFalse(results[0].success)
+        XCTAssertEqual(fallbackRecorder.trashedURLs, [])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cacheURL.path))
     }
 
     func testExecutorPermanentlyRemovesPlannedFilesOnlyWhenPermanentModeIsRequested() async throws {

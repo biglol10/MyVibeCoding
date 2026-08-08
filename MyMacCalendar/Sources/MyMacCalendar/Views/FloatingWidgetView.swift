@@ -201,17 +201,17 @@ private final class FloatingWidgetDragHandleView: NSView {
 }
 
 struct FloatingEventDetailView: View {
-    let event: CalendarEvent
+    let detail: EventOccurrenceDetail
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 10) {
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(Color(hex: event.colorHex))
+                    .fill(Color(hex: detail.colorHex))
                     .frame(width: 5, height: 44)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(event.title)
+                    Text(detail.title)
                         .font(.system(size: 17, weight: .bold))
                         .lineLimit(2)
                     Text(dateSummary)
@@ -225,12 +225,12 @@ struct FloatingEventDetailView: View {
             detailRow("반복", recurrenceText)
             detailRow("알림", reminderText)
 
-            if event.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            if detail.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("메모")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.secondary)
-                    Text(event.notes)
+                    Text(detail.notes)
                         .font(.system(size: 13))
                         .foregroundStyle(.primary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -246,14 +246,14 @@ struct FloatingEventDetailView: View {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "ko_KR")
         formatter.dateFormat = "yyyy년 M월 d일 (E)"
-        if Calendar.current.isDate(event.startDate, inSameDayAs: event.endDate) {
-            return formatter.string(from: event.startDate)
+        if Calendar.current.isDate(detail.startDate, inSameDayAs: detail.endDate) {
+            return formatter.string(from: detail.startDate)
         }
-        return "\(formatter.string(from: event.startDate)) - \(formatter.string(from: event.endDate))"
+        return "\(formatter.string(from: detail.startDate)) - \(formatter.string(from: detail.endDate))"
     }
 
     private var recurrenceText: String {
-        switch event.recurrence {
+        switch detail.recurrence {
         case .none:
             return "없음"
         case .weekly:
@@ -266,8 +266,8 @@ struct FloatingEventDetailView: View {
     }
 
     private var reminderText: String {
-        guard event.notificationOffsetsDays.isEmpty == false else { return "없음" }
-        return event.notificationOffsetsDays
+        guard detail.notificationOffsetsDays.isEmpty == false else { return "없음" }
+        return detail.notificationOffsetsDays
             .sorted(by: >)
             .map { offset in
                 switch offset {
