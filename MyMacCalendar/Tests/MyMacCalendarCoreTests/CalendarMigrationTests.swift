@@ -5,6 +5,56 @@ import XCTest
 
 @MainActor
 final class CalendarMigrationTests: XCTestCase {
+    func testCategorizedArrayLegacyStoreMigratesWithoutDataLoss() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MyMacCalendarCategorizedLegacy-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let originalURL = directory.appendingPathComponent("legacy.store")
+        let copyURL = directory.appendingPathComponent("migration-copy.store")
+        let eventID = UUID(uuidString: "cccccccc-cccc-cccc-cccc-cccccccccccc")!
+        let startDate = Date(timeIntervalSince1970: 1_800_000_000)
+        let legacy = try makeCategorizedLegacyContainer(at: originalURL)
+        legacy.mainContext.insert(
+            CategorizedArrayLegacySchema.CalendarEvent(
+                id: eventID,
+                title: "Categorized legacy event",
+                startDate: startDate,
+                endDate: startDate,
+                colorHex: EventCategory.work.colorHex,
+                categoryRaw: EventCategory.work.rawValue,
+                notes: "Legacy notes",
+                recurrenceRaw: EventRecurrence.monthly.rawValue,
+                notificationOffsetsDays: [7, 1, 0]
+            )
+        )
+        legacy.mainContext.insert(
+            CategorizedArrayLegacySchema.AppSettings(
+                floatingWidgetVisibleCount: 6,
+                defaultReminderHour: 8,
+                defaultReminderMinute: 45
+            )
+        )
+        try legacy.mainContext.save()
+        try copyStoreFamily(from: originalURL, to: copyURL)
+
+        let migrated = try CalendarStore.makeContainer(at: copyURL)
+        let events = try migrated.mainContext.fetch(FetchDescriptor<CalendarEvent>())
+        let event = try XCTUnwrap(events.first)
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(event.id, eventID)
+        XCTAssertEqual(event.category, .work)
+        XCTAssertEqual(event.recurrence, .monthly)
+        XCTAssertEqual(event.notificationOffsetsDays, [7, 1, 0])
+
+        let settings = try migrated.mainContext.fetch(FetchDescriptor<AppSettings>())
+        let migratedSettings = try XCTUnwrap(settings.first)
+        XCTAssertEqual(migratedSettings.floatingWidgetVisibleCount, 6)
+        XCTAssertEqual(migratedSettings.defaultReminderHour, 8)
+        XCTAssertEqual(migratedSettings.defaultReminderMinute, 45)
+    }
+
     func testPreviouslyUnversionedCurrentStoreOpensWithoutDataLoss() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("MyMacCalendarCurrentSchema-\(UUID().uuidString)", isDirectory: true)
@@ -148,6 +198,12 @@ final class CalendarMigrationTests: XCTestCase {
         return try ModelContainer(for: schema, configurations: [configuration])
     }
 
+    private func makeCategorizedLegacyContainer(at url: URL) throws -> ModelContainer {
+        let schema = Schema(versionedSchema: CategorizedArrayLegacySchema.self)
+        let configuration = ModelConfiguration(schema: schema, url: url)
+        return try ModelContainer(for: schema, configurations: [configuration])
+    }
+
     private func assertMigratedStore(at url: URL, matchesLegacyStoreAt legacyURL: URL) throws {
         let legacyContainer = try makeLegacyContainer(at: legacyURL)
         let legacyEvent = try XCTUnwrap(
@@ -221,6 +277,127 @@ final class CalendarMigrationTests: XCTestCase {
                     withExtension: "store"
                 )
             )
+        }
+    }
+}
+
+private enum CategorizedArrayLegacySchema: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(1, 0, 0) }
+    static var models: [any PersistentModel.Type] {
+        [CalendarEvent.self, HolidayRecord.self, AppSettings.self]
+    }
+
+    @Model
+    final class CalendarEvent {
+        @Attribute(.unique) var id: UUID
+        var title: String
+        var startDate: Date
+        var endDate: Date
+        var colorHex: String
+        var categoryRaw: String
+        var notes: String
+        var recurrenceRaw: String
+        var notificationOffsetsDays: [Int]
+        var createdAt: Date
+        var updatedAt: Date
+
+        init(
+            id: UUID = UUID(),
+            title: String,
+            startDate: Date,
+            endDate: Date,
+            colorHex: String = EventCategory.personal.colorHex,
+            categoryRaw: String = EventCategory.personal.rawValue,
+            notes: String = "",
+            recurrenceRaw: String = EventRecurrence.none.rawValue,
+            notificationOffsetsDays: [Int] = [],
+            createdAt: Date = Date(),
+            updatedAt: Date = Date()
+        ) {
+            self.id = id
+            self.title = title
+            self.startDate = startDate
+            self.endDate = endDate
+            self.colorHex = colorHex
+            self.categoryRaw = categoryRaw
+            self.notes = notes
+            self.recurrenceRaw = recurrenceRaw
+            self.notificationOffsetsDays = notificationOffsetsDays
+            self.createdAt = createdAt
+            self.updatedAt = updatedAt
+        }
+    }
+
+    @Model
+    final class HolidayRecord {
+        @Attribute(.unique) var id: UUID
+        var date: Date
+        var title: String
+        var sourceRaw: String
+        var providerKey: String
+        var isHidden: Bool
+        var year: Int
+        var updatedAt: Date
+
+        init(
+            id: UUID = UUID(),
+            date: Date,
+            title: String,
+            sourceRaw: String,
+            providerKey: String = "",
+            isHidden: Bool = false,
+            year: Int,
+            updatedAt: Date = Date()
+        ) {
+            self.id = id
+            self.date = date
+            self.title = title
+            self.sourceRaw = sourceRaw
+            self.providerKey = providerKey
+            self.isHidden = isHidden
+            self.year = year
+            self.updatedAt = updatedAt
+        }
+    }
+
+    @Model
+    final class AppSettings {
+        @Attribute(.unique) var id: String
+        var launchAtLogin: Bool
+        var showMenuBar: Bool
+        var floatingWidgetEnabled: Bool
+        var floatingWidgetAlwaysOnTop: Bool
+        var floatingWidgetOpacity: Double
+        var floatingWidgetVisibleCount: Int
+        var defaultReminderHour: Int
+        var defaultReminderMinute: Int
+        var theme: String
+        var calendarDensity: String
+
+        init(
+            id: String = "default",
+            launchAtLogin: Bool = false,
+            showMenuBar: Bool = true,
+            floatingWidgetEnabled: Bool = true,
+            floatingWidgetAlwaysOnTop: Bool = true,
+            floatingWidgetOpacity: Double = 0.96,
+            floatingWidgetVisibleCount: Int = 5,
+            defaultReminderHour: Int = 9,
+            defaultReminderMinute: Int = 0,
+            theme: String = "system",
+            calendarDensity: String = "comfortable"
+        ) {
+            self.id = id
+            self.launchAtLogin = launchAtLogin
+            self.showMenuBar = showMenuBar
+            self.floatingWidgetEnabled = floatingWidgetEnabled
+            self.floatingWidgetAlwaysOnTop = floatingWidgetAlwaysOnTop
+            self.floatingWidgetOpacity = floatingWidgetOpacity
+            self.floatingWidgetVisibleCount = floatingWidgetVisibleCount
+            self.defaultReminderHour = defaultReminderHour
+            self.defaultReminderMinute = defaultReminderMinute
+            self.theme = theme
+            self.calendarDensity = calendarDensity
         }
     }
 }
