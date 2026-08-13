@@ -51,6 +51,25 @@ private struct MetricSampleCache<Value> {
     }
 }
 
+private enum SamplePresentationState: Equatable {
+    case fresh
+    case stale
+    case unavailable
+}
+
+private extension MetricSampleCache {
+    var presentationState: SamplePresentationState {
+        guard value != nil else { return .unavailable }
+        if consecutiveFailures == 0 { return .fresh }
+        if consecutiveFailures == 1 { return .stale }
+        return .unavailable
+    }
+
+    var presentedValue: Value? {
+        presentationState == .unavailable ? nil : value
+    }
+}
+
 public struct SystemMetricsSnapshot: Equatable, Sendable {
     public let summaries: [MetricSummary]
     public let cpu: CPUSnapshot?
@@ -126,7 +145,6 @@ public final class SystemMetricsService {
     private var processCache = MetricSampleCache<[ProcessMetric]>()
     private var summaryCache: [MetricKind: MetricSummary] = [:]
     private var cpuHistorySamples: [MetricHistorySample] = []
-    private var consecutiveNetworkFailures = 0
     private var diskSpaceCandidates: [DiskSpaceCandidate] = []
     private var diskSpaceCandidateRefreshTask: Task<Void, Never>?
     private var lastDiskSpaceCandidateRefreshStartedAt: Date?
@@ -165,74 +183,54 @@ public final class SystemMetricsService {
         let processCadence = max(base, 2)
         let slowCadence = max(base, 10)
 
-        var sampledKinds = Set<MetricKind>()
-        var successfulKinds = Set<MetricKind>()
+        var freshKinds = Set<MetricKind>()
 
         if cpuCache.isDue(at: now, cadence: base) {
-            sampledKinds.insert(.cpu)
             let result = await sampler.sampleCPU()
             cpuCache.record(result, at: now)
             if let result {
-                successfulKinds.insert(.cpu)
+                freshKinds.insert(.cpu)
                 cpuHistorySamples.append(MetricHistorySample(date: now, value: result.totalUsagePercent))
                 cpuHistorySamples.removeAll { now.timeIntervalSince($0.date) > 300 }
             }
         }
 
         if memoryCache.isDue(at: now, cadence: base) {
-            sampledKinds.insert(.memory)
             let result = await sampler.sampleMemory()
             memoryCache.record(result, at: now)
-            if result != nil { successfulKinds.insert(.memory) }
+            if result != nil { freshKinds.insert(.memory) }
         }
 
         if diskCache.isDue(at: now, cadence: slowCadence) {
-            sampledKinds.insert(.disk)
             let result = await sampler.sampleDisk()
             diskCache.record(result, at: now)
-            if result != nil { successfulKinds.insert(.disk) }
+            if result != nil { freshKinds.insert(.disk) }
         }
 
         if networkCache.isDue(at: now, cadence: base) {
-            sampledKinds.insert(.network)
             let result = await sampler.sampleNetwork()
             networkCache.record(result, at: now)
-            if result != nil {
-                successfulKinds.insert(.network)
-                consecutiveNetworkFailures = 0
-            } else {
-                consecutiveNetworkFailures += 1
-            }
+            if result != nil { freshKinds.insert(.network) }
         }
 
         if batteryCache.isDue(at: now, cadence: slowCadence) {
-            sampledKinds.insert(.battery)
             let result = await sampler.sampleBattery()
             batteryCache.record(result, at: now)
-            if result != nil { successfulKinds.insert(.battery) }
+            if result != nil { freshKinds.insert(.battery) }
         }
 
-        var processesAreFresh = false
         if processCache.isDue(at: now, cadence: processCadence, forced: reason.forcesProcessSampling) {
-            sampledKinds.insert(.processes)
             let result = await sampler.sampleProcesses()
             processCache.record(result, at: now)
-            if result != nil {
-                successfulKinds.insert(.processes)
-                processesAreFresh = true
-            }
+            if result != nil { freshKinds.insert(.processes) }
         }
 
-        let cpu = cpuCache.value
-        let memory = memoryCache.value
-        let disk = diskCache.value
-        let network = networkCache.value
-        let battery = batteryCache.value
-        let processes = ProcessSorting.filtered(processCache.value ?? [], searchText: "", sortKey: .cpu)
-
-        let evaluatedKinds = successfulKinds.union(
-            sampledKinds.filter { summaryCache[$0] == nil }
-        )
+        let cpu = cpuCache.presentedValue
+        let memory = memoryCache.presentedValue
+        let disk = diskCache.presentedValue
+        let network = networkCache.presentedValue
+        let battery = batteryCache.presentedValue
+        let processes = ProcessSorting.filtered(processCache.presentedValue ?? [], searchText: "", sortKey: .cpu)
         let summaries = buildSummaries(
             cpu: cpu,
             memory: memory,
@@ -241,8 +239,15 @@ public final class SystemMetricsService {
             battery: battery,
             processes: processes,
             now: now,
-            evaluatedKinds: evaluatedKinds,
-            successfulKinds: successfulKinds
+            presentationStates: [
+                .cpu: cpuCache.presentationState,
+                .memory: memoryCache.presentationState,
+                .disk: diskCache.presentationState,
+                .network: networkCache.presentationState,
+                .battery: batteryCache.presentationState,
+                .processes: processCache.presentationState
+            ],
+            freshKinds: freshKinds
         )
 
         return SystemMetricsSnapshot(
@@ -254,7 +259,7 @@ public final class SystemMetricsService {
             battery: battery,
             diskSpaceCandidates: diskSpaceCandidates,
             processes: processes,
-            processesAreFresh: processesAreFresh,
+            processesAreFresh: freshKinds.contains(.processes),
             cpuHistory: cpuHistorySamples.map(\.value),
             cpuHistorySamples: cpuHistorySamples,
             updatedAt: now
@@ -286,12 +291,19 @@ public final class SystemMetricsService {
         battery: BatterySnapshot?,
         processes: [ProcessMetric],
         now: Date,
-        evaluatedKinds: Set<MetricKind>,
-        successfulKinds: Set<MetricKind>
+        presentationStates: [MetricKind: SamplePresentationState],
+        freshKinds: Set<MetricKind>
     ) -> [MetricSummary] {
         MetricKind.allCases.map { kind in
-            guard evaluatedKinds.contains(kind) else {
-                return summaryCache[kind] ?? unavailableSummary(kind: kind, now: now)
+            guard freshKinds.contains(kind) else {
+                switch presentationStates[kind] ?? .unavailable {
+                case .fresh:
+                    return summaryCache[kind] ?? unavailableSummary(kind: kind, now: now)
+                case .stale:
+                    return staleSummary(kind: kind, now: now)
+                case .unavailable:
+                    return unavailableSummary(kind: kind, now: now)
+                }
             }
 
             let summary: MetricSummary
@@ -352,14 +364,7 @@ public final class SystemMetricsService {
 
             case .network:
                 guard let network else {
-                    return MetricSummary(
-                        kind: .network,
-                        title: MetricKind.network.title,
-                        valueText: "Unavailable",
-                        detailText: "No active interface",
-                        health: evaluator.networkHealth(snapshot: nil, consecutiveFailures: consecutiveNetworkFailures),
-                        updatedAt: now
-                    )
+                    return unavailableSummary(kind: .network, now: now)
                 }
                 summary = MetricSummary(
                     kind: .network,
@@ -368,7 +373,7 @@ public final class SystemMetricsService {
                     detailText: "\(network.interfaceName ?? "No interface")  ↑ \(MetricFormatters.compactSpeed(network.uploadBytesPerSecond))",
                     health: evaluator.debouncedHealth(
                         for: .network,
-                        candidate: evaluator.networkHealth(snapshot: network, consecutiveFailures: consecutiveNetworkFailures)
+                        candidate: evaluator.networkHealth(snapshot: network, consecutiveFailures: 0)
                     ),
                     updatedAt: now
                 )
@@ -397,11 +402,25 @@ public final class SystemMetricsService {
                 )
             }
 
-            if successfulKinds.contains(kind) {
-                summaryCache[kind] = summary
-            }
+            summaryCache[kind] = summary
             return summary
         }
+    }
+
+    private func staleSummary(kind: MetricKind, now: Date) -> MetricSummary {
+        guard let summary = summaryCache[kind] else {
+            return unavailableSummary(kind: kind, now: now)
+        }
+
+        let detailText = [summary.detailText, "Using last sample"].compactMap { $0 }.joined(separator: " ")
+        return MetricSummary(
+            kind: summary.kind,
+            title: summary.title,
+            valueText: summary.valueText,
+            detailText: detailText,
+            health: summary.health == .critical ? .critical : .warning,
+            updatedAt: summary.updatedAt
+        )
     }
 
     private func unavailableSummary(kind: MetricKind, now: Date) -> MetricSummary {

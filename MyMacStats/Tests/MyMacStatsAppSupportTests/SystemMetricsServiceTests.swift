@@ -67,26 +67,21 @@ final class SystemMetricsServiceTests: XCTestCase {
         )
 
         let snapshot = await service.refresh(now: now)
-        let secondSnapshot = await service.refresh(now: now.addingTimeInterval(1))
-
         XCTAssertEqual(snapshot.summary(for: .cpu)?.health, .unavailable)
         XCTAssertEqual(snapshot.summary(for: .memory)?.valueText, "Unavailable")
-        XCTAssertEqual(snapshot.summary(for: .network)?.health, .warning)
-        XCTAssertEqual(secondSnapshot.summary(for: .network)?.health, .unavailable)
+        XCTAssertEqual(snapshot.summary(for: .network)?.health, .unavailable)
         XCTAssertEqual(snapshot.summary(for: .battery)?.valueText, "Unavailable")
     }
 
-    func testSingleNetworkSamplingFailureIsWarningBeforeBecomingUnavailable() async {
+    func testInitialNetworkSamplingFailureIsUnavailableWithoutLastKnownGoodValue() async {
         let service = SystemMetricsService(
             sampler: MockSystemSampler(),
             evaluator: HealthEvaluator(debounceSamples: 1)
         )
 
-        let first = await service.refresh(now: Date(timeIntervalSince1970: 0))
-        let second = await service.refresh(now: Date(timeIntervalSince1970: 1))
+        let snapshot = await service.refresh(now: Date(timeIntervalSince1970: 0))
 
-        XCTAssertEqual(first.summary(for: .network)?.health, .warning)
-        XCTAssertEqual(second.summary(for: .network)?.health, .unavailable)
+        XCTAssertEqual(snapshot.summary(for: .network)?.health, .unavailable)
     }
 
     func testCPUHistoryRetainsFiveMinutesOfTimestampedSamples() async {
@@ -191,6 +186,133 @@ final class SystemMetricsServiceTests: XCTestCase {
 
         XCTAssertEqual(sampler.batteryCallCount, 1)
         XCTAssertEqual(second.summary(for: .battery), first.summary(for: .battery))
+    }
+
+    func testFirstCPUFailureRetainsLastValueThenSecondFailureBecomesUnavailable() async {
+        let start = Date(timeIntervalSince1970: 2_000)
+        let sampler = recordingSampler(at: start)
+        let service = SystemMetricsService(
+            sampler: sampler,
+            evaluator: HealthEvaluator(cpuSustainedSeconds: 0, debounceSamples: 1)
+        )
+
+        _ = await service.refresh(now: start, reason: .scheduled(baseInterval: 1))
+        sampler.cpuResult = nil
+
+        let stale = await service.refresh(
+            now: start.addingTimeInterval(1),
+            reason: .scheduled(baseInterval: 1)
+        )
+
+        XCTAssertEqual(stale.cpu?.totalUsagePercent, 40)
+        XCTAssertEqual(stale.summary(for: .cpu)?.health, .warning)
+        XCTAssertTrue(stale.summary(for: .cpu)?.detailText?.contains("Using last sample") == true)
+        XCTAssertEqual(stale.summary(for: .cpu)?.updatedAt, start)
+        XCTAssertEqual(stale.cpuHistory, [40])
+
+        let unavailable = await service.refresh(
+            now: start.addingTimeInterval(2),
+            reason: .scheduled(baseInterval: 1)
+        )
+
+        XCTAssertNil(unavailable.cpu)
+        XCTAssertEqual(unavailable.summary(for: .cpu)?.health, .unavailable)
+        XCTAssertEqual(unavailable.cpuHistory, [40])
+
+        sampler.cpuResult = cpuSnapshot(usage: 25, at: start.addingTimeInterval(3))
+        let recovered = await service.refresh(
+            now: start.addingTimeInterval(3),
+            reason: .scheduled(baseInterval: 1)
+        )
+
+        XCTAssertEqual(recovered.cpu?.totalUsagePercent, 25)
+        XCTAssertEqual(recovered.summary(for: .cpu)?.health, .normal)
+        XCTAssertEqual(recovered.cpuHistory, [40, 25])
+    }
+
+    func testProcessFailuresRetainOnceThenBecomeUnavailableAndEmptySuccessRecovers() async {
+        let start = Date(timeIntervalSince1970: 3_000)
+        let sampler = recordingSampler(at: start)
+        let service = SystemMetricsService(
+            sampler: sampler,
+            evaluator: HealthEvaluator(debounceSamples: 1)
+        )
+
+        _ = await service.refresh(now: start, reason: .scheduled(baseInterval: 1))
+        sampler.processResult = nil
+
+        let stale = await service.refresh(
+            now: start.addingTimeInterval(2),
+            reason: .scheduled(baseInterval: 1)
+        )
+        XCTAssertEqual(stale.processes.map(\.name), ["Safari"])
+        XCTAssertEqual(stale.summary(for: .processes)?.health, .warning)
+        XCTAssertFalse(stale.processesAreFresh)
+
+        let unavailable = await service.refresh(
+            now: start.addingTimeInterval(4),
+            reason: .scheduled(baseInterval: 1)
+        )
+        XCTAssertEqual(unavailable.processes, [])
+        XCTAssertEqual(unavailable.summary(for: .processes)?.health, .unavailable)
+
+        sampler.processResult = []
+        let recovered = await service.refresh(
+            now: start.addingTimeInterval(6),
+            reason: .scheduled(baseInterval: 1)
+        )
+        XCTAssertEqual(recovered.processes, [])
+        XCTAssertEqual(recovered.summary(for: .processes)?.health, .normal)
+        XCTAssertTrue(recovered.processesAreFresh)
+    }
+
+    func testSkippedDiskSampleDoesNotAdvanceHealthDebounce() async {
+        let start = Date(timeIntervalSince1970: 4_000)
+        let sampler = recordingSampler(at: start)
+        let service = SystemMetricsService(
+            sampler: sampler,
+            evaluator: HealthEvaluator(debounceSamples: 2)
+        )
+
+        let first = await service.refresh(now: start, reason: .scheduled(baseInterval: 1))
+        let skipped = await service.refresh(
+            now: start.addingTimeInterval(1),
+            reason: .scheduled(baseInterval: 1)
+        )
+        sampler.diskResult = diskSnapshot(freeBytes: 5, at: start.addingTimeInterval(10))
+        let second = await service.refresh(
+            now: start.addingTimeInterval(10),
+            reason: .scheduled(baseInterval: 1)
+        )
+        let third = await service.refresh(
+            now: start.addingTimeInterval(20),
+            reason: .scheduled(baseInterval: 1)
+        )
+
+        XCTAssertEqual(first.summary(for: .disk)?.health, .normal)
+        XCTAssertEqual(skipped.summary(for: .disk)?.health, .normal)
+        XCTAssertEqual(second.summary(for: .disk)?.health, .normal)
+        XCTAssertEqual(third.summary(for: .disk)?.health, .critical)
+        XCTAssertEqual(sampler.diskCallCount, 3)
+    }
+
+    private func recordingSampler(at now: Date) -> RecordingSystemSampler {
+        RecordingSystemSampler(
+            cpu: cpuSnapshot(usage: 40, at: now),
+            memory: MemorySnapshot(totalBytes: 100, usedBytes: 50, freeBytes: 50, compressedBytes: nil, cachedBytes: nil, swapUsedBytes: nil, pressure: .normal, sampledAt: now),
+            disk: diskSnapshot(freeBytes: 50, at: now),
+            network: NetworkSnapshot(interfaceName: "en0", downloadBytesPerSecond: 1, uploadBytesPerSecond: 1, receivedBytes: 1, sentBytes: 1, isConnected: true, sampledAt: now),
+            battery: BatterySnapshot(isPresent: true, percentage: 50, isCharging: false, powerSource: "Battery Power", timeRemainingMinutes: nil, cycleCount: nil, serviceRecommended: false, sampledAt: now),
+            processes: [ProcessMetric(pid: 1, name: "Safari", cpuPercent: 1, memoryBytes: 100, path: "/Applications/Safari.app", bundleIdentifier: "com.apple.Safari")]
+        )
+    }
+
+    private func cpuSnapshot(usage: Double, at now: Date) -> CPUSnapshot {
+        CPUSnapshot(totalUsagePercent: usage, userPercent: usage / 2, systemPercent: usage / 2, idlePercent: 100 - usage, sampledAt: now)
+    }
+
+    private func diskSnapshot(freeBytes: UInt64, at now: Date) -> DiskSnapshot {
+        DiskSnapshot(volumeName: "Macintosh HD", mountPoint: "/", totalBytes: 100, freeBytes: freeBytes, readBytesPerSecond: nil, writeBytesPerSecond: nil, sampledAt: now)
     }
 
     private func gib(_ value: UInt64) -> UInt64 {
