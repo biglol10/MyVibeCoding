@@ -428,6 +428,114 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.selectedProcessCanForceQuit)
     }
 
+    func testTerminationDoesNotUseCachedProcessesWhenForcedRefreshFails() async {
+        var sent: [(Int32, Int32)] = []
+        let target = ProcessMetric(
+            pid: 500,
+            name: "Figma",
+            cpuPercent: 10,
+            memoryBytes: 100,
+            path: "/Applications/Figma.app/Contents/MacOS/Figma",
+            bundleIdentifier: "com.figma.Desktop"
+        )
+        let sampler = SnapshotSampler(processes: [target])
+        let service = SystemMetricsService(
+            sampler: sampler,
+            evaluator: HealthEvaluator(debounceSamples: 1)
+        )
+        _ = await service.refresh(reason: .scheduled(baseInterval: 10))
+        sampler.processResult = nil
+
+        let viewModel = DashboardViewModel(
+            snapshot: snapshot(processes: [target]),
+            service: service,
+            terminator: ProcessTerminator(
+                currentProcessID: 99,
+                signalSender: { pid, signal in
+                    sent.append((pid, signal))
+                    return 0
+                },
+                errnoProvider: { 0 }
+            )
+        )
+
+        viewModel.requestTermination(for: target)
+        await viewModel.confirmPendingTermination()
+
+        XCTAssertEqual(sampler.processCallCount, 2)
+        XCTAssertTrue(sent.isEmpty)
+        XCTAssertEqual(
+            viewModel.terminationMessage,
+            "Could not refresh the process list. No termination signal was sent."
+        )
+    }
+
+    func testTerminationValidationForcesFreshProcessSampling() async {
+        var sent: [(Int32, Int32)] = []
+        let target = ProcessMetric(
+            pid: 500,
+            name: "Figma",
+            cpuPercent: 10,
+            memoryBytes: 100,
+            path: "/Applications/Figma.app/Contents/MacOS/Figma",
+            bundleIdentifier: "com.figma.Desktop"
+        )
+        let sampler = SnapshotSampler(processes: [target])
+        let service = SystemMetricsService(
+            sampler: sampler,
+            evaluator: HealthEvaluator(debounceSamples: 1)
+        )
+        let viewModel = DashboardViewModel(
+            snapshot: snapshot(processes: [target]),
+            service: service,
+            terminator: ProcessTerminator(
+                currentProcessID: 99,
+                signalSender: { pid, signal in
+                    sent.append((pid, signal))
+                    return 0
+                },
+                errnoProvider: { 0 }
+            )
+        )
+
+        viewModel.requestTermination(for: target)
+        _ = await service.refresh(reason: .scheduled(baseInterval: 10))
+        await viewModel.confirmPendingTermination()
+
+        XCTAssertEqual(sampler.processCallCount, 2)
+        XCTAssertEqual(sent.map(\.0), [500])
+        XCTAssertEqual(sent.map(\.1), [SIGTERM])
+    }
+
+    func testRefreshNowUsesSelectedRefreshInterval() async {
+        let target = ProcessMetric(
+            pid: 500,
+            name: "Figma",
+            cpuPercent: 10,
+            memoryBytes: 100,
+            path: "/Applications/Figma.app/Contents/MacOS/Figma",
+            bundleIdentifier: "com.figma.Desktop"
+        )
+        let sampler = SnapshotSampler(processes: [target])
+        let service = SystemMetricsService(
+            sampler: sampler,
+            evaluator: HealthEvaluator(debounceSamples: 1)
+        )
+        _ = await service.refresh(
+            now: Date().addingTimeInterval(-3),
+            reason: .scheduled(baseInterval: 10)
+        )
+        let viewModel = DashboardViewModel(
+            snapshot: snapshot(processes: [target]),
+            service: service
+        )
+        viewModel.refreshInterval = .tenSeconds
+
+        await viewModel.refreshNow()
+
+        XCTAssertEqual(sampler.processCallCount, 1)
+    }
+
     func testConfirmPendingTerminationCanUseCapturedTargetAfterPendingStateClears() async {
         var sent: [(Int32, Int32)] = []
         let viewModel = DashboardViewModel(
@@ -569,11 +677,13 @@ final class DashboardViewModelTests: XCTestCase {
     }
 }
 
+@MainActor
 private final class SnapshotSampler: SystemSampler {
-    let processes: [ProcessMetric]
+    var processResult: [ProcessMetric]?
+    private(set) var processCallCount = 0
 
-    init(processes: [ProcessMetric]) {
-        self.processes = processes
+    init(processes: [ProcessMetric]?) {
+        processResult = processes
     }
 
     func sampleCPU() async -> CPUSnapshot? { nil }
@@ -582,7 +692,10 @@ private final class SnapshotSampler: SystemSampler {
     func sampleNetwork() async -> NetworkSnapshot? { nil }
     func sampleBattery() async -> BatterySnapshot? { nil }
     func sampleDiskSpaceCandidates() async -> [DiskSpaceCandidate] { [] }
-    func sampleProcesses() async -> [ProcessMetric]? { processes }
+    func sampleProcesses() async -> [ProcessMetric]? {
+        processCallCount += 1
+        return processResult
+    }
 }
 
 private final class RecordingApplicationTerminator: ApplicationTerminating {

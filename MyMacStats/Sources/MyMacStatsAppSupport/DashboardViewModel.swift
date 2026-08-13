@@ -330,9 +330,21 @@ public final class DashboardViewModel: ObservableObject {
         let targetDescription = pendingTerminationTargetDescription(process: process, group: group)
         let targetGroupID = group?.id ?? terminationGroup(for: process)?.id
 
-        let latestSnapshot = await service.refresh()
+        let latestSnapshot = await service.refresh(
+            reason: .terminationValidation(baseInterval: refreshInterval.seconds)
+        )
         snapshot = latestSnapshot
         await healthAlertController.observe(snapshot: latestSnapshot)
+
+        guard latestSnapshot.processesAreFresh else {
+            terminationMessage = "Could not refresh the process list. No termination signal was sent."
+            terminationMessageProcessID = process.pid
+            forceQuitCandidateGroupID = nil
+            pendingTerminationProcess = nil
+            pendingTerminationGroup = nil
+            pendingTerminationMode = .quit
+            return
+        }
 
         let targetValidation = validatedTerminationTargets(
             originalTargets,
@@ -450,8 +462,12 @@ public final class DashboardViewModel: ObservableObject {
     }
 
     public func refreshNow() async {
-        snapshot = await service.refresh()
-        await healthAlertController.observe(snapshot: snapshot)
+        let refreshed = await service.refresh(
+            reason: .scheduled(baseInterval: refreshInterval.seconds)
+        )
+        guard !Task.isCancelled else { return }
+        snapshot = refreshed
+        await healthAlertController.observe(snapshot: refreshed)
     }
 
     public func start() {
@@ -461,7 +477,13 @@ public final class DashboardViewModel: ObservableObject {
                 guard let self else { return }
                 await self.refreshNow()
                 let interval = self.refreshInterval.seconds
-                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                do {
+                    try await Task.sleep(for: .seconds(interval))
+                } catch is CancellationError {
+                    return
+                } catch {
+                    return
+                }
             }
         }
     }
