@@ -296,6 +296,36 @@ final class SystemMetricsServiceTests: XCTestCase {
         XCTAssertEqual(sampler.diskCallCount, 3)
     }
 
+    func testSkippedDiskFailureDoesNotCountAndFirstDueFailureIsStale() async {
+        let start = Date(timeIntervalSince1970: 5_000)
+        let sampler = recordingSampler(at: start)
+        let service = SystemMetricsService(
+            sampler: sampler,
+            evaluator: HealthEvaluator(debounceSamples: 1)
+        )
+
+        let initial = await service.refresh(now: start, reason: .scheduled(baseInterval: 1))
+        sampler.diskResult = nil
+
+        let skipped = await service.refresh(
+            now: start.addingTimeInterval(1),
+            reason: .scheduled(baseInterval: 1)
+        )
+        XCTAssertEqual(skipped.disk?.freeBytes, 50)
+        XCTAssertEqual(skipped.summary(for: .disk), initial.summary(for: .disk))
+        XCTAssertEqual(skipped.summary(for: .disk)?.health, .normal)
+
+        let stale = await service.refresh(
+            now: start.addingTimeInterval(10),
+            reason: .scheduled(baseInterval: 1)
+        )
+        XCTAssertEqual(stale.disk?.freeBytes, 50)
+        XCTAssertEqual(stale.summary(for: .disk)?.health, .warning)
+        XCTAssertTrue(stale.summary(for: .disk)?.detailText?.contains("Using last sample") == true)
+        XCTAssertEqual(stale.summary(for: .disk)?.updatedAt, start)
+        XCTAssertEqual(sampler.diskCallCount, 2)
+    }
+
     private func recordingSampler(at now: Date) -> RecordingSystemSampler {
         RecordingSystemSampler(
             cpu: cpuSnapshot(usage: 40, at: now),
