@@ -117,6 +117,7 @@ After a screenshot is captured, the editor toolbar can annotate, OCR, and redact
 - Screenshot annotation tools: pen, highlighter, arrow, rectangle, ellipse, text, solid redaction, OCR, undo/redo, copy, save, delete
 - Quick Redact for detected sensitive text
 - Recording preview, trim-copy export, and GIF export; a blank trim end uses the media's actual duration, while invalid or reversed times are rejected with an explanation
+- Recovery of completed but unsaved recordings after an unexpected app exit; recovered files reopen as unsaved and still require Save or Delete
 - Capture history with thumbnails, search, open, per-item delete, and Clear History that keeps capture files
 - Floating pinned screenshot preview
 - Presets for quickly switching common workflows
@@ -127,6 +128,7 @@ After a screenshot is captured, the editor toolbar can annotate, OCR, and redact
 - macOS screen recording permission is tied to the installed app bundle and code signature. If permission prompts keep appearing after reinstalling, remove the old `CaptureStudio` entry from System Settings and add `/Applications/CaptureStudio.app` again.
 - Starting a new capture or opening a history item while the current screenshot or recording has unsaved changes asks whether to Save, Discard Changes, or Cancel.
 - Quitting with unsaved work asks whether to Save, Discard Changes, or Cancel. CaptureStudio also refuses to quit while a capture, recording, export, or file operation is still active.
+- Manual recordings are held in a private app-owned recovery folder until saved or discarded. After an unexpected exit, the newest completed recording reopens as unsaved on the next launch.
 - If a configured output folder is missing or not writable, CaptureStudio does not silently fall back to Desktop. The new result stays open as unsaved so you can choose another folder and save it.
 - Quick Redact adds editable redaction layers. It does not alter an already saved original or the current clipboard; use Save or Copy to create the redacted version.
 - Integration tests that touch live screen capture require macOS permissions and are run with `CAPTURE_STUDIO_RUN_INTEGRATION=1`.

@@ -5,7 +5,7 @@ import MyMacCleanCore
 @MainActor
 @Observable
 public final class StartupItemsViewModel {
-    private let scanner: StartupItemScanner
+    private let startupItemScanning: StartupItemScanning
     private let controller: StartupItemController
     private let receiptStore: DeletionReceiptStore
 
@@ -20,14 +20,16 @@ public final class StartupItemsViewModel {
     public var isApplyingChange = false
     public var hasScanned = false
     public var errorMessage: String?
+    public var scanIssues: [ScanIssue] = []
     public var statusMessage: String?
 
     public init(
         scanner: StartupItemScanner = StartupItemScanner(),
         controller: StartupItemController = StartupItemController(),
-        receiptStore: DeletionReceiptStore = .default()
+        receiptStore: DeletionReceiptStore = .default(),
+        startupItemScanning: StartupItemScanning? = nil
     ) {
-        self.scanner = scanner
+        self.startupItemScanning = startupItemScanning ?? .live(scanner: scanner)
         self.controller = controller
         self.receiptStore = receiptStore
     }
@@ -53,19 +55,14 @@ public final class StartupItemsViewModel {
         guard !isScanning else { return }
         isScanning = true
         defer { isScanning = false }
-        do {
-            items = try await scanner.scan()
-            hasScanned = true
-            errorMessage = nil
-            statusMessage = nil
-            reconcileSelection()
-        } catch {
-            hasScanned = true
-            errorMessage = error.localizedDescription
-            statusMessage = nil
-            items = []
-            selectedItemID = nil
-        }
+        scanIssues = []
+        let result = await startupItemScanning.scan()
+        items = result.value
+        scanIssues = result.issues
+        hasScanned = true
+        errorMessage = nil
+        statusMessage = nil
+        reconcileSelection()
     }
 
     public func selectItem(id: StartupItem.ID?) {
@@ -100,7 +97,9 @@ public final class StartupItemsViewModel {
         do {
             let sourceURL = item.plistURL
             let movedURL = try operation()
-            items = try await scanner.scan()
+            let result = await startupItemScanning.scan()
+            items = result.value
+            scanIssues = result.issues
             selectedItemID = items.first { $0.plistURL == movedURL }?.id ?? items.first?.id
             errorMessage = nil
             let receipt = receipt(for: item, action: action, sourceURL: sourceURL)

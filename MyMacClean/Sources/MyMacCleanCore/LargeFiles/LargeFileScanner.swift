@@ -16,31 +16,52 @@ public struct LargeFileScanner: Sendable {
     }
 
     public func scan() async throws -> [LargeFileCandidate] {
+        await scanWithCoverage().value
+    }
+
+    public func scanWithCoverage() async -> ScanResult<[LargeFileCandidate]> {
+        await Task.detached(priority: .userInitiated) {
+            scanSynchronouslyWithCoverage()
+        }.value
+    }
+
+    private func scanSynchronouslyWithCoverage() -> ScanResult<[LargeFileCandidate]> {
         var candidates: [LargeFileCandidate] = []
+        var issues: [ScanIssue] = []
         for root in roots {
             guard !isSystemRoot(root) else { continue }
             guard FileManager.default.fileExists(atPath: root.path) else { continue }
-            candidates.append(contentsOf: try scan(root: root))
+            let result = scan(root: root)
+            candidates.append(contentsOf: result.value)
+            issues.append(contentsOf: result.issues)
         }
-        return candidates.sorted {
+        let sortedCandidates = candidates.sorted {
             if $0.size == $1.size {
                 return $0.url.path.localizedStandardCompare($1.url.path) == .orderedAscending
             }
             return $0.size > $1.size
         }
+        return ScanResult(value: sortedCandidates, issues: issues.deduplicatedAndSorted())
     }
 
-    private func scan(root: URL) throws -> [LargeFileCandidate] {
+    private func scan(root: URL) -> ScanResult<[LargeFileCandidate]> {
         var results: [LargeFileCandidate] = []
+        var issues: [ScanIssue] = []
         let displayRoot = root
         let resolvedRoot = root.resolvingSymlinksInPath().standardizedFileURL
         guard let enumerator = FileManager.default.enumerator(
             at: root,
             includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey, .isPackageKey, .contentModificationDateKey, .fileSizeKey],
             options: [.skipsHiddenFiles],
-            errorHandler: { _, _ in true }
+            errorHandler: { url, error in
+                issues.append(ScanIssue.from(path: url, error: error))
+                return true
+            }
         ) else {
-            return []
+            return ScanResult(
+                value: [],
+                issues: [ScanIssue.from(path: root, error: CocoaError(.fileReadUnknown))]
+            )
         }
 
         for case let url as URL in enumerator {
@@ -54,17 +75,23 @@ public struct LargeFileScanner: Sendable {
                 continue
             }
 
-            let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey, .fileSizeKey])
-            guard values?.isRegularFile == true else { continue }
+            let values: URLResourceValues
+            do {
+                values = try url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey, .fileSizeKey])
+            } catch {
+                issues.append(ScanIssue.from(path: url, error: error))
+                continue
+            }
+            guard values.isRegularFile == true else { continue }
 
-            let size = Int64(values?.fileSize ?? 0)
+            let size = Int64(values.fileSize ?? 0)
             guard size >= minimumSize else { continue }
 
             results.append(
                 LargeFileCandidate(
                     url: displayURL(for: url, displayRoot: displayRoot, resolvedRoot: resolvedRoot),
                     size: size,
-                    modifiedAt: values?.contentModificationDate,
+                    modifiedAt: values.contentModificationDate,
                     kind: LargeFileKind.infer(from: url),
                     rootURL: displayRoot,
                     defaultSelected: false
@@ -72,7 +99,7 @@ public struct LargeFileScanner: Sendable {
             )
         }
 
-        return results
+        return ScanResult(value: results, issues: issues.deduplicatedAndSorted())
     }
 
     private func shouldSkipDirectory(_ url: URL) -> Bool {

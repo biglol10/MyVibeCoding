@@ -282,11 +282,12 @@
 - 회귀 테스트: 손상 원본 보존, load/save/remove 오류, stale refresh 성공/실패/미시작, 시작 시 갱신 저장 실패, 새 grant 저장 실패, grant 삭제 실패, Reset 복구를 검증했다.
 - 실제 확인: 별도 QA bundle ID의 UserDefaults에 손상된 9-byte 데이터를 주입했다. release 앱은 crash 없이 경고를 표시했고 Settings > Privacy & Access에 복구 안내와 Reset이 노출됐다. 앱 시작과 설정 진입 뒤에도 원본 bytes가 유지됐고, 명시적으로 Reset을 누른 뒤에만 키와 경고가 제거됐다. QA 앱, 설정 domain, 임시 bundle은 모두 정리했다.
 
-## 남은 위험 우선순위
+## 후속 상태와 남은 위험 우선순위
 
-1. **Normal**: Quick Look용 ZIP 임시 추출물의 소비 완료/앱 종료 cleanup 정책이 없다.
-2. **검증 공백**: 실제 다중 항목 Trash 취소 rollback, 실제 network volume, sandbox grant, 마우스 drag/drop은 자동 또는 simulated 검증만 수행했다.
-3. **제품 범위**: Redo, Spotlight 검색, Group By UI, SMB/NFS 연결 UI, ZIP 내부 직접 쓰기, 공개 배포 서명/공증은 아직 제공하지 않는다.
+Quick Look용 ZIP 임시 추출물의 소비 완료/앱 종료 cleanup 부재는 2026-08-08 구현과 검증에서 해소됐다. session-owned artifact, durable retry, 외부 앱 open retention, startup expiry cleanup의 최신 근거는 `docs/qa/2026-08-08-archive-preview-lifecycle-verification.md`를 따른다.
+
+1. **검증 공백**: 실제 다중 항목 Trash 취소 rollback, 실제 network volume, sandbox grant, 마우스 drag/drop은 자동 또는 simulated 검증만 수행했다.
+2. **제품 범위**: Redo, Spotlight 검색, Group By UI, SMB/NFS 연결 UI, ZIP 내부 직접 쓰기, 공개 배포 서명/공증은 아직 제공하지 않는다.
 
 ## 최종 검증 결과
 

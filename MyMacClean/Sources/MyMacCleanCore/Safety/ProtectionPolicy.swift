@@ -5,7 +5,6 @@ public struct ProtectionPolicy: Sendable {
     private let allowedUserLibraryAppDataRoots: [URL]
     private let allowedTemporaryRoots: [URL]
     private let protectedUserRoots: [URL]
-    private let protectedRoots: [URL]
     private let additionalProtectedRoots: [URL]
 
     public init(
@@ -41,14 +40,6 @@ public struct ProtectionPolicy: Sendable {
             homeDirectory.appendingPathComponent("Music", isDirectory: true),
             homeDirectory.appendingPathComponent("Library/Mobile Documents", isDirectory: true)
         ]
-        self.protectedRoots = protectedUserRoots + [
-            URL(fileURLWithPath: "/System", isDirectory: true),
-            URL(fileURLWithPath: "/bin", isDirectory: true),
-            URL(fileURLWithPath: "/sbin", isDirectory: true),
-            URL(fileURLWithPath: "/usr", isDirectory: true),
-            URL(fileURLWithPath: "/private", isDirectory: true),
-            URL(fileURLWithPath: "/var", isDirectory: true)
-        ]
     }
 
     public func isProtected(_ url: URL) -> Bool {
@@ -59,25 +50,31 @@ public struct ProtectionPolicy: Sendable {
             return true
         }
         if isAllowedUserDataPath(url) {
-            return isLexicallyAllowedButResolvesOutsideAllowedRoots(url) && isProtectedByDeclaredRoots(url)
+            return false
         }
-        return isProtectedByDeclaredRoots(url)
+        if isAllowedApplicationBundle(url) {
+            return false
+        }
+        return true
     }
 
     private func isAllowedUserDataPath(_ url: URL) -> Bool {
         allowedRoots.contains {
-            PathUtilities.isDescendant(url, of: $0) || PathUtilities.isDescendantResolvingSymlinks(url, of: $0)
+            let resolvedRoot = $0.resolvingSymlinksInPath().standardizedFileURL
+            let isLexicallyInside = PathUtilities.isDescendant(url, of: $0)
+                || PathUtilities.isDescendant(url, of: resolvedRoot)
+            return isLexicallyInside && PathUtilities.isDescendantResolvingSymlinks(url, of: $0)
         }
     }
 
-    private func isLexicallyAllowedButResolvesOutsideAllowedRoots(_ url: URL) -> Bool {
-        allowedRoots.contains { PathUtilities.isDescendant(url, of: $0) }
-            && !allowedRoots.contains { PathUtilities.isDescendantResolvingSymlinks(url, of: $0) }
-    }
-
-    private func isProtectedByDeclaredRoots(_ url: URL) -> Bool {
-        protectedRoots.contains {
-            PathUtilities.isDescendant(url, of: $0) || PathUtilities.isDescendantResolvingSymlinks(url, of: $0)
+    private func isAllowedApplicationBundle(_ url: URL) -> Bool {
+        guard url.pathExtension.lowercased() == "app" else { return false }
+        let systemApplications = URL(fileURLWithPath: "/Applications", isDirectory: true)
+        return ([systemApplications] + allowedUserApplicationRoots).contains { root in
+            let resolvedRoot = root.resolvingSymlinksInPath().standardizedFileURL
+            let isLexicallyInside = PathUtilities.isDescendant(url, of: root)
+                || PathUtilities.isDescendant(url, of: resolvedRoot)
+            return isLexicallyInside && PathUtilities.isDescendantResolvingSymlinks(url, of: root)
         }
     }
 

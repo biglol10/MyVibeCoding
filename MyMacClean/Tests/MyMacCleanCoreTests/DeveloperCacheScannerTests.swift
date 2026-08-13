@@ -74,6 +74,28 @@ final class DeveloperCacheScannerTests: XCTestCase {
         XCTAssertFalse(results.first?.defaultSelected ?? true)
     }
 
+    func testScanWithCoverageReportsSizeFailureAndKeepsValidTargets() async throws {
+        let home = try TestFixtures.temporaryDirectory(named: "developer-cache-coverage")
+        let derivedData = home.appendingPathComponent("Library/Developer/Xcode/DerivedData", isDirectory: true)
+        let npm = home.appendingPathComponent(".npm", isDirectory: true)
+        try writePayload(in: derivedData, name: "build.bin", size: 12)
+        try writePayload(in: npm, name: "cache.bin", size: 13)
+        let calculator = FileSizeCalculator(sizeProvider: { url, _ in
+            if url == npm {
+                throw CocoaError(.fileReadNoPermission)
+            }
+            return 12
+        })
+
+        let result = await DeveloperCacheScanner(
+            homeDirectory: home,
+            sizeCalculator: calculator
+        ).scanWithCoverage()
+
+        XCTAssertEqual(result.value.map(\.tool), [.xcodeDerivedData])
+        XCTAssertTrue(result.issues.contains { $0.path == npm.path && $0.permissionRelated })
+    }
+
     private func writePayload(in directory: URL, name: String, size: Int) throws {
         let url = directory.appendingPathComponent(name)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

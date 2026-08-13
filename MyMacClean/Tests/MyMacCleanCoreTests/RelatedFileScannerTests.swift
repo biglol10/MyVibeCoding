@@ -2,7 +2,7 @@ import XCTest
 @testable import MyMacCleanCore
 
 final class RelatedFileScannerTests: XCTestCase {
-    func testScansKnownLibraryLocationsAndMarksProtectedMatches() async throws {
+    func testScansKnownLibraryLocationsAndExcludesUnrelatedUserDocuments() async throws {
         let home = try TestFixtures.temporaryDirectory(named: "scanner-home")
         let app = InstalledApp(
             displayName: "Figma",
@@ -32,7 +32,7 @@ final class RelatedFileScannerTests: XCTestCase {
 
         XCTAssertTrue(candidates.contains { $0.url == support && $0.kind == .applicationSupport && !$0.isProtected }, summary)
         XCTAssertTrue(candidates.contains { $0.url == cache && $0.kind == .cache && !$0.isProtected }, summary)
-        XCTAssertTrue(candidates.contains { $0.url == document && $0.isProtected }, summary)
+        XCTAssertFalse(candidates.contains { $0.url == document }, summary)
     }
 
     func testScansNestedMacOSSupportLocations() async throws {
@@ -47,7 +47,10 @@ final class RelatedFileScannerTests: XCTestCase {
             bundleSize: 10,
             lastOpenedAt: nil
         )
-        let nestedSupportCache = home.appendingPathComponent("Library/Application Support/Caches/cursor-updater", isDirectory: true)
+        let nestedSupportCache = home.appendingPathComponent(
+            "Library/Application Support/Caches/com.todesktop.230313mzl4w4u92.updater",
+            isDirectory: true
+        )
         let byHostPreference = home.appendingPathComponent("Library/Preferences/ByHost/com.todesktop.230313mzl4w4u92.ShipIt.HOST.plist")
         try FileManager.default.createDirectory(at: nestedSupportCache, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: byHostPreference.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -100,11 +103,9 @@ final class RelatedFileScannerTests: XCTestCase {
             lastOpenedAt: nil
         )
         let cache = home.appendingPathComponent("Library/Caches/com.figma.Desktop", isDirectory: true)
-        let unreadableRoot = home.appendingPathComponent("Unreadable", isDirectory: true)
+        let unreadableRoot = home.appendingPathComponent("NotADirectory")
         try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: unreadableRoot, withIntermediateDirectories: true)
-        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: unreadableRoot.path)
-        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: unreadableRoot.path) }
+        try Data("not a directory".utf8).write(to: unreadableRoot)
 
         let candidates = try await RelatedFileScanner(
             homeDirectory: home,
@@ -112,5 +113,33 @@ final class RelatedFileScannerTests: XCTestCase {
         ).scanRelatedFiles(for: app)
 
         XCTAssertTrue(candidates.contains { $0.url == cache })
+    }
+
+    func testReportsUnreadableScanRootWithoutDroppingOtherCandidates() async throws {
+        let home = try TestFixtures.temporaryDirectory(named: "scanner-coverage-home")
+        let app = InstalledApp(
+            displayName: "Figma",
+            bundleIdentifier: "com.figma.Desktop",
+            version: nil,
+            executableName: "Figma",
+            bundleURL: home.appendingPathComponent("Applications/Figma.app"),
+            iconIdentifier: nil,
+            bundleSize: 10,
+            lastOpenedAt: nil
+        )
+        let cache = home.appendingPathComponent("Library/Caches/com.figma.Desktop", isDirectory: true)
+        let unreadableRoot = home.appendingPathComponent("Unreadable", isDirectory: true)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: unreadableRoot, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: unreadableRoot.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: unreadableRoot.path) }
+
+        let scanner = RelatedFileScanner(homeDirectory: home, extraScanRoots: [unreadableRoot])
+        let result = await scanner.scanRelatedFilesWithCoverage(for: app)
+        let compatibilityCandidates = try await scanner.scanRelatedFiles(for: app)
+
+        XCTAssertTrue(result.value.contains { $0.url == cache })
+        XCTAssertTrue(result.issues.contains { $0.path == unreadableRoot.path })
+        XCTAssertEqual(compatibilityCandidates.map(\.url), result.value.map(\.url))
     }
 }

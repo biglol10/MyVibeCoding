@@ -41,6 +41,105 @@ final class ActivitySessionAccumulatorTests: XCTestCase {
         XCTAssertEqual(records[0].durationSeconds, 10)
     }
 
+    func testSplitsSameWindowAfterLongObservationGapWithoutCountingGap() {
+        var ids = ["s1", "s2"]
+        let accumulator = ActivitySessionAccumulator(
+            maximumMergeGap: 15,
+            idProvider: { ids.removeFirst() }
+        )
+        let start = Date(timeIntervalSince1970: 100)
+
+        _ = accumulator.observe(sample(at: start, app: "Codex", title: "Project"))
+        let records = accumulator.observe(
+            sample(at: start.addingTimeInterval(16), app: "Codex", title: "Project")
+        )
+
+        XCTAssertEqual(records.map(\.id), ["s1", "s2"])
+        XCTAssertEqual(records[0].durationSeconds, 1)
+        XCTAssertEqual(records[1].durationSeconds, 1)
+    }
+
+    func testConfiguredGapAboveCeilingStillSplitsAtSixteenSeconds() {
+        var ids = ["s1", "s2"]
+        let accumulator = ActivitySessionAccumulator(
+            maximumMergeGap: 30,
+            idProvider: { ids.removeFirst() }
+        )
+        let start = Date(timeIntervalSince1970: 100)
+
+        _ = accumulator.observe(sample(at: start, app: "Codex", title: "Project"))
+        let records = accumulator.observe(
+            sample(at: start.addingTimeInterval(16), app: "Codex", title: "Project")
+        )
+
+        XCTAssertEqual(records.map(\.id), ["s1", "s2"])
+        XCTAssertEqual(records.map(\.durationSeconds), [1, 1])
+    }
+
+    func testNegativeConfiguredGapDoesNotMergePositiveObservationGap() {
+        var ids = ["s1", "s2"]
+        let accumulator = ActivitySessionAccumulator(
+            maximumMergeGap: -1,
+            idProvider: { ids.removeFirst() }
+        )
+        let start = Date(timeIntervalSince1970: 100)
+
+        _ = accumulator.observe(sample(at: start, app: "Codex", title: "Project"))
+        let records = accumulator.observe(
+            sample(at: start.addingTimeInterval(1), app: "Codex", title: "Project")
+        )
+
+        XCTAssertEqual(records.map(\.id), ["s1", "s2"])
+        XCTAssertEqual(records.map(\.durationSeconds), [1, 1])
+    }
+
+    func testNegativeConfiguredGapNormalizesToZeroAndMergesSameTimestamp() {
+        var ids = ["s1"]
+        let accumulator = ActivitySessionAccumulator(
+            maximumMergeGap: -1,
+            idProvider: { ids.removeFirst() }
+        )
+        let start = Date(timeIntervalSince1970: 100)
+
+        _ = accumulator.observe(sample(at: start, app: "Codex", title: "Project"))
+        let records = accumulator.observe(sample(at: start, app: "Codex", title: "Project"))
+
+        XCTAssertEqual(records.map(\.id), ["s1"])
+        XCTAssertEqual(records[0].durationSeconds, 1)
+    }
+
+    func testSplitsWhenObservationClockMovesBackward() {
+        var ids = ["s1", "s2"]
+        let accumulator = ActivitySessionAccumulator(
+            maximumMergeGap: 15,
+            idProvider: { ids.removeFirst() }
+        )
+        let start = Date(timeIntervalSince1970: 100)
+
+        _ = accumulator.observe(sample(at: start, app: "Codex", title: "Project"))
+        let records = accumulator.observe(
+            sample(at: start.addingTimeInterval(-1), app: "Codex", title: "Project")
+        )
+
+        XCTAssertEqual(records.map(\.id), ["s1", "s2"])
+        XCTAssertEqual(records[0].durationSeconds, 1)
+    }
+
+    func testResetPreventsSameWindowFromResumingPreviousSession() {
+        var ids = ["s1", "s2"]
+        let accumulator = ActivitySessionAccumulator(idProvider: { ids.removeFirst() })
+        let start = Date(timeIntervalSince1970: 100)
+
+        _ = accumulator.observe(sample(at: start, app: "Codex", title: "Project"))
+        accumulator.reset()
+        let records = accumulator.observe(
+            sample(at: start.addingTimeInterval(5), app: "Codex", title: "Project")
+        )
+
+        XCTAssertEqual(records.map(\.id), ["s2"])
+        XCTAssertEqual(records[0].durationSeconds, 1)
+    }
+
     private func sample(at date: Date, app: String, title: String) -> ActivitySample {
         ActivitySample(
             observedAt: date,

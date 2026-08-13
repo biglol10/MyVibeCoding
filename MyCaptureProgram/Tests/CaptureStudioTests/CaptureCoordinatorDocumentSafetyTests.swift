@@ -127,6 +127,37 @@ final class CaptureCoordinatorDocumentSafetyTests: XCTestCase {
     }
 
     @MainActor
+    func testOpeningHistoryItemReauthorizesWhenDocumentChangesDuringFileRead() async throws {
+        let original = makeDirtyScreenshot()
+        let newerDocument = makeDirtyScreenshot()
+        let appState = AppState(currentDocument: original)
+        let authorizer = SafetyDocumentReplacementAuthorizer(decisions: [.discard, .cancel])
+        let loader = SafetySuspendingHistoryFileLoader()
+        let coordinator = makeCoordinator(
+            appState: appState,
+            selectionService: SafetySelectionService(),
+            authorizer: authorizer,
+            historyFileLoader: CaptureHistoryFileLoader { url in
+                try await loader.load(url)
+            }
+        )
+        let fixture = try makeHistoryFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+        let openTask = Task { @MainActor in
+            await coordinator.openHistoryItem(fixture.item)
+        }
+        await loader.waitUntilLoadingStarted()
+        appState.currentDocument = newerDocument
+        loader.finishLoading()
+        await openTask.value
+
+        XCTAssertEqual(authorizer.requestCount, 2)
+        XCTAssertEqual(appState.currentDocument, newerDocument)
+        XCTAssertEqual(appState.statusMessage, "History item was not opened. Current document was preserved.")
+    }
+
+    @MainActor
     func testOpeningHistoryItemDiscardReplacesDirtyDocument() async throws {
         let original = makeDirtyScreenshot()
         let appState = AppState(currentDocument: original)
@@ -246,6 +277,7 @@ final class CaptureCoordinatorDocumentSafetyTests: XCTestCase {
             recordingService: recordingService,
             selectionService: SafetySelectionService(),
             screenCapturePermissionChecker: SafetyPermissionChecker(),
+            pendingRecordingStore: makePendingRecordingStore(),
             documentReplacementAuthorizer: authorizer
         )
 
@@ -309,8 +341,11 @@ final class CaptureCoordinatorDocumentSafetyTests: XCTestCase {
 
     @MainActor
     func testTerminationDiscardRemovesOwnedUnsavedRecording() async throws {
-        let fileURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("termination-unsaved-\(UUID().uuidString).mp4")
+        let pendingDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CaptureCoordinatorDocumentSafetyTests-pending-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: pendingDirectory) }
+        let pendingRecordingStore = PendingRecordingStore(directoryURL: pendingDirectory)
+        let fileURL = try pendingRecordingStore.allocateRecordingURL()
         try Data("recording".utf8).write(to: fileURL)
         let document = EditorDocument(
             kind: .recording,
@@ -322,7 +357,8 @@ final class CaptureCoordinatorDocumentSafetyTests: XCTestCase {
         let coordinator = makeCoordinator(
             appState: appState,
             selectionService: SafetySelectionService(),
-            replacementDecision: .discard
+            replacementDecision: .discard,
+            pendingRecordingStore: pendingRecordingStore
         )
 
         let shouldTerminate = await coordinator.prepareForTermination()
@@ -402,7 +438,9 @@ final class CaptureCoordinatorDocumentSafetyTests: XCTestCase {
         appState: AppState,
         selectionService: SelectionServicing,
         replacementDecision: DocumentReplacementDecision = .discard,
-        authorizer: DocumentReplacementAuthorizing? = nil
+        authorizer: DocumentReplacementAuthorizing? = nil,
+        pendingRecordingStore: PendingRecordingStore? = nil,
+        historyFileLoader: CaptureHistoryFileLoader = CaptureHistoryFileLoader()
     ) -> CaptureCoordinator {
         CaptureCoordinator(
             appState: appState,
@@ -411,6 +449,8 @@ final class CaptureCoordinatorDocumentSafetyTests: XCTestCase {
             recordingService: SafetyRecordingService(),
             selectionService: selectionService,
             screenCapturePermissionChecker: SafetyPermissionChecker(),
+            pendingRecordingStore: pendingRecordingStore ?? makePendingRecordingStore(),
+            historyFileLoader: historyFileLoader,
             documentReplacementAuthorizer: authorizer
                 ?? SafetyDocumentReplacementAuthorizer(decision: replacementDecision)
         )
@@ -429,6 +469,16 @@ final class CaptureCoordinatorDocumentSafetyTests: XCTestCase {
             $0.countdownSeconds = 0
         }
         return store
+    }
+
+    @MainActor
+    private func makePendingRecordingStore() -> PendingRecordingStore {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CaptureCoordinatorDocumentSafetyTests-pending-\(UUID().uuidString)", isDirectory: true)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        return PendingRecordingStore(directoryURL: directory)
     }
 
     private func makeDirtyScreenshot() -> EditorDocument {
@@ -458,6 +508,47 @@ final class CaptureCoordinatorDocumentSafetyTests: XCTestCase {
                 fileIdentity: try CaptureFileIdentity.existingFile(at: historyURL)
             )
         )
+    }
+}
+
+private final class SafetySuspendingHistoryFileLoader: @unchecked Sendable {
+    private let lock = NSLock()
+    private var loadContinuation: CheckedContinuation<Void, Never>?
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var didStart = false
+
+    func load(_ url: URL) async throws -> Data {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            didStart = true
+            let waiters = startWaiters
+            startWaiters.removeAll()
+            loadContinuation = continuation
+            lock.unlock()
+            waiters.forEach { $0.resume() }
+        }
+        return try Data(contentsOf: url)
+    }
+
+    func waitUntilLoadingStarted() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if didStart {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                startWaiters.append(continuation)
+                lock.unlock()
+            }
+        }
+    }
+
+    func finishLoading() {
+        lock.lock()
+        let continuation = loadContinuation
+        loadContinuation = nil
+        lock.unlock()
+        continuation?.resume()
     }
 }
 

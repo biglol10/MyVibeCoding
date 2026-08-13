@@ -78,4 +78,20 @@ final class LargeFileScannerTests: XCTestCase {
 
         XCTAssertEqual(results.map(\.url), [largest, medium])
     }
+
+    func testScanWithCoverageReportsInvalidRootAndKeepsValidFiles() async throws {
+        let root = try TestFixtures.temporaryDirectory(named: "large-files-coverage")
+        let largeFile = root.appendingPathComponent("large.mov")
+        let invalidRoot = root.appendingPathComponent("NotADirectory")
+        try Data(repeating: 1, count: 2_000).write(to: largeFile)
+        try Data("not a directory".utf8).write(to: invalidRoot)
+
+        let result = await LargeFileScanner(
+            roots: [root, invalidRoot],
+            minimumSize: 1_000
+        ).scanWithCoverage()
+
+        XCTAssertEqual(result.value.map(\.url), [largeFile])
+        XCTAssertTrue(result.issues.contains { $0.path == invalidRoot.path })
+    }
 }

@@ -2,11 +2,12 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_DIR="$(cd "$ROOT_DIR/.." && pwd)"
 APP_DIR="$ROOT_DIR/.build/FlowPilotNative.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
-ICON_SOURCE="$ROOT_DIR/../src-tauri/icons/icon.icns"
+ICON_SOURCE="$REPO_DIR/src-tauri/icons/icon.icns"
 
 cd "$ROOT_DIR"
 swift build
@@ -29,10 +30,10 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
   <string>FlowPilotNative</string>
   <key>CFBundleIdentifier</key>
   <string>app.flowpilot.native</string>
-  <key>CFBundleIconFile</key>
-  <string>icon.icns</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
+  <key>CFBundleIconFile</key>
+  <string>icon</string>
   <key>CFBundleName</key>
   <string>FlowPilot</string>
   <key>CFBundlePackageType</key>

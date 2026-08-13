@@ -278,4 +278,57 @@ final class DeletionReportViewModelTests: XCTestCase {
         XCTAssertTrue(report.copyableReportText.contains("Changed: 1"))
         XCTAssertFalse(report.copyableReportText.contains("Deleted:"))
     }
+
+    func testSummarizesAppResetWithResetSpecificCopy() {
+        let report = DeletionReportViewModel(
+            receipt: DeletionReceipt(
+                appName: "Cursor",
+                bundleIdentifier: "com.example.cursor",
+                bundlePath: "/Applications/Cursor.app",
+                action: .appReset,
+                selectedCandidates: [],
+                executionResults: [
+                    DeletionItemResult(path: "/Users/me/Library/Caches/com.example.cursor", success: true, errorMessage: nil)
+                ],
+                verificationResults: [
+                    DeletionVerificationResult(path: "/Users/me/Library/Caches/com.example.cursor", status: .deleted, errorMessage: nil)
+                ],
+                confirmationMatched: true
+            )
+        )
+
+        XCTAssertEqual(report.statusTitle, "App data reset and verified")
+        XCTAssertEqual(report.completedCountTitle, "Reset")
+        XCTAssertEqual(report.summaryLine, "1 reset, 0 remaining")
+        XCTAssertTrue(report.copyableReportText.contains("MyMacClean App Data Reset Report"))
+        XCTAssertTrue(report.copyableReportText.contains("Reset: 1"))
+
+        let toast = DeletionToastPresentation(report: report)
+        XCTAssertEqual(toast.title, "App data reset succeeded")
+        XCTAssertEqual(toast.message, "1 reset, 0 remaining")
+    }
+
+    func testSummarizesFailedAppResetWithPathLevelErrors() {
+        let path = "/Users/me/Library/Caches/com.example.cursor"
+        let report = DeletionReportViewModel(
+            receipt: DeletionReceipt(
+                appName: "Cursor",
+                bundleIdentifier: "com.example.cursor",
+                bundlePath: "/Applications/Cursor.app",
+                action: .appReset,
+                selectedCandidates: [],
+                executionResults: [
+                    DeletionItemResult(path: path, success: false, errorMessage: "Operation not permitted")
+                ],
+                verificationResults: [
+                    DeletionVerificationResult(path: path, status: .stillExists, errorMessage: nil)
+                ],
+                confirmationMatched: true
+            )
+        )
+
+        XCTAssertEqual(report.statusTitle, "App data reset failed")
+        XCTAssertEqual(report.errorLogLines, ["\(path) - Operation not permitted"])
+        XCTAssertEqual(DeletionToastPresentation(report: report).title, "App data reset failed")
+    }
 }

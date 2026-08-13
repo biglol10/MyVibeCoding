@@ -41,16 +41,27 @@ public struct OrphanFileScanner: Sendable {
     }
 
     public func scan() async throws -> [OrphanFileGroup] {
+        await scanWithCoverage().value
+    }
+
+    public func scanWithCoverage() async -> ScanResult<[OrphanFileGroup]> {
         let installedIdentifiers = Set(installedApps.compactMap { $0.bundleIdentifier?.lowercased() })
             .union(excludedBundleIdentifiers)
         var groupedCandidates: [String: [RelatedFileCandidate]] = [:]
+        var issues: [ScanIssue] = []
 
         for (root, kind) in scanRoots() where FileManager.default.fileExists(atPath: root.path) {
-            let urls = (try? FileManager.default.contentsOfDirectory(
-                at: root,
-                includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey],
-                options: [.skipsHiddenFiles]
-            ).map { root.appendingPathComponent($0.lastPathComponent) }) ?? []
+            let urls: [URL]
+            do {
+                urls = try FileManager.default.contentsOfDirectory(
+                    at: root,
+                    includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey],
+                    options: [.skipsHiddenFiles]
+                ).map { root.appendingPathComponent($0.lastPathComponent) }
+            } catch {
+                issues.append(ScanIssue.from(path: root, error: error))
+                continue
+            }
 
             for url in urls {
                 guard let identifier = bundleIdentifierCandidate(from: url.lastPathComponent) else { continue }
@@ -71,10 +82,17 @@ public struct OrphanFileScanner: Sendable {
                     isKnownCleanupRoot: true
                 )
                 let allowsDefaultSelection = allowsDefaultSelection(for: kind)
+                let size: Int64
+                do {
+                    size = try sizeCalculator.sizeOfItem(at: url)
+                } catch {
+                    issues.append(ScanIssue.from(path: url, error: error))
+                    continue
+                }
                 let candidate = RelatedFileCandidate(
                     url: url,
                     kind: kind,
-                    size: (try? sizeCalculator.sizeOfItem(at: url)) ?? 0,
+                    size: size,
                     matchReason: "orphan bundle identifier match",
                     confidence: .high,
                     evidence: [evidence],
@@ -87,7 +105,7 @@ public struct OrphanFileScanner: Sendable {
             }
         }
 
-        return groupedCandidates
+        let groups = groupedCandidates
             .map { identifier, candidates in
                 OrphanFileGroup(
                     inferredName: identifier,
@@ -98,6 +116,7 @@ public struct OrphanFileScanner: Sendable {
             .sorted {
                 $0.inferredIdentifier.localizedCaseInsensitiveCompare($1.inferredIdentifier) == .orderedAscending
             }
+        return ScanResult(value: groups, issues: issues.deduplicatedAndSorted())
     }
 
     private func scanRoots() -> [(URL, RelatedFileKind)] {

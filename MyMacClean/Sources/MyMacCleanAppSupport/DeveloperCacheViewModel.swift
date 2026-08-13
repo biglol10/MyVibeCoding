@@ -12,6 +12,7 @@ public final class DeveloperCacheViewModel {
     private let verifier: DeletionVerifier
     private let receiptStore: DeletionReceiptStore
     private let runningApplicationMonitor: RunningApplicationMonitor
+    private let developerCacheScanning: DeveloperCacheScanning
 
     public var candidates: [DeveloperCacheCandidate] = []
     public var selectedCandidateIDs: Set<DeveloperCacheCandidate.ID> = []
@@ -21,6 +22,7 @@ public final class DeveloperCacheViewModel {
     public var isDeleting = false
     public var hasScanned = false
     public var errorMessage: String?
+    public var scanIssues: [ScanIssue] = []
     public var deletionReport: DeletionReportViewModel?
 
     public init(
@@ -30,7 +32,8 @@ public final class DeveloperCacheViewModel {
         executor: DeletionExecutor? = nil,
         verifier: DeletionVerifier = DeletionVerifier(),
         receiptStore: DeletionReceiptStore = .default(),
-        runningApplicationMonitor: RunningApplicationMonitor = RunningApplicationMonitor()
+        runningApplicationMonitor: RunningApplicationMonitor = RunningApplicationMonitor(),
+        developerCacheScanning: DeveloperCacheScanning? = nil
     ) {
         self.homeDirectory = homeDirectory
         self.dockerStorageURL = dockerStorageURL ?? Self.defaultDockerStorageURL(homeDirectory: homeDirectory)
@@ -41,6 +44,10 @@ public final class DeveloperCacheViewModel {
         self.verifier = verifier
         self.receiptStore = receiptStore
         self.runningApplicationMonitor = runningApplicationMonitor
+        self.developerCacheScanning = developerCacheScanning ?? .live(
+            homeDirectory: homeDirectory,
+            dockerStorageURL: self.dockerStorageURL
+        )
     }
 
     public static func defaultDockerStorageURL(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
@@ -96,18 +103,13 @@ public final class DeveloperCacheViewModel {
         candidates = []
         selectedCandidateIDs = []
         deletionReport = nil
-        do {
-            candidates = try await DeveloperCacheScanner(
-                homeDirectory: homeDirectory,
-                dockerStorageURL: dockerStorageURL
-            ).scan()
-            selectedCandidateIDs = Set(candidates.filter(\.defaultSelected).map(\.id))
-            hasScanned = true
-            errorMessage = nil
-        } catch {
-            hasScanned = true
-            errorMessage = error.localizedDescription
-        }
+        scanIssues = []
+        let result = await developerCacheScanning.scan()
+        candidates = result.value
+        scanIssues = result.issues
+        selectedCandidateIDs = Set(candidates.filter(\.defaultSelected).map(\.id))
+        hasScanned = true
+        errorMessage = nil
     }
 
     public func setCandidateSelection(_ id: DeveloperCacheCandidate.ID, isSelected: Bool) {

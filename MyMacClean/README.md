@@ -5,7 +5,8 @@ app. It is designed for review-first cleanup, not one-click system cleaning.
 
 The app focuses on five daily-use cleanup areas:
 
-- Applications: uninstall apps and selected related files.
+- Applications: uninstall apps and selected related files, or reset reviewed
+  app data while keeping the app installed.
 - Orphan Files: find leftovers from apps that are no longer installed.
 - Large Files: review large user files before moving anything to Trash.
 - Developer Cache: clean regenerable developer caches after manual review.
@@ -21,12 +22,18 @@ MyMacClean is intentionally conservative.
 - Applications and Orphan Files can use permanent deletion only as an explicit
   opt-in in the confirmation sheet.
 - Large Files and Developer Cache cleanup are Trash-only in the current app.
-- Confirmation uses `DELETE`.
+- Uninstall and cleanup confirmation uses `DELETE`. App data reset uses
+  `RESET` so the operation is distinct from uninstall.
 - Protected paths are checked again at execution time.
 - User documents, Desktop, Downloads, iCloud document roots, media folders,
   system paths, and the running MyMacClean app bundle are protected for
   app-related cleanup.
 - Symlink targets are resolved before deletion decisions.
+- Related-file matching requires bounded bundle identifiers or complete name
+  tokens. Similar identifiers and names embedded inside unrelated package
+  names are not treated as strong evidence.
+- Existing but unreadable scan locations are reported as `Scan incomplete`;
+  partial results are never presented as a complete empty scan.
 - Cleanup receipts are recorded for destructive attempts.
 - If Full Disk Access appears to be missing at launch, MyMacClean shows a
   permission prompt that opens System Settings directly to Full Disk Access.
@@ -47,6 +54,8 @@ MyMacClean is intentionally conservative.
 ### Applications
 
 - Discovers installed apps.
+- Discovers apps inside ordinary subfolders while skipping embedded helper apps
+  inside application packages.
 - Filters and sorts app list.
 - Scans the selected app bundle and related Library files.
 - Shows match evidence and safety level for each candidate.
@@ -55,6 +64,9 @@ MyMacClean is intentionally conservative.
 - Supports permanent deletion and force-delete options only after explicit
   confirmation.
 - Refreshes the app list and clears stale details after deletion.
+- Provides `Reset Data` mode for reviewed related files while preserving the
+  app bundle. Reset is Trash-only, has no force option, requires `RESET`, and
+  refreshes the inspector after verified cleanup.
 
 ### Orphan Files
 
@@ -73,12 +85,18 @@ MyMacClean is intentionally conservative.
 
 - Finds large files for manual review.
 - Scans top-level files in `~/Downloads` by default.
+- Lets the user choose one folder for the current app session. The choice is
+  deliberately not persisted across launches.
+- Offers `Include Subfolders`, off by default. Changing the folder or recursion
+  setting clears stale scan results before the next scan.
 - Uses a 500 MB minimum size threshold.
 - Does not auto-select results.
 - Excludes system roots and package internals.
 - Sorts results by size descending.
 - Supports reveal/copy-path and selected-file cleanup.
 - Moves selected large files to Trash only.
+- Rejects broad or system-owned scan roots, and rebuilds deletion protection
+  from the exact active folder.
 
 ### Developer Cache
 
@@ -222,7 +240,8 @@ Run the full test suite:
 swift test
 ```
 
-The package contains core tests for scanning, deletion planning, execution,
+The package contains core tests for bounded matching, nested app discovery,
+partial-scan reporting, deletion planning and execution, App Reset,
 verification, receipts, protection policy, startup item control, large files,
 developer cache, and app support view models.
 
@@ -249,4 +268,10 @@ docs/superpowers              Design and implementation notes
 - No system LaunchAgent or LaunchDaemon modification.
 - Startup item changes are reversible rename operations only and are recorded
   in Delete History as startup item changes.
-- Large Files currently scans top-level files in `~/Downloads` by default.
+- App Reset removes only explicitly selected related data; it does not reinstall
+  an app, sign out of vendor accounts stored elsewhere, or bypass macOS
+  permissions.
+- Large Files uses top-level `~/Downloads` as its default, but can scan one
+  user-selected folder per session with optional recursion.
+- Large Files rejects broad roots such as the home directory, `/Applications`,
+  `/Library`, and system locations.

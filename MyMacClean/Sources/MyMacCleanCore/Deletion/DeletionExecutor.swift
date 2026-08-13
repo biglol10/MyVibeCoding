@@ -150,9 +150,10 @@ public struct DeletionExecutor: Sendable {
         plan: DeletionPlan,
         confirmation: String,
         force: Bool = false,
-        mode: DeletionMode = .moveToTrash
+        mode: DeletionMode = .moveToTrash,
+        requiredConfirmation: String = "DELETE"
     ) async -> [DeletionItemResult] {
-        guard confirmation == requiredConfirmationPhrase(for: plan.app) else {
+        guard confirmation == requiredConfirmation else {
             return plan.candidates.map {
                 DeletionItemResult(path: $0.url.path, success: false, errorMessage: DeletionExecutionErrorMessage.confirmationMismatch)
             }

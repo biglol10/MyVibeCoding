@@ -25,6 +25,10 @@ public struct RelatedFileScanner: Sendable {
     }
 
     public func scanRelatedFiles(for app: InstalledApp) async throws -> [RelatedFileCandidate] {
+        await scanRelatedFilesWithCoverage(for: app).value
+    }
+
+    public func scanRelatedFilesWithCoverage(for app: InstalledApp) async -> ScanResult<[RelatedFileCandidate]> {
         let appBundleEvidence = MatchEvidence(
             type: .selectedAppBundle,
             matchedValue: app.displayName,
@@ -52,10 +56,18 @@ public struct RelatedFileScanner: Sendable {
                 isProtected: appBundleProtected
             )
         ]
+        var issues: [ScanIssue] = []
 
         for (root, kind) in scanRoots() {
             guard FileManager.default.fileExists(atPath: root.path) else { continue }
-            let urls = try childURLs(in: root)
+            let urls: [URL]
+            switch childURLs(in: root) {
+            case .success(let children):
+                urls = children
+            case .failure(let error):
+                issues.append(ScanIssue.from(path: root, error: error))
+                continue
+            }
             for url in urls {
                 guard let match = matcher.match(url: url, app: app, kind: kind) else { continue }
                 let isProtected = protectionPolicy.isProtected(url)
@@ -82,9 +94,10 @@ public struct RelatedFileScanner: Sendable {
             }
         }
 
-        return Array(Set(candidates.map(\.url))).compactMap { url in
+        let uniqueCandidates = Array(Set(candidates.map(\.url))).compactMap { url in
             candidates.first { $0.url == url }
         }.sorted { $0.url.path < $1.url.path }
+        return ScanResult(value: uniqueCandidates, issues: issues.deduplicatedAndSorted())
     }
 
     private func scanRoots() -> [(URL, RelatedFileKind)] {
@@ -108,12 +121,14 @@ public struct RelatedFileScanner: Sendable {
             + extraScanRoots.map { ($0, .unknown) }
     }
 
-    private func childURLs(in root: URL) throws -> [URL] {
-        let contents = try? FileManager.default.contentsOfDirectory(
-            at: root,
-            includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey],
-            options: [.skipsHiddenFiles]
-        )
-        return contents?.map { root.appendingPathComponent($0.lastPathComponent) } ?? []
+    private func childURLs(in root: URL) -> Result<[URL], Error> {
+        Result {
+            let contents = try FileManager.default.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey],
+                options: [.skipsHiddenFiles]
+            )
+            return contents.map { root.appendingPathComponent($0.lastPathComponent) }
+        }
     }
 }

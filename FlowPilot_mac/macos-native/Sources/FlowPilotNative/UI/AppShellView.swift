@@ -56,13 +56,25 @@ struct AppShellView: View {
 
                 Spacer()
 
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(collector.pauseReason == nil && collector.isRunning ? .green : .gray)
-                        .frame(width: 8, height: 8)
-                    Text(collector.pauseReason == nil && collector.isRunning ? "Swift 수집 중" : "수집 일시중지")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(collector.isRunning && collector.pauseReason == nil && !collector.isManuallyPaused ? .green : .gray)
+                            .frame(width: 8, height: 8)
+                        Text(collector.statusText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+
+                    Button(collector.isManuallyPaused ? "수집 재개" : "수집 일시정지") {
+                        if collector.isManuallyPaused {
+                            collector.resumeCollection()
+                        } else {
+                            collector.pauseCollection()
+                        }
+                    }
+                    .buttonStyle(.borderless)
                 }
                 .padding(.top, 12)
             }

@@ -20,6 +20,15 @@ final class ProtectionPolicyTests: XCTestCase {
         XCTAssertFalse(policy.isProtected(URL(fileURLWithPath: "/Users/tester/Library/Application Support/Figma")))
     }
 
+    func testProtectsArbitraryUserPathsOutsideKnownCleanupRoots() {
+        let home = URL(fileURLWithPath: "/Users/tester", isDirectory: true)
+        let policy = ProtectionPolicy(homeDirectory: home)
+
+        XCTAssertTrue(policy.isProtected(home.appendingPathComponent("Projects/com.example.Editor")))
+        XCTAssertFalse(policy.isProtected(URL(fileURLWithPath: "/Applications/Editor.app", isDirectory: true)))
+        XCTAssertTrue(policy.isProtected(URL(fileURLWithPath: "/Applications/Editor Support", isDirectory: true)))
+    }
+
     func testAllowsUserApplicationsInsideHomeEvenWhenHomeLivesUnderPrivateVar() {
         let home = URL(fileURLWithPath: "/private/var/folders/tester-home", isDirectory: true)
         let policy = ProtectionPolicy(homeDirectory: home)

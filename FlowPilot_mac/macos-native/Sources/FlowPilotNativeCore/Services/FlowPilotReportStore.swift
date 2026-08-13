@@ -13,6 +13,7 @@ public final class FlowPilotReportStore: ObservableObject {
 
     private let databaseURL: URL
     private let fallback: SampleReportStore
+    private var hasLoadedDatabaseData = false
 
     public init(
         databaseURL: URL = FlowPilotReportStore.defaultDatabaseURL(),
@@ -36,7 +37,9 @@ public final class FlowPilotReportStore: ObservableObject {
 
     public func refresh(now: Date = Date()) {
         guard FileManager.default.fileExists(atPath: databaseURL.path) else {
-            applyFallback()
+            applyFallback(label: "샘플 데이터")
+            lastError = nil
+            hasLoadedDatabaseData = false
             return
         }
 
@@ -53,9 +56,14 @@ public final class FlowPilotReportStore: ObservableObject {
             uncategorizedItems = Self.uncategorizedItems(from: data)
             dataSourceLabel = "기존 FlowPilot 데이터"
             lastError = nil
+            hasLoadedDatabaseData = true
         } catch {
             lastError = error.localizedDescription
-            applyFallback()
+            if hasLoadedDatabaseData {
+                dataSourceLabel = "마지막 정상 데이터 (데이터베이스 오류)"
+            } else {
+                applyFallback(label: "샘플 데이터 (데이터베이스 오류)")
+            }
         }
     }
 
@@ -96,7 +104,7 @@ public final class FlowPilotReportStore: ObservableObject {
             .appendingPathComponent("time-manager.sqlite3")
     }
 
-    private func applyFallback() {
+    private func applyFallback(label: String) {
         summary = fallback.summary
         usageItems = fallback.usageItems
         timelineSessions = fallback.timelineSessions
@@ -107,7 +115,7 @@ public final class FlowPilotReportStore: ObservableObject {
         )
         rules = []
         uncategorizedItems = Self.uncategorizedItems(from: weeklyData)
-        dataSourceLabel = "샘플 데이터"
+        dataSourceLabel = label
     }
 
     private static func uncategorizedItems(from data: DashboardReportData) -> [UncategorizedItem] {

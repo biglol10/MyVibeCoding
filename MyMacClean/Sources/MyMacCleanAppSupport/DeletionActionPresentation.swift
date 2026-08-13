@@ -5,7 +5,7 @@ extension DeletionAction {
         switch self {
         case .startupItemDisable, .startupItemEnable:
             true
-        case .uninstall, .orphanCleanup, .largeFileCleanup, .developerCacheCleanup:
+        case .uninstall, .appReset, .orphanCleanup, .largeFileCleanup, .developerCacheCleanup:
             false
         }
     }

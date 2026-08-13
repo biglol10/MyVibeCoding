@@ -18,7 +18,7 @@ final class ExplorerSettingsStoreTests: XCTestCase {
         }
     }
 
-    func testDefaultsStoreSavesAndLoadsSettingsAcrossInstances() {
+    func testDefaultsStoreSavesAndLoadsSettingsAcrossInstances() throws {
         let key = "settings"
         let savedSettings = ExplorerSettings(
             paneMode: .dual,
@@ -28,19 +28,21 @@ final class ExplorerSettingsStoreTests: XCTestCase {
             previewByteLimit: .expanded
         )
 
-        UserDefaultsExplorerSettingsStore(defaults: defaults, key: key).save(savedSettings)
-        let loadedSettings = UserDefaultsExplorerSettingsStore(defaults: defaults, key: key).load()
+        try UserDefaultsExplorerSettingsStore(defaults: defaults, key: key).save(savedSettings)
+        let loadedSettings = try UserDefaultsExplorerSettingsStore(defaults: defaults, key: key).load()
 
         XCTAssertEqual(loadedSettings, savedSettings)
     }
 
-    func testDefaultsStoreFallsBackToDefaultsWhenDataIsCorrupt() {
+    func testDefaultsStoreThrowsAndPreservesStoredBytesWhenDataIsCorrupt() {
         let key = "settings"
-        defaults.set(Data("not json".utf8), forKey: key)
+        let corruptData = Data("not json".utf8)
+        defaults.set(corruptData, forKey: key)
 
-        let loadedSettings = UserDefaultsExplorerSettingsStore(defaults: defaults, key: key).load()
+        let store = UserDefaultsExplorerSettingsStore(defaults: defaults, key: key)
 
-        XCTAssertEqual(loadedSettings, ExplorerSettings())
+        XCTAssertThrowsError(try store.load())
+        XCTAssertEqual(defaults.data(forKey: key), corruptData)
     }
 
     func testDefaultsPreviewByteLimitWhenLoadingOlderSettings() throws {
@@ -59,9 +61,10 @@ final class ExplorerSettingsStoreTests: XCTestCase {
         """
         defaults.set(Data(oldSettingsJSON.utf8), forKey: key)
 
-        let loadedSettings = UserDefaultsExplorerSettingsStore(defaults: defaults, key: key).load()
+        let loadedSettings = try UserDefaultsExplorerSettingsStore(defaults: defaults, key: key).load()
 
         XCTAssertEqual(loadedSettings.previewByteLimit, .balanced)
         XCTAssertEqual(loadedSettings.previewMode, .smart)
+        XCTAssertTrue(loadedSettings.restorePreviousSession)
     }
 }

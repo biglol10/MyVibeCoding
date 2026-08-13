@@ -88,6 +88,9 @@ struct MainWindowView: View {
             )
         }
         .onAppear(perform: presentGuideOnLaunchIfNeeded)
+        .task(id: appState.currentDocument?.id) {
+            await captureCoordinator.recoverPendingRecordingIfAvailable()
+        }
     }
 
     private var permissionPromptBinding: Binding<PermissionPrompt?> {

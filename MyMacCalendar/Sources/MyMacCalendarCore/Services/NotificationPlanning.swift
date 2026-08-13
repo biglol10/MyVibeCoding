@@ -33,17 +33,20 @@ public struct NotificationPlanner {
         var result: [NotificationPlan] = []
 
         for event in events {
-            let offsets = Array(Set(event.notificationOffsetsDays.filter { $0 >= 0 })).sorted(by: >)
+            let expansionStart = calendar.startOfDay(for: now)
+            let offsets = Array(Set(event.notificationOffsetsDays.filter { offset in
+                offset >= 0 && expansionEnd(
+                    from: expansionStart,
+                    horizonDays: horizonDays,
+                    offsetDays: offset
+                ) != nil
+            })).sorted(by: >)
             guard offsets.isEmpty == false else { continue }
             let maximumOffset = offsets.max() ?? 0
-            let expansionStart = calendar.startOfDay(for: now)
-            let (horizonWithOffset, offsetOverflowed) = horizonDays.addingReportingOverflow(maximumOffset)
-            let (expansionDays, paddingOverflowed) = horizonWithOffset.addingReportingOverflow(1)
-            guard offsetOverflowed == false, paddingOverflowed == false else { continue }
-            guard let expansionEnd = calendar.date(
-                byAdding: .day,
-                value: expansionDays,
-                to: expansionStart
+            guard let expansionEnd = expansionEnd(
+                from: expansionStart,
+                horizonDays: horizonDays,
+                offsetDays: maximumOffset
             ) else {
                 continue
             }
@@ -122,5 +125,12 @@ public struct NotificationPlanner {
             .lowercased()
             .map { $0.isLetter || $0.isNumber || $0 == "-" ? $0 : "-" }
         return "event-\(eventID.uuidString.lowercased())-occurrence-\(occurrenceToken)-offset-\(offset)-batch-\(String(safeBatchID))"
+    }
+
+    private func expansionEnd(from start: Date, horizonDays: Int, offsetDays: Int) -> Date? {
+        let (horizonWithOffset, offsetOverflowed) = horizonDays.addingReportingOverflow(offsetDays)
+        let (expansionDays, paddingOverflowed) = horizonWithOffset.addingReportingOverflow(1)
+        guard offsetOverflowed == false, paddingOverflowed == false else { return nil }
+        return calendar.date(byAdding: .day, value: expansionDays, to: start)
     }
 }

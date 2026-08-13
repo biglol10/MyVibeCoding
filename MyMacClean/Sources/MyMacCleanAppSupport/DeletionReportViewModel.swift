@@ -35,6 +35,18 @@ public struct DeletionReportViewModel: Equatable, Sendable {
 
         let hasDeletedItems = receipt.verificationResults.contains { $0.status == .deleted }
         let hasRemainingItems = receipt.verificationResults.contains { $0.status == .stillExists || $0.status == .permissionDenied }
+        if receipt.action == .appReset {
+            if hasDeletedItems && hasRemainingItems {
+                return "App data reset with remaining items"
+            }
+            if receipt.executionResults.contains(where: { !$0.success }) {
+                return "App data reset failed"
+            }
+            if hasRemainingItems {
+                return "App data reset with remaining items"
+            }
+            return "App data reset and verified"
+        }
         if hasDeletedItems && hasRemainingItems {
             return "Deleted with remaining items"
         }
@@ -52,7 +64,10 @@ public struct DeletionReportViewModel: Equatable, Sendable {
     }
 
     public var completedCountTitle: String {
-        receipt.action.isStartupItemChange ? "Changed" : "Deleted"
+        if receipt.action.isStartupItemChange {
+            return "Changed"
+        }
+        return receipt.action == .appReset ? "Reset" : "Deleted"
     }
 
     public var completedCount: Int {
@@ -72,6 +87,9 @@ public struct DeletionReportViewModel: Equatable, Sendable {
     public var summaryLine: String {
         if receipt.action.isStartupItemChange {
             return "\(completedCount) changed, \(remainingCount) remaining"
+        }
+        if receipt.action == .appReset {
+            return "\(completedCount) reset, \(remainingCount) remaining"
         }
         return "\(completedCount) deleted, \(remainingCount) remaining"
     }
@@ -111,8 +129,17 @@ public struct DeletionReportViewModel: Equatable, Sendable {
     }
 
     public var copyableReportText: String {
+        let reportTitle: String
+        if receipt.action.isStartupItemChange {
+            reportTitle = "MyMacClean Startup Item Report"
+        } else if receipt.action == .appReset {
+            reportTitle = "MyMacClean App Data Reset Report"
+        } else {
+            reportTitle = "MyMacClean Deletion Report"
+        }
+
         var lines = [
-            receipt.action.isStartupItemChange ? "MyMacClean Startup Item Report" : "MyMacClean Deletion Report",
+            reportTitle,
             "App: \(receipt.appName)",
             "Bundle ID: \(receipt.bundleIdentifier ?? "Unknown")",
             "Action: \(receipt.action.rawValue)",

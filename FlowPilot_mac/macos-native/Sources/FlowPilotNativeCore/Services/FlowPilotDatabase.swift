@@ -59,8 +59,10 @@ public final class FlowPilotDatabase {
     public func saveSessions(_ sessions: [ActivitySessionRecord]) throws {
         try withConnection(flags: SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX) { db in
             try Self.initializeSchema(db: db)
-            for session in sessions {
-                try Self.saveSession(db: db, session: session)
+            try Self.withTransaction(db: db) {
+                for session in sessions {
+                    try Self.saveSession(db: db, session: session)
+                }
             }
         }
     }
@@ -75,11 +77,13 @@ public final class FlowPilotDatabase {
 
         try withConnection(flags: SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX) { db in
             try Self.initializeSchema(db: db)
-            let latestObservedAt = observations.map(\.observedAt).max() ?? Date()
-            let retentionCutoff = latestObservedAt.addingTimeInterval(-Self.windowObservationRetentionInterval)
-            try Self.pruneWindowObservations(db: db, before: retentionCutoff)
-            for observation in observations {
-                try Self.saveWindowObservation(db: db, sessionID: sessionID, observation: observation)
+            try Self.withTransaction(db: db) {
+                let latestObservedAt = observations.map(\.observedAt).max() ?? Date()
+                let retentionCutoff = latestObservedAt.addingTimeInterval(-Self.windowObservationRetentionInterval)
+                try Self.pruneWindowObservations(db: db, before: retentionCutoff)
+                for observation in observations {
+                    try Self.saveWindowObservation(db: db, sessionID: sessionID, observation: observation)
+                }
             }
         }
     }
@@ -136,6 +140,11 @@ public final class FlowPilotDatabase {
             throw FlowPilotDatabaseError.openFailed(message)
         }
         defer { sqlite3_close(db) }
+
+        let busyResult = sqlite3_busy_timeout(db, 2_000)
+        guard busyResult == SQLITE_OK else {
+            throw FlowPilotDatabaseError.openFailed(String(cString: sqlite3_errmsg(db)))
+        }
 
         return try body(db)
     }
@@ -205,6 +214,21 @@ public final class FlowPilotDatabase {
             CREATE INDEX IF NOT EXISTS idx_window_observations_observed_at ON window_observations(observed_at);
             CREATE INDEX IF NOT EXISTS idx_window_observations_session_id ON window_observations(session_id);
             """)
+    }
+
+    private static func withTransaction<T>(
+        db: OpaquePointer,
+        _ body: () throws -> T
+    ) throws -> T {
+        try execute(db: db, sql: "BEGIN IMMEDIATE")
+        do {
+            let value = try body()
+            try execute(db: db, sql: "COMMIT")
+            return value
+        } catch {
+            try? execute(db: db, sql: "ROLLBACK")
+            throw error
+        }
     }
 
     private static func saveSession(db: OpaquePointer, session: ActivitySessionRecord) throws {

@@ -2,6 +2,7 @@ import Foundation
 
 public enum DeletionAction: String, Codable, Equatable, Sendable {
     case uninstall
+    case appReset
     case orphanCleanup
     case largeFileCleanup
     case developerCacheCleanup
@@ -93,9 +94,9 @@ public struct DeletionReceiptStore: Sendable {
         data.append(0x0A)
         if FileManager.default.fileExists(atPath: fileURL.path) {
             let handle = try FileHandle(forWritingTo: fileURL)
+            defer { try? handle.close() }
             try handle.seekToEnd()
             try handle.write(contentsOf: data)
-            try handle.close()
         } else {
             try data.write(to: fileURL)
         }

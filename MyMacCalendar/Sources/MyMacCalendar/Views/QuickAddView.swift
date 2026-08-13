@@ -7,6 +7,7 @@ struct QuickAddView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var input = ""
     @State private var parsed: QuickAddResult?
+    @State private var pendingConfirmation: QuickAddResult?
     @State private var errorMessage: String?
 
     var body: some View {
@@ -69,13 +70,29 @@ struct QuickAddView: View {
             HStack {
                 Spacer()
                 Button("취소") { dismiss() }
-                Button("추가") { save() }
+                Button("추가") { submit() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(parsed == nil)
             }
             .padding(18)
         }
         .frame(width: 460)
+        .confirmationDialog(
+            "이 날짜로 추가할까요?",
+            isPresented: confirmationBinding,
+            titleVisibility: .visible
+        ) {
+            Button("오늘 일정으로 추가") {
+                guard let pendingConfirmation else { return }
+                self.pendingConfirmation = nil
+                save(pendingConfirmation)
+            }
+            Button("취소", role: .cancel) {
+                pendingConfirmation = nil
+            }
+        } message: {
+            Text("입력에서 날짜를 확정하지 못해 오늘 날짜로 미리보기를 만들었습니다.")
+        }
         .alert("저장할 수 없습니다", isPresented: errorBinding) {
             Button("확인", role: .cancel) {}
         } message: {
@@ -94,14 +111,36 @@ struct QuickAddView: View {
         )
     }
 
+    private var confirmationBinding: Binding<Bool> {
+        Binding(
+            get: { pendingConfirmation != nil },
+            set: { isPresented in
+                if isPresented == false {
+                    pendingConfirmation = nil
+                }
+            }
+        )
+    }
+
     private func parse() {
         parsed = QuickAddParser().parse(input)
     }
 
-    private func save() {
+    private func submit() {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return }
         let result = parsed ?? QuickAddParser().parse(trimmed)
+        switch QuickAddSubmissionPolicy().decision(for: result) {
+        case .unavailable:
+            return
+        case .save(let confirmed):
+            save(confirmed)
+        case .confirmFallback(let fallback):
+            pendingConfirmation = fallback
+        }
+    }
+
+    private func save(_ result: QuickAddResult) {
         modelContext.insert(CalendarEvent(title: result.title, startDate: result.startDate, endDate: result.endDate))
         do {
             try PersistenceTransaction.save(context: modelContext)

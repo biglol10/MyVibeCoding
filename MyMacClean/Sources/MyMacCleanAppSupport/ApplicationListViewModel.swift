@@ -37,10 +37,10 @@ public enum ApplicationListSort: String, CaseIterable, Identifiable, Sendable {
 @MainActor
 @Observable
 public final class ApplicationListViewModel {
-    private let discoveryService: AppDiscoveryService
+    private let applicationDiscovering: ApplicationDiscovering
     private let excludedBundleIdentifiers: Set<String>
     private let excludedBundleURLs: [URL]
-    private let scanner: RelatedFileScanner
+    private let relatedFileScanning: RelatedFileScanning
     private let planner: DeletionPlanner
     private let executor: DeletionExecutor
     private let verifier: DeletionVerifier
@@ -56,6 +56,8 @@ public final class ApplicationListViewModel {
     public var deletionResults: [DeletionItemResult] = []
     public var deletionReport: DeletionReportViewModel?
     public var errorMessage: String?
+    public var applicationDiscoveryIssues: [ScanIssue] = []
+    public var relatedFileScanIssues: [ScanIssue] = []
     public var hasLoadedApps = false
     public var isLoadingApps = false
     public var isScanning = false
@@ -67,6 +69,9 @@ public final class ApplicationListViewModel {
         didSet { reconcileVisibleSelection() }
     }
     public var appSort: ApplicationListSort = .nameAscending
+    public var cleanupMode: ApplicationCleanupMode = .uninstall {
+        didSet { reconcileCleanupModeSelection() }
+    }
 
     public init(
         discoveryService: AppDiscoveryService = AppDiscoveryService(),
@@ -77,12 +82,14 @@ public final class ApplicationListViewModel {
         executor: DeletionExecutor = DeletionExecutor(),
         verifier: DeletionVerifier = DeletionVerifier(),
         runningApplicationMonitor: RunningApplicationMonitor = RunningApplicationMonitor(),
-        receiptStore: DeletionReceiptStore = .default()
+        receiptStore: DeletionReceiptStore = .default(),
+        applicationDiscovering: ApplicationDiscovering? = nil,
+        relatedFileScanning: RelatedFileScanning? = nil
     ) {
-        self.discoveryService = discoveryService
+        self.applicationDiscovering = applicationDiscovering ?? .live(service: discoveryService)
         self.excludedBundleIdentifiers = Set(excludedBundleIdentifiers.map { $0.lowercased() })
         self.excludedBundleURLs = excludedBundleURLs
-        self.scanner = scanner
+        self.relatedFileScanning = relatedFileScanning ?? .live(scanner: scanner)
         self.planner = planner
         self.executor = executor
         self.verifier = verifier
@@ -98,6 +105,19 @@ public final class ApplicationListViewModel {
         return sortedApps(filtered)
     }
 
+    public var reviewCandidates: [RelatedFileCandidate] {
+        switch cleanupMode {
+        case .uninstall:
+            candidates
+        case .resetData:
+            candidates.filter { $0.kind != .appBundle }
+        }
+    }
+
+    public var selectedReviewCandidates: [RelatedFileCandidate] {
+        reviewCandidates.filter { selectedCandidateIDs.contains($0.id) && !$0.isProtected }
+    }
+
     public func loadApps() async {
         await reloadApps(selectFirstWhenEmpty: true)
     }
@@ -109,31 +129,28 @@ public final class ApplicationListViewModel {
     private func reloadApps(selectFirstWhenEmpty: Bool) async {
         isLoadingApps = true
         defer { isLoadingApps = false }
-        do {
-            let previousSelection = selectedApp
-            let refreshedApps = try await discoveryService.discoverApps()
-                .filter { !isExcludedCurrentApplication($0) }
-            apps = refreshedApps
-            hasLoadedApps = true
+        applicationDiscoveryIssues = []
+        let previousSelection = selectedApp
+        let result = await applicationDiscovering.discover()
+        let refreshedApps = result.value.filter { !isExcludedCurrentApplication($0) }
+        apps = refreshedApps
+        applicationDiscoveryIssues = result.issues
+        hasLoadedApps = true
 
-            if let previousSelection {
-                if let refreshedSelection = refreshedApps.first(where: { isSameApp($0, previousSelection) }),
-                   isVisibleApp(refreshedSelection) {
-                    selectedApp = refreshedSelection
-                } else {
-                    selectedApp = nil
-                    clearReviewState()
-                }
-            } else if selectFirstWhenEmpty {
-                selectApp(visibleApps.first)
+        if let previousSelection {
+            if let refreshedSelection = refreshedApps.first(where: { isSameApp($0, previousSelection) }),
+               isVisibleApp(refreshedSelection) {
+                selectedApp = refreshedSelection
             } else {
+                selectedApp = nil
                 clearReviewState()
             }
-            errorMessage = nil
-        } catch {
-            errorMessage = error.localizedDescription
-            hasLoadedApps = true
+        } else if selectFirstWhenEmpty {
+            selectApp(visibleApps.first)
+        } else {
+            clearReviewState()
         }
+        errorMessage = nil
     }
 
     public func selectApp(id: InstalledApp.ID?) {
@@ -151,18 +168,22 @@ public final class ApplicationListViewModel {
         isScanning = true
         defer { isScanning = false }
         clearReviewState()
-        do {
-            candidates = try await scanner.scanRelatedFiles(for: selectedApp)
-            selectedCandidateIDs = Set(candidates.filter(\.defaultSelected).map(\.id))
-            errorMessage = nil
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        let result = await relatedFileScanning.scan(selectedApp)
+        candidates = result.value
+        relatedFileScanIssues = result.issues
+        selectedCandidateIDs = Set(candidates.filter(\.defaultSelected).map(\.id))
+        errorMessage = nil
     }
 
     public func makePlan() throws -> DeletionPlan {
         guard let selectedApp else { throw DeletionPlannerError.emptySelection }
         return try planner.makePlan(app: selectedApp, candidates: candidates, selectedIDs: selectedCandidateIDs)
+    }
+
+    public func makeResetPlan() throws -> DeletionPlan {
+        guard let selectedApp else { throw DeletionPlannerError.emptySelection }
+        let resetCandidates = candidates.filter { $0.kind != .appBundle }
+        return try planner.makePlan(app: selectedApp, candidates: resetCandidates, selectedIDs: selectedCandidateIDs)
     }
 
     @discardableResult
@@ -207,7 +228,6 @@ public final class ApplicationListViewModel {
             deletionResults = results
             let removedSelectedApp = reconcileDeletion(
                 plan: plan,
-                results: results,
                 verificationResults: verificationResults
             )
             if removedSelectedApp {
@@ -226,9 +246,62 @@ public final class ApplicationListViewModel {
     }
 
     @discardableResult
+    public func resetSelectedData(confirmation: String) async -> DeletionReportViewModel? {
+        guard !isDeleting else { return nil }
+        if let selectedApp, runningApplicationMonitor.isRunning(selectedApp) {
+            clearDeletionOutcome()
+            errorMessage = "Quit \(selectedApp.displayName) before resetting its data."
+            return nil
+        }
+
+        isDeleting = true
+        defer { isDeleting = false }
+
+        do {
+            let plan = try makeResetPlan()
+            let results = await executor.execute(
+                plan: plan,
+                confirmation: confirmation,
+                mode: .moveToTrash,
+                requiredConfirmation: ApplicationCleanupMode.resetData.confirmationPhrase
+            )
+            let verificationResults = await verifier.verify(plan: plan, executionResults: results)
+            let receipt = DeletionReceipt(
+                appName: plan.app.displayName,
+                bundleIdentifier: plan.app.bundleIdentifier,
+                bundlePath: plan.app.bundleURL.path,
+                action: .appReset,
+                selectedCandidates: plan.candidates.map {
+                    DeletionReceiptCandidate(path: $0.url.path, kind: $0.kind, size: $0.size, safety: $0.safety, evidence: $0.evidence)
+                },
+                executionResults: results,
+                verificationResults: verificationResults,
+                confirmationMatched: results.allSatisfy { $0.errorMessage != DeletionExecutionErrorMessage.confirmationMismatch }
+            )
+            let report = DeletionReportViewModel(receipt: receipt)
+            do {
+                try receiptStore.append(receipt)
+                errorMessage = nil
+            } catch {
+                errorMessage = "Could not save deletion history: \(error.localizedDescription)"
+            }
+            deletionResults = results
+            deletionReport = report
+
+            if verificationResults.contains(where: { $0.status == .deleted }) {
+                await refreshReviewAfterReset(app: plan.app)
+            }
+            return report
+        } catch {
+            clearDeletionOutcome()
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    @discardableResult
     private func reconcileDeletion(
         plan: DeletionPlan,
-        results: [DeletionItemResult],
         verificationResults: [DeletionVerificationResult]
     ) -> Bool {
         if deletedSelectedAppBundle(plan: plan, verificationResults: verificationResults) {
@@ -236,9 +309,16 @@ public final class ApplicationListViewModel {
             return true
         }
 
-        guard results.allSatisfy(\.success) else { return false }
-
-        let deletedCandidateIDs = Set(plan.candidates.map(\.id))
+        let deletedPaths = Set(
+            verificationResults
+                .filter { $0.status == .deleted }
+                .map { normalizedPath($0.path) }
+        )
+        let deletedCandidateIDs = Set(
+            plan.candidates
+                .filter { deletedPaths.contains(normalizedPath($0.url.path)) }
+                .map(\.id)
+        )
         candidates.removeAll { deletedCandidateIDs.contains($0.id) }
         selectedCandidateIDs.subtract(deletedCandidateIDs)
         return false
@@ -274,7 +354,34 @@ public final class ApplicationListViewModel {
     private func clearReviewState() {
         candidates = []
         selectedCandidateIDs = []
+        relatedFileScanIssues = []
+        cleanupMode = .uninstall
         clearDeletionOutcome()
+    }
+
+    private func reconcileCleanupModeSelection() {
+        let allowedIDs = Set(reviewCandidates.map(\.id))
+        selectedCandidateIDs.formIntersection(allowedIDs)
+        if cleanupMode == .uninstall {
+            selectedCandidateIDs.formUnion(
+                candidates
+                    .filter { $0.kind == .appBundle && $0.defaultSelected && !$0.isProtected }
+                    .map(\.id)
+            )
+        }
+        clearDeletionOutcome()
+    }
+
+    private func refreshReviewAfterReset(app: InstalledApp) async {
+        guard selectedApp.map({ isSameApp($0, app) }) == true else { return }
+        let result = await relatedFileScanning.scan(app)
+        candidates = result.value
+        relatedFileScanIssues = result.issues
+        selectedCandidateIDs = Set(
+            reviewCandidates
+                .filter { $0.defaultSelected && !$0.isProtected }
+                .map(\.id)
+        )
     }
 
     private func clearDeletionOutcome() {

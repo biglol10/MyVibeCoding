@@ -16,6 +16,10 @@ public struct StartupItemScanner: Sendable {
     }
 
     public func scan() async throws -> [StartupItem] {
+        await scanWithCoverage().value
+    }
+
+    public func scanWithCoverage() async -> ScanResult<[StartupItem]> {
         let roots: [(URL, StartupItemScope)] = [
             (userLaunchAgentsURL, .userLaunchAgent),
             (globalLaunchAgentsURL, .globalLaunchAgent),
@@ -23,22 +27,31 @@ public struct StartupItemScanner: Sendable {
         ]
 
         var items: [StartupItem] = []
-        for (root, scope) in roots {
-            let urls = (try? FileManager.default.contentsOfDirectory(
-                at: root,
-                includingPropertiesForKeys: nil,
-                options: [.skipsHiddenFiles]
-            )) ?? []
+        var issues: [ScanIssue] = []
+        for (root, scope) in roots where FileManager.default.fileExists(atPath: root.path) {
+            let urls: [URL]
+            do {
+                urls = try FileManager.default.contentsOfDirectory(
+                    at: root,
+                    includingPropertiesForKeys: nil,
+                    options: [.skipsHiddenFiles]
+                )
+            } catch {
+                issues.append(ScanIssue.from(path: root, error: error))
+                continue
+            }
 
             for url in urls where Self.isLaunchPlist(url) {
-                guard let item = try? parseItem(at: url, scope: scope) else {
+                do {
+                    items.append(try parseItem(at: url, scope: scope))
+                } catch {
+                    issues.append(ScanIssue.from(path: url, error: error))
                     continue
                 }
-                items.append(item)
             }
         }
 
-        return items.sorted { lhs, rhs in
+        let sortedItems = items.sorted { lhs, rhs in
             let lhsScopeIndex = StartupItemScope.allCases.firstIndex(of: lhs.scope) ?? .max
             let rhsScopeIndex = StartupItemScope.allCases.firstIndex(of: rhs.scope) ?? .max
             if lhsScopeIndex == rhsScopeIndex {
@@ -46,6 +59,7 @@ public struct StartupItemScanner: Sendable {
             }
             return lhsScopeIndex < rhsScopeIndex
         }
+        return ScanResult(value: sortedItems, issues: issues.deduplicatedAndSorted())
     }
 
     private static func isLaunchPlist(_ url: URL) -> Bool {

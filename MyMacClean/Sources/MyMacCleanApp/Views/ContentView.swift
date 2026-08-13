@@ -280,6 +280,8 @@ struct ContentView: View {
             .padding(.horizontal)
             .padding(.bottom, 12)
 
+            scanCoverageBanner(viewModel.applicationDiscoveryIssues)
+
             Divider()
 
             if viewModel.isLoadingApps && viewModel.apps.isEmpty {
@@ -392,6 +394,10 @@ struct ContentView: View {
                             .lineLimit(1)
                             .truncationMode(.middle)
 
+                        Text(summary.actionTitle)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
                         HStack(spacing: 12) {
                             Text(receipt.completedAt.formatted(date: .abbreviated, time: .shortened))
                             Text("\(receipt.selectedCandidates.count) items")
@@ -426,6 +432,8 @@ struct ContentView: View {
                 .disabled(orphanFilesViewModel.isScanning || orphanFilesViewModel.isDeleting)
             }
             .padding()
+
+            scanCoverageBanner(orphanFilesViewModel.scanIssues)
 
             Divider()
 
@@ -495,6 +503,8 @@ struct ContentView: View {
             .padding(.horizontal)
             .padding(.bottom, 12)
 
+            scanCoverageBanner(startupItemsViewModel.scanIssues)
+
             Divider()
 
             if startupItemsViewModel.isScanning {
@@ -546,6 +556,36 @@ struct ContentView: View {
             }
             .padding()
 
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    Image(systemName: "folder")
+                        .foregroundStyle(.secondary)
+                    Text(largeFilesViewModel.activeScanRoot.path)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 8)
+                    Button {
+                        chooseLargeFilesScanFolder()
+                    } label: {
+                        Label("Choose Scan Folder", systemImage: "folder.badge.plus")
+                            .labelStyle(.iconOnly)
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Choose Scan Folder")
+                    .disabled(largeFilesViewModel.isScanning || largeFilesViewModel.isDeleting)
+                }
+
+                Toggle("Include Subfolders", isOn: $largeFilesViewModel.includeSubfolders)
+                    .toggleStyle(.checkbox)
+                    .font(.callout.weight(.medium))
+                    .disabled(largeFilesViewModel.isScanning || largeFilesViewModel.isDeleting)
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 12)
+
             HStack {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
@@ -558,6 +598,8 @@ struct ContentView: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .padding(.horizontal)
             .padding(.bottom, 12)
+
+            scanCoverageBanner(largeFilesViewModel.scanIssues)
 
             Divider()
 
@@ -663,6 +705,8 @@ struct ContentView: View {
             }
             .padding(.horizontal)
             .padding(.bottom, 12)
+
+            scanCoverageBanner(developerCacheViewModel.scanIssues)
 
             Divider()
 
@@ -863,6 +907,10 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
                 .truncationMode(.middle)
+
+            Text(summary.actionTitle)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.secondary)
 
             HStack(spacing: 18) {
                 HistoryMetric(title: "Selected", value: "\(receipt.selectedCandidates.count)")
@@ -1281,17 +1329,36 @@ struct ContentView: View {
                         Text("Related Items")
                             .font(.callout.weight(.semibold))
                             .foregroundStyle(.secondary)
-                        Text("\(viewModel.candidates.count)")
+                        Text("\(viewModel.candidates.filter { $0.kind != .appBundle }.count)")
                             .font(.title3.weight(.bold))
                     }
                 }
                 Divider()
+                if !viewModel.candidates.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Picker("Cleanup Mode", selection: $viewModel.cleanupMode) {
+                            ForEach(ApplicationCleanupMode.allCases) { mode in
+                                Text(mode.title).tag(mode)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .frame(maxWidth: 320)
+
+                        Text(viewModel.cleanupMode == .resetData
+                            ? "Keep the app installed and move only selected app data to Trash."
+                            : "Remove the app and selected related files.")
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 if let report = viewModel.deletionReport {
                     DeletionReportPanel(report: report)
                 }
+                scanCoverageBanner(viewModel.relatedFileScanIssues, horizontalPadding: 0)
                 ScrollView {
                     LazyVStack(spacing: 12) {
-                        ForEach(viewModel.candidates) { candidate in
+                        ForEach(viewModel.reviewCandidates) { candidate in
                             RelatedFileRow(
                                 candidate: candidate,
                                 isSelected: viewModel.selectedCandidateIDs.contains(candidate.id),
@@ -1308,11 +1375,12 @@ struct ContentView: View {
                     .padding(.vertical, 4)
                 }
                 DeleteActionButton(
+                    title: viewModel.cleanupMode == .resetData ? "Move App Data to Trash" : "Move Selected Items to Trash",
                     selectedCount: selectedCandidates.count,
                     selectedBytes: selectedCandidateBytes,
-                    disabledSummary: viewModel.candidates.isEmpty ? "Scan selected app first" : "Select related files first"
+                    disabledSummary: applicationActionDisabledSummary
                 ) {
-                    presentConfirmation(.application)
+                    presentConfirmation(viewModel.cleanupMode == .resetData ? .applicationReset : .applicationUninstall)
                 }
             } else if let report = viewModel.deletionReport {
                 ContentUnavailableView(
@@ -1331,11 +1399,12 @@ struct ContentView: View {
 
     private func confirmationSheet(for mode: DeletionConfirmationMode) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            let requiredConfirmation = "DELETE"
+            let requiredConfirmation = confirmationRequiredPhrase(for: mode)
             let isDeleting = confirmationIsDeleting(for: mode)
-            let allowsAdvancedDeleteOptions = mode != .largeFiles && mode != .developerCache
+            let isAppReset = mode == .applicationReset
+            let allowsAdvancedDeleteOptions = mode != .largeFiles && mode != .developerCache && !isAppReset
             let effectivePermanentDelete = allowsAdvancedDeleteOptions && permanentDelete
-            Text(effectivePermanentDelete ? "Permanent Deletion" : "Move to Trash")
+            Text(isAppReset ? "Reset App Data" : (effectivePermanentDelete ? "Permanent Deletion" : "Move to Trash"))
                 .font(.title2.weight(.semibold))
             VStack(alignment: .leading, spacing: 8) {
                 Text(confirmationTargetTitle(for: mode))
@@ -1361,7 +1430,7 @@ struct ContentView: View {
                     .stroke(Color.primary.opacity(0.08), lineWidth: 1)
             }
             .clipShape(RoundedRectangle(cornerRadius: 8))
-            Text(effectivePermanentDelete ? "Type DELETE to permanently remove selected items. This cannot be undone from Trash." : "Type DELETE to move selected items to Trash.")
+            Text(confirmationInstruction(for: mode, effectivePermanentDelete: effectivePermanentDelete))
                 .foregroundStyle(.secondary)
             TextField(requiredConfirmation, text: $confirmationText)
                 .textFieldStyle(.roundedBorder)
@@ -1384,7 +1453,7 @@ struct ContentView: View {
                 Button("Cancel") { confirmationMode = nil }
                     .disabled(isDeleting)
                 Spacer()
-                Button(isDeleting ? "Deleting..." : (effectivePermanentDelete ? "Permanently Delete" : "Move to Trash"), role: .destructive) {
+                Button(confirmationButtonTitle(for: mode, isDeleting: isDeleting, effectivePermanentDelete: effectivePermanentDelete), role: .destructive) {
                     handleConfirmedDeletionTap(for: mode, effectivePermanentDelete: effectivePermanentDelete)
                 }
                 .disabled(confirmationText != requiredConfirmation || isDeleting)
@@ -1409,11 +1478,52 @@ struct ContentView: View {
     }
 
     private var selectedCandidates: [RelatedFileCandidate] {
-        viewModel.candidates.filter { viewModel.selectedCandidateIDs.contains($0.id) }
+        viewModel.selectedReviewCandidates
     }
 
     private var selectedCandidateBytes: Int64 {
         selectedCandidates.reduce(Int64(0)) { $0 + $1.size }
+    }
+
+    private var applicationActionDisabledSummary: String {
+        if viewModel.candidates.isEmpty {
+            return "Scan selected app first"
+        }
+        if viewModel.cleanupMode == .resetData && viewModel.reviewCandidates.isEmpty {
+            return "No resettable app data found"
+        }
+        return "Select related files first"
+    }
+
+    private func confirmationRequiredPhrase(for mode: DeletionConfirmationMode) -> String {
+        mode == .applicationReset ? ApplicationCleanupMode.resetData.confirmationPhrase : "DELETE"
+    }
+
+    private func confirmationInstruction(
+        for mode: DeletionConfirmationMode,
+        effectivePermanentDelete: Bool
+    ) -> String {
+        if mode == .applicationReset {
+            return "Type RESET to move selected app data to Trash while keeping the app installed."
+        }
+        if effectivePermanentDelete {
+            return "Type DELETE to permanently remove selected items. This cannot be undone from Trash."
+        }
+        return "Type DELETE to move selected items to Trash."
+    }
+
+    private func confirmationButtonTitle(
+        for mode: DeletionConfirmationMode,
+        isDeleting: Bool,
+        effectivePermanentDelete: Bool
+    ) -> String {
+        if mode == .applicationReset {
+            return isDeleting ? "Resetting..." : "Move App Data to Trash"
+        }
+        if isDeleting {
+            return "Deleting..."
+        }
+        return effectivePermanentDelete ? "Permanently Delete" : "Move to Trash"
     }
 
     private func presentConfirmation(_ mode: DeletionConfirmationMode) {
@@ -1444,8 +1554,10 @@ struct ContentView: View {
         let deletionMode: DeletionMode = effectivePermanentDelete ? .permanent : .moveToTrash
         let report: DeletionReportViewModel?
         switch mode {
-        case .application:
+        case .applicationUninstall:
             report = await viewModel.deleteConfirmedItems(confirmation: confirmationText, force: forceDelete, mode: deletionMode)
+        case .applicationReset:
+            report = await viewModel.resetSelectedData(confirmation: confirmationText)
         case .orphanFiles:
             report = await orphanFilesViewModel.deleteSelectedLeftovers(confirmation: confirmationText, force: forceDelete, mode: deletionMode)
         case .largeFiles:
@@ -1460,7 +1572,7 @@ struct ContentView: View {
 
     private func consumeDeletionError(for mode: DeletionConfirmationMode) -> String? {
         switch mode {
-        case .application:
+        case .applicationUninstall, .applicationReset:
             defer { viewModel.errorMessage = nil }
             return viewModel.errorMessage
         case .orphanFiles:
@@ -1506,6 +1618,19 @@ struct ContentView: View {
         isFullDiskAccessPromptPresented = true
     }
 
+    @ViewBuilder
+    private func scanCoverageBanner(_ issues: [ScanIssue], horizontalPadding: CGFloat = 16) -> some View {
+        if !issues.isEmpty {
+            ScanCoverageBanner(
+                issues: issues,
+                copyDetails: copyToPasteboard,
+                openFullDiskAccessSettings: openFullDiskAccessSettings
+            )
+            .padding(.horizontal, horizontalPadding)
+            .padding(.bottom, 12)
+        }
+    }
+
     private func openFullDiskAccessSettings() {
         NSWorkspace.shared.open(FullDiskAccessPromptPresentation().settingsURL)
     }
@@ -1516,7 +1641,7 @@ struct ContentView: View {
 
     private func confirmationSelectedCandidates(for mode: DeletionConfirmationMode) -> [RelatedFileCandidate] {
         switch mode {
-        case .application:
+        case .applicationUninstall, .applicationReset:
             selectedCandidates
         case .orphanFiles:
             orphanFilesViewModel.selectedCandidates
@@ -1550,7 +1675,7 @@ struct ContentView: View {
 
     private func confirmationTargetTitle(for mode: DeletionConfirmationMode) -> String {
         switch mode {
-        case .application:
+        case .applicationUninstall, .applicationReset:
             viewModel.selectedApp?.displayName ?? "Selected Application"
         case .orphanFiles:
             "Orphan Files"
@@ -1567,16 +1692,16 @@ struct ContentView: View {
 
     private func confirmationEffectivePermanentDelete(for mode: DeletionConfirmationMode) -> Bool {
         switch mode {
-        case .largeFiles, .developerCache:
+        case .applicationReset, .largeFiles, .developerCache:
             return false
-        case .application, .orphanFiles:
+        case .applicationUninstall, .orphanFiles:
             return permanentDelete
         }
     }
 
     private func confirmationIsDeleting(for mode: DeletionConfirmationMode) -> Bool {
         switch mode {
-        case .application:
+        case .applicationUninstall, .applicationReset:
             viewModel.isDeleting
         case .orphanFiles:
             orphanFilesViewModel.isDeleting
@@ -1768,6 +1893,25 @@ struct ContentView: View {
         orphanFilesViewModel.updateInstalledApps(viewModel.apps)
     }
 
+    private func chooseLargeFilesScanFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose a Folder to Scan"
+        panel.prompt = "Choose"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+        panel.directoryURL = largeFilesViewModel.activeScanRoot
+
+        guard panel.runModal() == .OK,
+              let selectedURL = panel.url,
+              largeFilesViewModel.setScanRoot(selectedURL) else {
+            return
+        }
+
+        Task { await largeFilesViewModel.scan() }
+    }
+
     private func deletionStatusColor(for status: DeletionHistoryStatus) -> Color {
         switch status {
         case .verified: Color.green
@@ -1786,14 +1930,16 @@ struct ContentView: View {
 }
 
 private enum DeletionConfirmationMode: Identifiable {
-    case application
+    case applicationUninstall
+    case applicationReset
     case orphanFiles
     case largeFiles
     case developerCache
 
     var id: String {
         switch self {
-        case .application: "application"
+        case .applicationUninstall: "applicationUninstall"
+        case .applicationReset: "applicationReset"
         case .orphanFiles: "orphanFiles"
         case .largeFiles: "largeFiles"
         case .developerCache: "developerCache"

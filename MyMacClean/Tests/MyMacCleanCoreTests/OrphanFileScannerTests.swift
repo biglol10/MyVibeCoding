@@ -134,4 +134,21 @@ final class OrphanFileScannerTests: XCTestCase {
         XCTAssertEqual(groups.count, 1)
         XCTAssertGreaterThanOrEqual(groups[0].totalSize, 1_000_000)
     }
+
+    func testScanWithCoverageReportsUnreadableRootAndKeepsValidOrphans() async throws {
+        let home = try TestFixtures.temporaryDirectory(named: "orphans-coverage-home")
+        let cache = home.appendingPathComponent("Library/Caches/com.example.Valid", isDirectory: true)
+        let invalidPreferencesRoot = home.appendingPathComponent("Library/Preferences")
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: invalidPreferencesRoot.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("not a directory".utf8).write(to: invalidPreferencesRoot)
+
+        let result = await OrphanFileScanner(homeDirectory: home, installedApps: []).scanWithCoverage()
+
+        XCTAssertEqual(result.value.map(\.inferredIdentifier), ["com.example.Valid"])
+        XCTAssertTrue(result.issues.contains { $0.path == invalidPreferencesRoot.path })
+    }
 }

@@ -168,4 +168,75 @@ final class CandidateMatcherTests: XCTestCase {
         XCTAssertEqual(match?.evidence.first?.type, .weakName)
         XCTAssertEqual(match?.evidence.first?.strength, .weak)
     }
+
+    func testBundleIdentifierRequiresIdentifierBoundaries() {
+        let app = InstalledApp(
+            displayName: "Editor",
+            bundleIdentifier: "com.example.Editor",
+            version: nil,
+            executableName: "Editor",
+            bundleURL: URL(fileURLWithPath: "/Applications/Editor.app"),
+            iconIdentifier: nil,
+            bundleSize: 0,
+            lastOpenedAt: nil
+        )
+
+        let suffixCollision = CandidateMatcher().match(
+            url: URL(fileURLWithPath: "/Users/me/Library/Caches/com.example.EditorPlus"),
+            app: app,
+            kind: .cache
+        )
+        let prefixCollision = CandidateMatcher().match(
+            url: URL(fileURLWithPath: "/Users/me/Library/Caches/xcom.example.Editor"),
+            app: app,
+            kind: .cache
+        )
+        let groupContainer = CandidateMatcher().match(
+            url: URL(fileURLWithPath: "/Users/me/Library/Group Containers/group.com.example.Editor"),
+            app: app,
+            kind: .groupContainer
+        )
+        let helper = CandidateMatcher().match(
+            url: URL(fileURLWithPath: "/Users/me/Library/Caches/com.example.Editor.helper"),
+            app: app,
+            kind: .cache
+        )
+
+        XCTAssertNil(suffixCollision)
+        XCTAssertNil(prefixCollision)
+        XCTAssertEqual(groupContainer?.confidence, .high)
+        XCTAssertEqual(helper?.confidence, .high)
+    }
+
+    func testSingleTokenAppNameDoesNotMatchUnrelatedCompoundNames() {
+        let app = InstalledApp(
+            displayName: "Cursor",
+            bundleIdentifier: nil,
+            version: nil,
+            executableName: "Cursor",
+            bundleURL: URL(fileURLWithPath: "/Applications/Cursor.app"),
+            iconIdentifier: nil,
+            bundleSize: 0,
+            lastOpenedAt: nil
+        )
+
+        for name in ["cli-cursor", "cursor-theme", "restore-cursor"] {
+            XCTAssertNil(
+                CandidateMatcher().match(
+                    url: URL(fileURLWithPath: "/Users/me/Library/Application Support/\(name)"),
+                    app: app,
+                    kind: .applicationSupport
+                ),
+                "\(name) must not be treated as Cursor app data"
+            )
+        }
+
+        XCTAssertNotNil(
+            CandidateMatcher().match(
+                url: URL(fileURLWithPath: "/Users/me/Library/Application Support/Cursor"),
+                app: app,
+                kind: .applicationSupport
+            )
+        )
+    }
 }

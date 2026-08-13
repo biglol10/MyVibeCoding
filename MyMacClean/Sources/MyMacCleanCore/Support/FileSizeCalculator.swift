@@ -1,24 +1,40 @@
 import Foundation
 
 public struct FileSizeCalculator: Sendable {
-    public init() {}
+    private let sizeProvider: @Sendable (URL, Bool) throws -> Int64
+
+    public init() {
+        self.sizeProvider = Self.defaultSizeOfItem
+    }
+
+    public init(sizeProvider: @escaping @Sendable (URL, Bool) throws -> Int64) {
+        self.sizeProvider = sizeProvider
+    }
 
     public func sizeOfItem(at url: URL, recursive: Bool = true) throws -> Int64 {
+        try sizeProvider(url, recursive)
+    }
+
+    private static func defaultSizeOfItem(at url: URL, recursive: Bool) throws -> Int64 {
         let resourceValues = try url.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey, .totalFileAllocatedSizeKey])
         if resourceValues.isDirectory == true && recursive {
-            return try directorySize(at: url)
+            return try defaultDirectorySize(at: url)
         }
         return Int64(resourceValues.totalFileAllocatedSize ?? resourceValues.fileSize ?? 0)
     }
 
-    private func directorySize(at url: URL) throws -> Int64 {
+    private static func defaultDirectorySize(at url: URL) throws -> Int64 {
+        var traversalError: Error?
         guard let enumerator = FileManager.default.enumerator(
             at: url,
             includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .totalFileAllocatedSizeKey],
             options: [.skipsHiddenFiles],
-            errorHandler: nil
+            errorHandler: { _, error in
+                traversalError = error
+                return false
+            }
         ) else {
-            return 0
+            throw CocoaError(.fileReadUnknown)
         }
 
         var total: Int64 = 0
@@ -27,6 +43,9 @@ public struct FileSizeCalculator: Sendable {
             if values.isRegularFile == true {
                 total += Int64(values.totalFileAllocatedSize ?? values.fileSize ?? 0)
             }
+        }
+        if let traversalError {
+            throw traversalError
         }
         return total
     }

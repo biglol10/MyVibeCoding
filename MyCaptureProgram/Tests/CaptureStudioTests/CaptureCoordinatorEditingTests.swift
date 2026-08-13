@@ -3,6 +3,49 @@ import XCTest
 
 @MainActor
 final class CaptureCoordinatorEditingTests: XCTestCase {
+    @MainActor
+    func testHistoryIsNotAddedWhenSavedFileDisappearsDuringThumbnailGeneration() async throws {
+        let outputDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CaptureCoordinatorEditingTests-history-race-\(UUID().uuidString)", isDirectory: true)
+        let thumbnailDirectory = outputDirectory.appendingPathComponent("thumbnails", isDirectory: true)
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: outputDirectory) }
+        let settingsStore = SettingsStore(defaults: isolatedDefaults("historyThumbnailRaceSettings"))
+        settingsStore.update {
+            $0.screenshotFolderPath = outputDirectory.path
+            $0.automaticallySaveScreenshots = true
+            $0.copyCapturedImageToClipboard = false
+        }
+        let historyStore = CaptureHistoryStore(
+            defaults: isolatedDefaults("historyThumbnailRace"),
+            thumbnailDirectory: thumbnailDirectory
+        )
+        let encoder = BlockingHistoryThumbnailEncoder()
+        let thumbnailService = CaptureHistoryThumbnailService { data in
+            encoder.encode(data)
+        }
+        let appState = AppState()
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: settingsStore,
+            screenshotService: EditingMockScreenshotService(),
+            selectionService: EditingMockSelectionService(),
+            historyStore: historyStore,
+            historyThumbnailService: thumbnailService
+        )
+
+        let captureTask = Task { @MainActor in
+            await coordinator.startScreenshotCapture()
+        }
+        await encoder.waitUntilEncodingStarted()
+        let savedURL = try XCTUnwrap(appState.currentDocument?.fileURL)
+        try FileManager.default.removeItem(at: savedURL)
+        encoder.finishEncoding()
+        await captureTask.value
+
+        XCTAssertTrue(historyStore.items.isEmpty)
+    }
+
     func testSaveCurrentScreenshotUsesRenderedDataWhenLayersExist() async throws {
         let appState = AppState()
         let settingsStore = SettingsStore(defaults: isolatedDefaults("saveRendered"))
@@ -366,6 +409,60 @@ private final class FirstCallBlockingImageRenderService: ImageRenderServicing, @
 private final class EditingMockScreenshotService: ScreenshotServicing {
     func captureImage(selection: CaptureSelection) async throws -> ScreenshotResult {
         ScreenshotResult(pngData: Data([0x89, 0x50, 0x4E, 0x47]), createdAt: Date(timeIntervalSince1970: 20))
+    }
+}
+
+private final class EditingMockSelectionService: SelectionServicing {
+    func selectRectangle() async throws -> CaptureSelection {
+        CaptureSelection(
+            displayID: 1,
+            screenFrame: CGRect(x: 0, y: 0, width: 100, height: 100),
+            rect: CGRect(x: 0, y: 0, width: 40, height: 40),
+            scale: 1
+        )
+    }
+
+    func selectWindow() async throws -> CaptureSelection {
+        try await selectRectangle()
+    }
+
+    func selectFullScreen() async throws -> CaptureSelection {
+        try await selectRectangle()
+    }
+}
+
+private final class BlockingHistoryThumbnailEncoder: @unchecked Sendable {
+    private let lock = NSLock()
+    private let resume = DispatchSemaphore(value: 0)
+    private var didStart = false
+    private var startContinuation: CheckedContinuation<Void, Never>?
+
+    func encode(_ data: Data) -> Data {
+        lock.lock()
+        didStart = true
+        let continuation = startContinuation
+        startContinuation = nil
+        lock.unlock()
+        continuation?.resume()
+        resume.wait()
+        return data
+    }
+
+    func waitUntilEncodingStarted() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if didStart {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                startContinuation = continuation
+                lock.unlock()
+            }
+        }
+    }
+
+    func finishEncoding() {
+        resume.signal()
     }
 }
 

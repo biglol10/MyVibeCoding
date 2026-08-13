@@ -33,6 +33,7 @@
 ## 격리 앱 스모크
 
 사용 경로: `/tmp/MyMacCalendarCorrectnessAudit.qlimBr`
+
 전용 bundle identifier: `com.mymaccalendar.audit.20260808`
 
 - 빈 임시 SwiftData 저장소로 시작하고 현재 연도 온라인 휴일 18개가 자동 추가되는 것을 확인했다.

@@ -274,6 +274,57 @@ final class DeletionExecutorTests: XCTestCase {
 
         XCTAssertEqual(results, [DeletionItemResult(path: "/tmp/Figma-cache", success: false, errorMessage: "confirmation phrase mismatch")])
     }
+
+    func testExecutorRejectsDefaultPhraseWhenOperationRequiresReset() async throws {
+        let root = try TestFixtures.temporaryDirectory(named: "executor-reset-confirmation-mismatch")
+        let appURL = root.appendingPathComponent("Figma.app", isDirectory: true)
+        let cacheURL = root.appendingPathComponent("Library/Caches/com.figma.Desktop", isDirectory: true)
+        try FileManager.default.createDirectory(at: appURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: cacheURL, withIntermediateDirectories: true)
+
+        let app = InstalledApp(displayName: "Figma", bundleIdentifier: "com.figma.Desktop", version: nil, executableName: "Figma", bundleURL: appURL, iconIdentifier: nil, bundleSize: 0, lastOpenedAt: nil)
+        let candidate = RelatedFileCandidate(url: cacheURL, kind: .cache, size: 0, matchReason: "test", confidence: .high, defaultSelected: true, requiresManualReview: false, isProtected: false)
+        let plan = DeletionPlan(app: app, candidates: [candidate])
+        let recorder = RemovalRecorder()
+
+        let results = await DeletionExecutor(
+            fileRemover: recorder.fileRemover,
+            protectionPolicy: ProtectionPolicy(homeDirectory: root)
+        ).execute(
+            plan: plan,
+            confirmation: "DELETE",
+            requiredConfirmation: "RESET"
+        )
+
+        XCTAssertEqual(results, [DeletionItemResult(path: cacheURL.path, success: false, errorMessage: DeletionExecutionErrorMessage.confirmationMismatch)])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cacheURL.path))
+        XCTAssertTrue(recorder.trashedURLs.isEmpty)
+    }
+
+    func testExecutorAcceptsOperationSpecificResetPhrase() async throws {
+        let root = try TestFixtures.temporaryDirectory(named: "executor-reset-confirmation-match")
+        let appURL = root.appendingPathComponent("Figma.app", isDirectory: true)
+        let cacheURL = root.appendingPathComponent("Library/Caches/com.figma.Desktop", isDirectory: true)
+        try FileManager.default.createDirectory(at: appURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: cacheURL, withIntermediateDirectories: true)
+
+        let app = InstalledApp(displayName: "Figma", bundleIdentifier: "com.figma.Desktop", version: nil, executableName: "Figma", bundleURL: appURL, iconIdentifier: nil, bundleSize: 0, lastOpenedAt: nil)
+        let candidate = RelatedFileCandidate(url: cacheURL, kind: .cache, size: 0, matchReason: "test", confidence: .high, defaultSelected: true, requiresManualReview: false, isProtected: false)
+        let plan = DeletionPlan(app: app, candidates: [candidate])
+        let recorder = RemovalRecorder()
+
+        let results = await DeletionExecutor(
+            fileRemover: recorder.fileRemover,
+            protectionPolicy: ProtectionPolicy(homeDirectory: root)
+        ).execute(
+            plan: plan,
+            confirmation: "RESET",
+            requiredConfirmation: "RESET"
+        )
+
+        XCTAssertEqual(results, [DeletionItemResult(path: cacheURL.path, success: true, errorMessage: nil)])
+        XCTAssertEqual(recorder.trashedURLs, [cacheURL])
+    }
 }
 
 private final class RemovalRecorder: @unchecked Sendable {

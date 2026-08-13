@@ -25,6 +25,28 @@ final class QuickAddParserTests: XCTestCase {
         XCTAssertFalse(result.needsConfirmation)
     }
 
+    func testSlashLeapDayFindsNextLeapYear() throws {
+        let parser = QuickAddParser(calendar: calendar)
+        let result = parser.parse("2/29 윤년 일정", now: try date(2026, 2, 1))
+
+        XCTAssertEqual(result.title, "윤년 일정")
+        XCTAssertEqual(calendar.component(.year, from: result.startDate), 2028)
+        XCTAssertEqual(calendar.component(.month, from: result.startDate), 2)
+        XCTAssertEqual(calendar.component(.day, from: result.startDate), 29)
+        XCTAssertFalse(result.needsConfirmation)
+    }
+
+    func testPastLeapDayFindsFollowingLeapYear() throws {
+        let parser = QuickAddParser(calendar: calendar)
+        let result = parser.parse("2/29 윤년 일정", now: try date(2028, 3, 1))
+
+        XCTAssertEqual(result.title, "윤년 일정")
+        XCTAssertEqual(calendar.component(.year, from: result.startDate), 2032)
+        XCTAssertEqual(calendar.component(.month, from: result.startDate), 2)
+        XCTAssertEqual(calendar.component(.day, from: result.startDate), 29)
+        XCTAssertFalse(result.needsConfirmation)
+    }
+
     func testInvalidSlashDateNeedsConfirmationInsteadOfRollingOver() throws {
         let parser = QuickAddParser(calendar: calendar)
         let result = parser.parse("2/30 회의", now: try date(2026, 2, 1))

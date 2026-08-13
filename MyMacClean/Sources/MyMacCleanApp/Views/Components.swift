@@ -2,6 +2,81 @@ import SwiftUI
 import MyMacCleanCore
 import MyMacCleanAppSupport
 
+struct ScanCoverageBanner: View {
+    let issues: [ScanIssue]
+    let copyDetails: (String) -> Void
+    let openFullDiskAccessSettings: () -> Void
+
+    @State private var isExpanded = false
+
+    private var presentation: ScanCoveragePresentation {
+        ScanCoveragePresentation(issues: issues)
+    }
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            VStack(alignment: .leading, spacing: 10) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 7) {
+                        ForEach(presentation.detailLines, id: \.self) { line in
+                            Text(line)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 96)
+
+                HStack(spacing: 10) {
+                    Spacer()
+                    Button {
+                        copyDetails(presentation.copyText)
+                    } label: {
+                        Label("Copy Scan Details", systemImage: "doc.on.doc")
+                            .labelStyle(.iconOnly)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Copy Scan Details")
+
+                    if presentation.showsFullDiskAccessAction {
+                        Button("Open Full Disk Access") {
+                            openFullDiskAccessSettings()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+            }
+            .padding(.top, 8)
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.orange)
+                    .frame(width: 18)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(presentation.title)
+                        .font(.callout.weight(.semibold))
+                    Text(presentation.summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.orange.opacity(0.09))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.orange.opacity(0.22), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
 struct SizeText: View {
     let bytes: Int64
 
@@ -131,17 +206,20 @@ struct RelatedFileRow: View {
 }
 
 struct DeleteActionButton: View {
+    let title: String
     let selectedCount: Int
     let selectedBytes: Int64
     let disabledSummary: String
     let action: () -> Void
 
     init(
+        title: String = "Move Selected Items to Trash",
         selectedCount: Int,
         selectedBytes: Int64,
         disabledSummary: String = "Select related files first",
         action: @escaping () -> Void
     ) {
+        self.title = title
         self.selectedCount = selectedCount
         self.selectedBytes = selectedBytes
         self.disabledSummary = disabledSummary
@@ -156,7 +234,7 @@ struct DeleteActionButton: View {
                     .frame(width: 28, height: 28)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Move Selected Items to Trash")
+                    Text(title)
                         .font(.headline.weight(.semibold))
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)

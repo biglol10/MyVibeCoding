@@ -10,10 +10,19 @@ public final class ActivitySessionAccumulator {
     }
 
     private var openSession: OpenSession?
+    private let maximumMergeGap: TimeInterval
     private let idProvider: IDProvider
 
-    public init(idProvider: @escaping IDProvider = { "active-window:\(UUID().uuidString)" }) {
+    public init(
+        maximumMergeGap: TimeInterval = 15,
+        idProvider: @escaping IDProvider = { "active-window:\(UUID().uuidString)" }
+    ) {
+        self.maximumMergeGap = min(max(0, maximumMergeGap), 15)
         self.idProvider = idProvider
+    }
+
+    public func reset() {
+        openSession = nil
     }
 
     public func observe(_ sample: ActivitySample) -> [ActivitySessionRecord] {
@@ -21,6 +30,14 @@ public final class ActivitySessionAccumulator {
             let next = OpenSession(id: idProvider(), startedAt: sample.observedAt, sample: sample)
             self.openSession = next
             return [record(from: next, endedAt: sample.observedAt)]
+        }
+
+        let observationGap = sample.observedAt.timeIntervalSince(openSession.sample.observedAt)
+        if observationGap < 0 || observationGap > maximumMergeGap {
+            let closed = record(from: openSession, endedAt: openSession.sample.observedAt)
+            let next = OpenSession(id: idProvider(), startedAt: sample.observedAt, sample: sample)
+            self.openSession = next
+            return [closed, record(from: next, endedAt: sample.observedAt)]
         }
 
         if shouldMerge(openSession.sample, sample) {

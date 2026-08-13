@@ -24,11 +24,22 @@ public struct DeveloperCacheScanner: Sendable {
     }
 
     public func scan() async throws -> [DeveloperCacheCandidate] {
+        await scanWithCoverage().value
+    }
+
+    public func scanWithCoverage() async -> ScanResult<[DeveloperCacheCandidate]> {
         var candidates: [DeveloperCacheCandidate] = []
+        var issues: [ScanIssue] = []
         for target in targets {
             let url = target.explicitURL ?? homeDirectory.appendingPathComponent(target.relativePath ?? "", isDirectory: true)
             guard FileManager.default.fileExists(atPath: url.path) else { continue }
-            let size = (try? sizeCalculator.sizeOfItem(at: url)) ?? 0
+            let size: Int64
+            do {
+                size = try sizeCalculator.sizeOfItem(at: url)
+            } catch {
+                issues.append(ScanIssue.from(path: url, error: error))
+                continue
+            }
             candidates.append(
                 DeveloperCacheCandidate(
                     tool: target.tool,
@@ -39,7 +50,7 @@ public struct DeveloperCacheScanner: Sendable {
                 )
             )
         }
-        return candidates
+        return ScanResult(value: candidates, issues: issues.deduplicatedAndSorted())
     }
 
     private var targets: [Target] {

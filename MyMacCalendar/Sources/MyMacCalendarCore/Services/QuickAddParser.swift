@@ -39,10 +39,14 @@ public struct QuickAddParser {
         guard let month = Int(match[1]), let day = Int(match[2]) else { return nil }
         let currentYear = calendar.component(.year, from: now)
         let startOfToday = calendar.startOfDay(for: now)
-        guard let currentYearDate = strictDate(year: currentYear, month: month, day: day) else { return nil }
-        let date = calendar.startOfDay(for: currentYearDate) < startOfToday
-            ? strictDate(year: currentYear + 1, month: month, day: day) ?? currentYearDate
-            : currentYearDate
+        guard let date = nextValidDate(
+            month: month,
+            day: day,
+            startingYear: currentYear,
+            notBefore: startOfToday
+        ) else {
+            return nil
+        }
         let normalized = calendar.startOfDay(for: date)
         return QuickAddResult(title: match[3], startDate: normalized, endDate: normalized, needsConfirmation: false)
     }
@@ -85,6 +89,22 @@ public struct QuickAddParser {
             return nil
         }
         return date
+    }
+
+    private func nextValidDate(month: Int, day: Int, startingYear: Int, notBefore minimumDate: Date) -> Date? {
+        for yearOffset in 0...8 {
+            guard let candidate = strictDate(
+                year: startingYear + yearOffset,
+                month: month,
+                day: day
+            ) else {
+                continue
+            }
+            if calendar.startOfDay(for: candidate) >= minimumDate {
+                return candidate
+            }
+        }
+        return nil
     }
 }
 

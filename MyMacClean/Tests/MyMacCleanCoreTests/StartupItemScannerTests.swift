@@ -86,13 +86,17 @@ final class StartupItemScannerTests: XCTestCase {
             ]
         )
 
-        let results = try await StartupItemScanner(
+        let result = await StartupItemScanner(
             userLaunchAgentsURL: userLaunchAgents,
             globalLaunchAgentsURL: root.appendingPathComponent("GlobalLaunchAgents", isDirectory: true),
             globalLaunchDaemonsURL: root.appendingPathComponent("GlobalLaunchDaemons", isDirectory: true)
-        ).scan()
+        ).scanWithCoverage()
 
-        XCTAssertEqual(results.map(\.label), ["com.example.good"])
+        XCTAssertEqual(result.value.map(\.label), ["com.example.good"])
+        XCTAssertEqual(
+            result.issues.map(\.path),
+            [userLaunchAgents.appendingPathComponent("com.example.bad.plist").path]
+        )
     }
 
     func testScannerClassifiesSystemLocationsAsReadOnlyAndMissingTarget() async throws {

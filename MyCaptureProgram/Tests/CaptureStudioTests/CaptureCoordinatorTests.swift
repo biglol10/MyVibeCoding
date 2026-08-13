@@ -363,7 +363,8 @@ final class CaptureCoordinatorTests: XCTestCase {
             screenshotService: MockScreenshotService(),
             recordingService: MockRecordingService(),
             selectionService: MockSelectionService(),
-            delaySleeper: MockDelaySleeper()
+            delaySleeper: MockDelaySleeper(),
+            pendingRecordingStore: makePendingRecordingStore()
         )
 
         await coordinator.startNewCapture()
@@ -391,7 +392,8 @@ final class CaptureCoordinatorTests: XCTestCase {
             screenshotService: MockScreenshotService(),
             recordingService: recordingService,
             selectionService: MockSelectionService(),
-            delaySleeper: MockDelaySleeper()
+            delaySleeper: MockDelaySleeper(),
+            pendingRecordingStore: makePendingRecordingStore()
         )
 
         await coordinator.startNewCapture()
@@ -411,7 +413,8 @@ final class CaptureCoordinatorTests: XCTestCase {
             screenshotService: MockScreenshotService(),
             recordingService: MockRecordingService(),
             selectionService: FailingSelectionService(error: SelectionError.cancelled),
-            delaySleeper: MockDelaySleeper()
+            delaySleeper: MockDelaySleeper(),
+            pendingRecordingStore: makePendingRecordingStore()
         )
 
         await coordinator.startScreenRecording()
@@ -438,7 +441,8 @@ final class CaptureCoordinatorTests: XCTestCase {
             screenshotService: MockScreenshotService(),
             recordingService: recordingService,
             selectionService: MockSelectionService(),
-            delaySleeper: MockDelaySleeper()
+            delaySleeper: MockDelaySleeper(),
+            pendingRecordingStore: makePendingRecordingStore()
         )
 
         await coordinator.startNewCapture()
@@ -466,7 +470,8 @@ final class CaptureCoordinatorTests: XCTestCase {
             screenshotService: MockScreenshotService(),
             recordingService: MockRecordingService(),
             selectionService: MockSelectionService(),
-            delaySleeper: delaySleeper
+            delaySleeper: delaySleeper,
+            pendingRecordingStore: makePendingRecordingStore()
         )
 
         await coordinator.startNewCapture()
@@ -492,7 +497,8 @@ final class CaptureCoordinatorTests: XCTestCase {
             screenshotService: MockScreenshotService(),
             recordingService: recordingService,
             selectionService: selectionService,
-            delaySleeper: MockDelaySleeper()
+            delaySleeper: MockDelaySleeper(),
+            pendingRecordingStore: makePendingRecordingStore()
         )
 
         await coordinator.startNewCapture()
@@ -522,7 +528,8 @@ final class CaptureCoordinatorTests: XCTestCase {
             screenshotService: MockScreenshotService(),
             recordingService: MockRecordingService(),
             selectionService: MockSelectionService(),
-            delaySleeper: MockDelaySleeper()
+            delaySleeper: MockDelaySleeper(),
+            pendingRecordingStore: makePendingRecordingStore()
         )
 
         await coordinator.startNewCapture()
@@ -552,7 +559,8 @@ final class CaptureCoordinatorTests: XCTestCase {
             recordingService: MockRecordingService(),
             selectionService: MockSelectionService(),
             delaySleeper: MockDelaySleeper(),
-            fileRevealService: fileRevealService
+            fileRevealService: fileRevealService,
+            pendingRecordingStore: makePendingRecordingStore()
         )
 
         await coordinator.startNewCapture()
@@ -653,7 +661,8 @@ final class CaptureCoordinatorTests: XCTestCase {
             screenshotService: MockScreenshotService(),
             recordingService: recordingService,
             selectionService: selectionService,
-            delaySleeper: MockDelaySleeper()
+            delaySleeper: MockDelaySleeper(),
+            pendingRecordingStore: makePendingRecordingStore()
         )
 
         await coordinator.startScreenRecording()
@@ -681,7 +690,8 @@ final class CaptureCoordinatorTests: XCTestCase {
             screenshotService: MockScreenshotService(),
             recordingService: recordingService,
             selectionService: selectionService,
-            delaySleeper: MockDelaySleeper()
+            delaySleeper: MockDelaySleeper(),
+            pendingRecordingStore: makePendingRecordingStore()
         )
 
         await coordinator.startScreenRecording()
@@ -709,7 +719,8 @@ final class CaptureCoordinatorTests: XCTestCase {
             recordingService: EventLoggingRecordingService(events: events),
             selectionService: EventLoggingSelectionService(events: events),
             delaySleeper: MockDelaySleeper(),
-            windowVisibilityController: EventLoggingWindowVisibilityController(events: events)
+            windowVisibilityController: EventLoggingWindowVisibilityController(events: events),
+            pendingRecordingStore: makePendingRecordingStore()
         )
 
         await coordinator.startScreenRecording()
@@ -734,7 +745,8 @@ final class CaptureCoordinatorTests: XCTestCase {
             recordingService: EventLoggingStoppedRecordingService(events: events),
             selectionService: EventLoggingSelectionService(events: events),
             delaySleeper: MockDelaySleeper(),
-            windowVisibilityController: EventLoggingWindowVisibilityController(events: events)
+            windowVisibilityController: EventLoggingWindowVisibilityController(events: events),
+            pendingRecordingStore: makePendingRecordingStore()
         )
 
         await coordinator.startScreenRecording()
@@ -761,7 +773,8 @@ final class CaptureCoordinatorTests: XCTestCase {
             recordingService: EventLoggingRecordingService(events: events),
             selectionService: EventLoggingSelectionService(events: events),
             delaySleeper: EventLoggingDelaySleeper(events: events),
-            windowVisibilityController: EventLoggingWindowVisibilityController(events: events)
+            windowVisibilityController: EventLoggingWindowVisibilityController(events: events),
+            pendingRecordingStore: makePendingRecordingStore()
         )
 
         await coordinator.startScreenRecording()
@@ -784,7 +797,8 @@ final class CaptureCoordinatorTests: XCTestCase {
             screenshotService: MockScreenshotService(),
             recordingService: recordingService,
             selectionService: MockSelectionService(),
-            delaySleeper: MockDelaySleeper()
+            delaySleeper: MockDelaySleeper(),
+            pendingRecordingStore: makePendingRecordingStore()
         )
 
         let recordingTask = Task {
@@ -844,7 +858,8 @@ final class CaptureCoordinatorTests: XCTestCase {
             settingsStore: settingsStore,
             recordingService: FailingRecordingService(error: RecordingError.streamFailed("Encoder disconnected")),
             selectionService: MockSelectionService(),
-            delaySleeper: MockDelaySleeper()
+            delaySleeper: MockDelaySleeper(),
+            pendingRecordingStore: makePendingRecordingStore()
         )
 
         await coordinator.startScreenRecording()
@@ -969,6 +984,16 @@ final class CaptureCoordinatorTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
         return defaults
+    }
+
+    @MainActor
+    private func makePendingRecordingStore() -> PendingRecordingStore {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CaptureCoordinatorTests-pending-\(UUID().uuidString)", isDirectory: true)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        return PendingRecordingStore(directoryURL: directory)
     }
 
     @MainActor

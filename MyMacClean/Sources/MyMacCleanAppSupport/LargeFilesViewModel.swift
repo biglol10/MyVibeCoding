@@ -5,12 +5,12 @@ import MyMacCleanCore
 @MainActor
 @Observable
 public final class LargeFilesViewModel {
-    private let scanRoots: [URL]
     private let minimumSize: Int64
     private let planner: DeletionPlanner
-    private let executor: DeletionExecutor
+    private let executorOverride: DeletionExecutor?
     private let verifier: DeletionVerifier
     private let receiptStore: DeletionReceiptStore
+    private let largeFileScanning: LargeFileScanning
 
     public var candidates: [LargeFileCandidate] = []
     public var selectedCandidateIDs: Set<LargeFileCandidate.ID> = []
@@ -20,7 +20,16 @@ public final class LargeFilesViewModel {
     public var isDeleting = false
     public var hasScanned = false
     public var errorMessage: String?
+    public var scanIssues: [ScanIssue] = []
     public var deletionReport: DeletionReportViewModel?
+    public private(set) var activeScanRoot: URL
+    public var includeSubfolders = false {
+        didSet {
+            guard includeSubfolders != oldValue else { return }
+            invalidateScanState()
+            errorMessage = nil
+        }
+    }
 
     public init(
         scanRoots: [URL] = LargeFilesViewModel.defaultScanRoots(),
@@ -28,16 +37,21 @@ public final class LargeFilesViewModel {
         planner: DeletionPlanner = DeletionPlanner(),
         executor: DeletionExecutor? = nil,
         verifier: DeletionVerifier = DeletionVerifier(),
-        receiptStore: DeletionReceiptStore = .default()
+        receiptStore: DeletionReceiptStore = .default(),
+        largeFileScanning: LargeFileScanning = .live
     ) {
-        self.scanRoots = scanRoots
+        let defaultRoot = Self.defaultScanRoots().first
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads", isDirectory: true)
+        let configuredRoot = scanRoots.first ?? defaultRoot
+        self.activeScanRoot = UserFileCleanupPolicy.accepts(root: configuredRoot)
+            ? configuredRoot.standardizedFileURL
+            : defaultRoot.standardizedFileURL
         self.minimumSize = minimumSize
         self.planner = planner
-        self.executor = executor ?? DeletionExecutor(
-            deletionProtectionPolicy: UserFileCleanupPolicy(allowedRoots: scanRoots).deletionProtectionPolicy
-        )
+        self.executorOverride = executor
         self.verifier = verifier
         self.receiptStore = receiptStore
+        self.largeFileScanning = largeFileScanning
     }
 
     public static func defaultScanRoots(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> [URL] {
@@ -69,21 +83,42 @@ public final class LargeFilesViewModel {
         candidates.reduce(0) { $0 + $1.size }
     }
 
+    @discardableResult
+    public func setScanRoot(_ root: URL) -> Bool {
+        let standardizedRoot = root.standardizedFileURL
+        guard UserFileCleanupPolicy.accepts(root: standardizedRoot) else {
+            errorMessage = "Choose a specific folder. Filesystem, home, application, library, and volume roots are not allowed."
+            return false
+        }
+
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: standardizedRoot.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            errorMessage = "Choose an existing folder to scan."
+            return false
+        }
+
+        guard standardizedRoot != activeScanRoot else {
+            errorMessage = nil
+            return true
+        }
+
+        activeScanRoot = standardizedRoot
+        invalidateScanState()
+        errorMessage = nil
+        return true
+    }
+
     public func scan() async {
         guard !isScanning else { return }
         isScanning = true
         defer { isScanning = false }
-        candidates = []
-        selectedCandidateIDs = []
-        deletionReport = nil
-        do {
-            candidates = try await LargeFileScanner(roots: scanRoots, minimumSize: minimumSize, recursive: false).scan()
-            hasScanned = true
-            errorMessage = nil
-        } catch {
-            hasScanned = true
-            errorMessage = error.localizedDescription
-        }
+        invalidateScanState()
+        let result = await largeFileScanning.scan([activeScanRoot], minimumSize, includeSubfolders)
+        candidates = result.value
+        scanIssues = result.issues
+        hasScanned = true
+        errorMessage = nil
     }
 
     @discardableResult
@@ -108,7 +143,7 @@ public final class LargeFilesViewModel {
             bundleIdentifier: nil,
             version: nil,
             executableName: nil,
-            bundleURL: scanRoots.first ?? FileManager.default.homeDirectoryForCurrentUser,
+            bundleURL: activeScanRoot,
             iconIdentifier: nil,
             bundleSize: 0,
             lastOpenedAt: nil
@@ -119,7 +154,7 @@ public final class LargeFilesViewModel {
             let plan = try planner.makePlan(app: app, candidates: relatedCandidates, selectedIDs: selectedIDs)
             isDeleting = true
             defer { isDeleting = false }
-            let results = await executor.execute(plan: plan, confirmation: confirmation, mode: .moveToTrash)
+            let results = await activeExecutor.execute(plan: plan, confirmation: confirmation, mode: .moveToTrash)
             let verificationResults = await verifier.verify(plan: plan, executionResults: results)
             let receipt = DeletionReceipt(
                 appName: "Large Files",
@@ -156,6 +191,22 @@ public final class LargeFilesViewModel {
         candidates.removeAll { deletedPaths.contains($0.url.path) }
         let remainingIDs = Set(candidates.map(\.id))
         selectedCandidateIDs.formIntersection(remainingIDs)
+    }
+
+    private var activeExecutor: DeletionExecutor {
+        executorOverride ?? DeletionExecutor(
+            deletionProtectionPolicy: UserFileCleanupPolicy(
+                allowedRoots: [activeScanRoot]
+            ).deletionProtectionPolicy
+        )
+    }
+
+    private func invalidateScanState() {
+        candidates = []
+        selectedCandidateIDs = []
+        deletionReport = nil
+        scanIssues = []
+        hasScanned = false
     }
 
     private func sorted(_ candidates: [LargeFileCandidate]) -> [LargeFileCandidate] {

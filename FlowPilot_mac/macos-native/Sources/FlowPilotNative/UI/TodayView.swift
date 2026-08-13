@@ -13,6 +13,7 @@ struct TodayView: View {
                 header
                 permissionNotice
                 collectorPauseNotice
+                reportStoreError
                 collectorError
                 browserBridgeError
                 summaryGrid
@@ -89,14 +90,41 @@ struct TodayView: View {
     }
 
     @ViewBuilder
+    private var reportStoreError: some View {
+        if let error = store.lastError {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("데이터를 읽는 중 문제가 발생했습니다")
+                    .font(.headline)
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("데이터 다시 읽기") {
+                    store.refresh()
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+            .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.red.opacity(0.25)))
+        }
+    }
+
+    @ViewBuilder
     private var browserBridgeError: some View {
         if let error = browserBridge.lastError {
-            Text("브라우저 브리지: \(error)")
-                .font(.caption)
-                .foregroundStyle(.orange)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
-                .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 8) {
+                Text("브라우저 브리지: \(error)")
+                if !browserBridge.isRunning {
+                    Button("브리지 다시 시도") {
+                        browserBridge.restart()
+                    }
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.orange)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+            .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
         }
     }
 

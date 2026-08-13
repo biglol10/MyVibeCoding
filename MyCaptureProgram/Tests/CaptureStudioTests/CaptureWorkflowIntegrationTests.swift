@@ -19,7 +19,7 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
             settings.showInFinderAfterSave = false
         }
         let clipboard = SpyClipboardService()
-        let coordinator = try await Self.makeCoordinator(
+        let coordinator = try await makeCoordinator(
             appState: appState,
             settingsStore: settingsStore,
             clipboardService: clipboard
@@ -48,7 +48,7 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
             settings.defaultDelaySeconds = 0
         }
         let selection = try await Self.smallDisplaySelection()
-        let coordinator = try await Self.makeCoordinator(
+        let coordinator = try await makeCoordinator(
             appState: appState,
             settingsStore: settingsStore,
             selection: selection
@@ -81,7 +81,7 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
             settings.defaultDelaySeconds = 0
         }
         let selection = try await Self.smallDisplaySelection()
-        let coordinator = try await Self.makeCoordinator(
+        let coordinator = try await makeCoordinator(
             appState: appState,
             settingsStore: settingsStore,
             selection: selection
@@ -123,7 +123,7 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
             settings.showInFinderAfterSave = false
         }
         let selection = try await Self.smallDisplaySelection()
-        let coordinator = try await Self.makeCoordinator(
+        let coordinator = try await makeCoordinator(
             appState: appState,
             settingsStore: settingsStore,
             selection: selection
@@ -155,7 +155,7 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
             settings.recordingQuality = .standard
         }
         let selection = try await Self.smallDisplaySelection()
-        let coordinator = try await Self.makeCoordinator(
+        let coordinator = try await makeCoordinator(
             appState: appState,
             settingsStore: settingsStore,
             selection: selection
@@ -195,7 +195,7 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
             settings.recordingQuality = .standard
         }
         let selection = try await Self.mediumDisplaySelection()
-        let coordinator = try await Self.makeCoordinator(
+        let coordinator = try await makeCoordinator(
             appState: appState,
             settingsStore: settingsStore,
             selection: selection
@@ -213,7 +213,7 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
         XCTAssertLessThanOrEqual(duration, 6.5)
     }
 
-    private static func makeCoordinator(
+    private func makeCoordinator(
         appState: AppState,
         settingsStore: SettingsStore,
         clipboardService: ClipboardServicing = SpyClipboardService(),
@@ -223,7 +223,11 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
         if let selection {
             resolvedSelection = selection
         } else {
-            resolvedSelection = try await smallDisplaySelection()
+            resolvedSelection = try await Self.smallDisplaySelection()
+        }
+        let pendingDirectory = try Self.makeTemporaryDirectory()
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: pendingDirectory)
         }
         return CaptureCoordinator(
             appState: appState,
@@ -234,7 +238,8 @@ final class CaptureWorkflowIntegrationTests: XCTestCase {
             selectionService: FixedSelectionService(selection: resolvedSelection),
             delaySleeper: NoOpDelaySleeper(),
             clipboardService: clipboardService,
-            fileRevealService: NoOpFileRevealService()
+            fileRevealService: NoOpFileRevealService(),
+            pendingRecordingStore: PendingRecordingStore(directoryURL: pendingDirectory)
         )
     }
 

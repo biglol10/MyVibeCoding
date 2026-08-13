@@ -102,4 +102,28 @@ final class DeletionHistoryReceiptSummaryTests: XCTestCase {
         XCTAssertEqual(summary.primaryCount, 1)
         XCTAssertEqual(summary.remainingCount, 0)
     }
+
+    func testLabelsVerifiedAppResetWithoutUninstallLanguage() {
+        let receipt = DeletionReceipt(
+            appName: "Cursor",
+            bundleIdentifier: "com.example.cursor",
+            bundlePath: "/Applications/Cursor.app",
+            action: .appReset,
+            selectedCandidates: [],
+            executionResults: [
+                DeletionItemResult(path: "/Users/me/Library/Caches/com.example.cursor", success: true, errorMessage: nil)
+            ],
+            verificationResults: [
+                DeletionVerificationResult(path: "/Users/me/Library/Caches/com.example.cursor", status: .deleted, errorMessage: nil)
+            ],
+            confirmationMatched: true
+        )
+
+        let summary = DeletionHistoryReceiptSummary(receipt: receipt)
+
+        XCTAssertEqual(summary.actionTitle, "App Data Reset")
+        XCTAssertEqual(summary.statusTitle, "Verified")
+        XCTAssertEqual(summary.primaryCountTitle, "Reset")
+        XCTAssertEqual(summary.primaryCount, 1)
+    }
 }

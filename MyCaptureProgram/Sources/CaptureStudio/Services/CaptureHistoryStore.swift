@@ -1,5 +1,5 @@
-import AppKit
 import Foundation
+import ImageIO
 
 @MainActor
 public final class CaptureHistoryStore: ObservableObject {
@@ -30,12 +30,20 @@ public final class CaptureHistoryStore: ObservableObject {
     }
 
     public func add(_ item: CaptureHistoryItem) {
+        add(item, thumbnailIsPrepared: false)
+    }
+
+    public func addPrepared(_ item: CaptureHistoryItem) {
+        add(item, thumbnailIsPrepared: true)
+    }
+
+    private func add(_ item: CaptureHistoryItem, thumbnailIsPrepared: Bool) {
         let removedItems = items.filter { existing in
             existing.id == item.id || existing.fileURL.standardizedFileURL == item.fileURL.standardizedFileURL
         }
         removedItems.forEach { _ = deleteThumbnailIfNeeded($0) }
         items.removeAll { removedItems.contains($0) }
-        items.insert(storedItem(from: item), at: 0)
+        items.insert(storedItem(from: item, thumbnailIsPrepared: thumbnailIsPrepared), at: 0)
         items.sort { $0.createdAt > $1.createdAt }
         if items.count > maxItems {
             let droppedItems = Array(items.dropFirst(maxItems))
@@ -92,12 +100,15 @@ public final class CaptureHistoryStore: ObservableObject {
         defaults.set(data, forKey: Self.storageKey)
     }
 
-    private func storedItem(from item: CaptureHistoryItem) -> CaptureHistoryItem {
+    private func storedItem(from item: CaptureHistoryItem, thumbnailIsPrepared: Bool) -> CaptureHistoryItem {
         var storedItem = item
         storedItem.thumbnailURL = nil
         if item.kind == .screenshot,
            let sourceData = item.thumbnailData,
-           let thumbnailData = Self.thumbnailData(from: sourceData) {
+           let thumbnailData = thumbnailIsPrepared
+            ? sourceData
+            : CaptureHistoryThumbnailService.encodeThumbnail(from: sourceData),
+           CGImageSourceCreateWithData(thumbnailData as CFData, nil) != nil {
             let thumbnailURL = thumbnailDirectory
                 .appendingPathComponent(item.id.uuidString)
                 .appendingPathExtension("png")
@@ -111,35 +122,6 @@ public final class CaptureHistoryStore: ObservableObject {
         }
         storedItem.thumbnailData = nil
         return storedItem
-    }
-
-    static func thumbnailData(from sourceData: Data) -> Data? {
-        guard let image = NSImage(data: sourceData), image.size.width > 0, image.size.height > 0 else {
-            return nil
-        }
-
-        let maxSize = NSSize(width: 240, height: 160)
-        let scale = min(maxSize.width / image.size.width, maxSize.height / image.size.height, 1)
-        let targetSize = NSSize(
-            width: max(1, image.size.width * scale),
-            height: max(1, image.size.height * scale)
-        )
-        let thumbnail = NSImage(size: targetSize)
-        thumbnail.lockFocus()
-        image.draw(
-            in: NSRect(origin: .zero, size: targetSize),
-            from: NSRect(origin: .zero, size: image.size),
-            operation: .copy,
-            fraction: 1
-        )
-        thumbnail.unlockFocus()
-
-        guard let tiffData = thumbnail.tiffRepresentation,
-              let representation = NSBitmapImageRep(data: tiffData)
-        else {
-            return nil
-        }
-        return representation.representation(using: .png, properties: [:])
     }
 
     private func deleteThumbnailIfNeeded(_ item: CaptureHistoryItem) -> Bool {

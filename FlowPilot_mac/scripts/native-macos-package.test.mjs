@@ -21,16 +21,18 @@ test("native macOS app declares Safari automation usage", () => {
 
   assert.match(script, /NSAppleEventsUsageDescription/);
   assert.match(script, /Safari.*현재 탭.*URL/);
-  assert.match(script, /CFBundleIconFile/);
-  assert.match(script, /cp "\$ICON_SOURCE" "\$RESOURCES_DIR\/icon\.icns"/);
 });
 
-test("native macOS app sets the Dock icon from the bundled icon", () => {
-  const app = readFileSync(
+test("native macOS app bundle installs the shared FlowPilot icon", () => {
+  const script = readFileSync(resolve(root, "macos-native/scripts/build-dev-app.sh"), "utf8");
+  const appSource = readFileSync(
     resolve(root, "macos-native/Sources/FlowPilotNative/FlowPilotNativeApp.swift"),
-    "utf8"
+    "utf8",
   );
 
-  assert.match(app, /installDockIcon\(\)/);
-  assert.match(app, /NSApplication\.shared\.applicationIconImage = icon/);
+  assert.match(script, /src-tauri\/icons\/icon\.icns/);
+  assert.match(script, /cp "\$ICON_SOURCE" "\$RESOURCES_DIR\/icon\.icns"/);
+  assert.match(script, /CFBundleIconFile/);
+  assert.match(script, /<string>icon<\/string>/);
+  assert.match(appSource, /applicationIconImage = icon/);
 });

@@ -23,8 +23,13 @@ public final class CaptureCoordinator: ObservableObject {
     private let floatingPinService: FloatingPinServicing
     private let recordingExportService: RecordingExportServicing
     private let documentReplacementAuthorizer: DocumentReplacementAuthorizing
+    private let pendingRecordingStore: PendingRecordingStore
+    private let pendingRecordingValidator: PendingRecordingMediaValidator
+    private let historyThumbnailService: CaptureHistoryThumbnailService
+    private let historyFileLoader: CaptureHistoryFileLoader
     private var screenshotSaveGenerationByDocumentID: [UUID: UInt64] = [:]
     private var isTerminationPreparationInProgress = false
+    private var didAttemptPendingRecordingRecovery = false
 
     public init(
         appState: AppState,
@@ -46,6 +51,10 @@ public final class CaptureCoordinator: ObservableObject {
         metadataService: CaptureMetadataServicing = CoreGraphicsCaptureMetadataService(),
         floatingPinService: FloatingPinServicing = AppKitFloatingPinService(),
         recordingExportService: RecordingExportServicing = AVFoundationRecordingExportService(),
+        pendingRecordingStore: PendingRecordingStore = PendingRecordingStore(),
+        pendingRecordingValidator: PendingRecordingMediaValidator = PendingRecordingMediaValidator(),
+        historyThumbnailService: CaptureHistoryThumbnailService = CaptureHistoryThumbnailService(),
+        historyFileLoader: CaptureHistoryFileLoader = CaptureHistoryFileLoader(),
         documentReplacementAuthorizer: DocumentReplacementAuthorizing = AppKitDocumentReplacementAuthorizer()
     ) {
         self.appState = appState
@@ -67,6 +76,10 @@ public final class CaptureCoordinator: ObservableObject {
         self.metadataService = metadataService
         self.floatingPinService = floatingPinService
         self.recordingExportService = recordingExportService
+        self.pendingRecordingStore = pendingRecordingStore
+        self.pendingRecordingValidator = pendingRecordingValidator
+        self.historyThumbnailService = historyThumbnailService
+        self.historyFileLoader = historyFileLoader
         self.documentReplacementAuthorizer = documentReplacementAuthorizer
     }
 
@@ -136,7 +149,7 @@ public final class CaptureCoordinator: ObservableObject {
                 )
                 appState.currentDocument = document
                 discardSupersededTemporaryRecordingIfNeeded(replacement)
-                addHistoryItem(for: document)
+                await addHistoryItem(for: document)
                 appState.statusMessage = "Screenshot captured."
             } else {
                 let document = EditorDocument(
@@ -179,7 +192,7 @@ public final class CaptureCoordinator: ObservableObject {
             captureWindowsAreHidden = false
             let namingContext = metadataService.namingContext(for: selection)
             try await waitIfNeeded(seconds: settings.countdownSeconds)
-            let outputURL = fileOutputService.temporaryRecordingURL()
+            let outputURL = try pendingRecordingStore.allocateRecordingURL()
             appState.isRecordingInProgress = true
             defer { appState.isRecordingInProgress = false }
             let result = try await recordingService.recordScreen(selection: selection, to: outputURL, settings: settings)
@@ -226,7 +239,7 @@ public final class CaptureCoordinator: ObservableObject {
             appState.currentDocument = document
             discardSupersededTemporaryRecordingIfNeeded(replacement)
             if settings.automaticallySaveRecordings {
-                addHistoryItem(for: document)
+                await addHistoryItem(for: document)
                 revealIfNeeded(finalURL, settings: settings)
                 appState.statusMessage = "Recording saved."
             } else {
@@ -252,6 +265,58 @@ public final class CaptureCoordinator: ObservableObject {
 
         appState.statusMessage = "Stopping recording..."
         await recordingService.stopRecording()
+    }
+
+    public func recoverPendingRecordingIfAvailable() async {
+        guard !didAttemptPendingRecordingRecovery,
+              appState.currentDocument == nil,
+              !appState.isInteractionBlocked,
+              !appState.isRecordingInProgress
+        else {
+            return
+        }
+        didAttemptPendingRecordingRecovery = true
+
+        let pendingRecordingStore = self.pendingRecordingStore
+        do {
+            let recordings = try await Task.detached(priority: .utility) {
+                try pendingRecordingStore.recoverableRecordings()
+            }.value
+            var recoverableRecording: PendingRecording?
+            for candidate in recordings {
+                if await pendingRecordingValidator.isRecoverableRecording(at: candidate.fileURL) {
+                    recoverableRecording = candidate
+                    break
+                }
+            }
+            guard appState.currentDocument == nil,
+                  !appState.isInteractionBlocked,
+                  !appState.isRecordingInProgress
+            else {
+                didAttemptPendingRecordingRecovery = false
+                return
+            }
+            guard let recording = recoverableRecording,
+                  recording.fileIdentity.matchesExistingFile(at: recording.fileURL)
+            else {
+                if !recordings.isEmpty {
+                    appState.statusMessage = "An unsaved recording was found but could not be recovered."
+                }
+                return
+            }
+
+            appState.currentDocument = EditorDocument(
+                kind: .recording,
+                createdAt: recording.createdAt,
+                fileURL: recording.fileURL,
+                fileIdentity: recording.fileIdentity,
+                namingContext: FileNamingContext(applicationName: "Recovered Recording", windowTitle: nil),
+                isDirty: true
+            )
+            appState.statusMessage = "Recovered an unsaved recording. Save or delete it before starting another capture."
+        } catch {
+            appState.statusMessage = "Unsaved recordings could not be checked: \(error.localizedDescription)"
+        }
     }
 
     public var needsTerminationPreparation: Bool {
@@ -329,7 +394,7 @@ public final class CaptureCoordinator: ObservableObject {
                 }
                 var historyDocument = document
                 historyDocument.renderedImageData = outputData
-                addHistoryItem(for: historyDocument)
+                await addHistoryItem(for: historyDocument)
                 appState.statusMessage = "Screenshot saved."
             } catch let error as ImageRenderError {
                 if isCurrentScreenshotSave(saveGeneration, expectedRevision: expectedRevision) {
@@ -373,7 +438,7 @@ public final class CaptureCoordinator: ObservableObject {
                 document.fileIdentity = try? CaptureFileIdentity.existingFile(at: fileURL)
                 document.isDirty = false
                 appState.currentDocument = document
-                addHistoryItem(for: document)
+                await addHistoryItem(for: document)
                 appState.statusMessage = "Recording saved."
             } catch {
                 appState.statusMessage = "Save failed: \(error.localizedDescription)"
@@ -459,10 +524,17 @@ public final class CaptureCoordinator: ObservableObject {
         }
         replacement = refreshedReplacement
         guard validateHistoryItemForOpening(item),
-              let historyDocument = historyDocument(for: item)
+              let historyDocument = await historyDocument(for: item)
         else {
             return
         }
+        guard let refreshedReplacement = await refreshReplacementAuthorizationIfDocumentChanged(
+            replacement,
+            cancelStatusMessage: "History item was not opened. Current document was preserved."
+        ) else {
+            return
+        }
+        replacement = refreshedReplacement
 
         discardSupersededTemporaryRecordingIfNeeded(replacement)
         appState.currentDocument = historyDocument
@@ -572,7 +644,7 @@ public final class CaptureCoordinator: ObservableObject {
                 identity: sourceIdentity
             )
             appState.currentDocument = currentDocument
-            addHistoryItem(for: currentDocument)
+            await addHistoryItem(for: currentDocument)
             revealIfNeeded(trimmedURL, settings: settingsStore.settings)
             appState.statusMessage = removedTemporarySource
                 ? "Recording trimmed."
@@ -788,8 +860,11 @@ public final class CaptureCoordinator: ObservableObject {
         fileRevealService.reveal(url)
     }
 
-    private func addHistoryItem(for document: EditorDocument) {
-        guard let fileURL = document.fileURL else {
+    private func addHistoryItem(for document: EditorDocument) async {
+        guard let fileURL = document.fileURL,
+              let expectedFileIdentity = document.fileIdentity
+                ?? (try? CaptureFileIdentity.existingFile(at: fileURL))
+        else {
             return
         }
 
@@ -798,28 +873,28 @@ public final class CaptureCoordinator: ObservableObject {
             ? context?.displayTitle ?? fileURL.lastPathComponent
             : fileURL.lastPathComponent
         let detail = document.kind == .recording ? "Recording" : "Screenshot"
-        historyStore?.add(
+        let thumbnailData: Data?
+        if document.kind == .screenshot, let imageData = document.currentImageData {
+            thumbnailData = await historyThumbnailService.thumbnailData(from: imageData)
+        } else {
+            thumbnailData = nil
+        }
+        guard expectedFileIdentity.matchesExistingFile(at: fileURL) else {
+            return
+        }
+        historyStore?.addPrepared(
             CaptureHistoryItem(
                 kind: document.kind,
                 createdAt: document.createdAt,
                 fileURL: fileURL,
                 title: title,
                 detail: detail,
-                fileIdentity: try? CaptureFileIdentity.existingFile(at: fileURL),
-                thumbnailData: Self.historyThumbnailData(for: document),
+                fileIdentity: expectedFileIdentity,
+                thumbnailData: thumbnailData,
                 sourceApplication: context?.applicationName,
                 windowTitle: context?.windowTitle
             )
         )
-    }
-
-    private static func historyThumbnailData(for document: EditorDocument) -> Data? {
-        guard document.kind == .screenshot,
-              let imageData = document.currentImageData
-        else {
-            return nil
-        }
-        return CaptureHistoryStore.thumbnailData(from: imageData)
     }
 
     private func waitIfNeeded(seconds: Int) async throws {
@@ -1015,7 +1090,7 @@ public final class CaptureCoordinator: ObservableObject {
         return true
     }
 
-    private func historyDocument(for item: CaptureHistoryItem) -> EditorDocument? {
+    private func historyDocument(for item: CaptureHistoryItem) async -> EditorDocument? {
         do {
             let fileIdentity = try item.fileIdentity ?? CaptureFileIdentity.existingFile(at: item.fileURL)
             let namingContext = FileNamingContext(
@@ -1024,7 +1099,7 @@ public final class CaptureCoordinator: ObservableObject {
             )
             switch item.kind {
             case .screenshot:
-                let data = try Data(contentsOf: item.fileURL)
+                let data = try await historyFileLoader.load(item.fileURL)
                 guard fileIdentity.matchesExistingFile(at: item.fileURL) else {
                     appState.statusMessage = "History file changed and was not opened."
                     return nil
@@ -1062,9 +1137,7 @@ public final class CaptureCoordinator: ObservableObject {
               let fileURL = document.fileURL,
               let fileIdentity = document.fileIdentity,
               fileIdentity.matchesExistingFile(at: fileURL),
-              fileURL.standardizedFileURL.path.hasPrefix(
-                FileManager.default.temporaryDirectory.standardizedFileURL.path + "/"
-              )
+              pendingRecordingStore.owns(fileURL)
         else {
             return
         }
@@ -1093,9 +1166,7 @@ public final class CaptureCoordinator: ObservableObject {
         guard document.kind == .recording,
               document.isDirty,
               let fileURL = document.fileURL,
-              fileURL.standardizedFileURL.path.hasPrefix(
-                FileManager.default.temporaryDirectory.standardizedFileURL.path + "/"
-              )
+              pendingRecordingStore.owns(fileURL)
         else {
             return true
         }

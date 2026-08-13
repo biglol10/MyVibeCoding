@@ -18,7 +18,7 @@ final class SidebarFavoritesStoreTests: XCTestCase {
         }
     }
 
-    func testDefaultsStoreSavesAndLoadsSidebarState() {
+    func testDefaultsStoreSavesAndLoadsSidebarState() throws {
         let state = SidebarState(
             favorites: [
                 SidebarFavorite(title: "Projects", url: URL(fileURLWithPath: "/Users/biglol/Projects", isDirectory: true))
@@ -28,25 +28,26 @@ final class SidebarFavoritesStoreTests: XCTestCase {
             ]
         )
 
-        UserDefaultsSidebarFavoritesStore(defaults: defaults, key: "sidebar").save(state)
-        let loaded = UserDefaultsSidebarFavoritesStore(defaults: defaults, key: "sidebar").load()
+        try UserDefaultsSidebarFavoritesStore(defaults: defaults, key: "sidebar").save(state)
+        let loaded = try UserDefaultsSidebarFavoritesStore(defaults: defaults, key: "sidebar").load()
 
         XCTAssertEqual(loaded, state)
     }
 
-    func testDefaultsStoreSeedsDefaultFavoritesWhenMissing() {
-        let loaded = UserDefaultsSidebarFavoritesStore(defaults: defaults, key: "sidebar").load()
+    func testDefaultsStoreSeedsDefaultFavoritesWhenMissing() throws {
+        let loaded = try UserDefaultsSidebarFavoritesStore(defaults: defaults, key: "sidebar").load()
 
         XCTAssertEqual(loaded.favorites.map(\.title), ["Home", "Desktop", "Documents", "Downloads", "Applications"])
         XCTAssertTrue(loaded.recentFolders.isEmpty)
     }
 
-    func testDefaultsStoreFallsBackToDefaultFavoritesWhenDataIsCorrupt() {
-        defaults.set(Data("not json".utf8), forKey: "sidebar")
+    func testDefaultsStoreThrowsAndPreservesStoredBytesWhenDataIsCorrupt() {
+        let corruptData = Data("not json".utf8)
+        defaults.set(corruptData, forKey: "sidebar")
 
-        let loaded = UserDefaultsSidebarFavoritesStore(defaults: defaults, key: "sidebar").load()
+        let store = UserDefaultsSidebarFavoritesStore(defaults: defaults, key: "sidebar")
 
-        XCTAssertEqual(loaded.favorites.map(\.title), ["Home", "Desktop", "Documents", "Downloads", "Applications"])
-        XCTAssertTrue(loaded.recentFolders.isEmpty)
+        XCTAssertThrowsError(try store.load())
+        XCTAssertEqual(defaults.data(forKey: "sidebar"), corruptData)
     }
 }

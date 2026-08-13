@@ -130,6 +130,42 @@ final class CaptureHistoryStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testStoreWritesPreparedThumbnailWithoutReencodingIt() throws {
+        let thumbnailDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CaptureHistoryStoreTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: thumbnailDirectory) }
+        let preparedThumbnail = try pngData(width: 120, height: 80)
+        let store = CaptureHistoryStore(
+            defaults: isolatedDefaults("preparedThumbnail"),
+            thumbnailDirectory: thumbnailDirectory
+        )
+
+        store.addPrepared(
+            CaptureHistoryItem(
+                kind: .screenshot,
+                createdAt: Date(timeIntervalSince1970: 10),
+                fileURL: URL(fileURLWithPath: "/tmp/prepared-thumbnail.png"),
+                title: "Prepared thumbnail",
+                detail: "Screenshot",
+                thumbnailData: preparedThumbnail
+            )
+        )
+
+        let thumbnailURL = try XCTUnwrap(store.items.first?.thumbnailURL)
+        XCTAssertEqual(try Data(contentsOf: thumbnailURL), preparedThumbnail)
+    }
+
+    func testThumbnailServiceRunsEncoderOffTheMainThread() async {
+        let service = CaptureHistoryThumbnailService { _ in
+            Data([Thread.isMainThread ? 1 : 0])
+        }
+
+        let result = await service.thumbnailData(from: Data([9]))
+
+        XCTAssertEqual(result, Data([0]))
+    }
+
+    @MainActor
     func testRemovingHistoryItemDeletesThumbnailFile() throws {
         let thumbnailDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("CaptureHistoryStoreTests-\(UUID().uuidString)", isDirectory: true)

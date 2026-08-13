@@ -44,6 +44,12 @@ final class FloatingWidgetController {
                 name: NSWindow.didMoveNotification,
                 object: newWindow
             )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(screenParametersDidChange(_:)),
+                name: NSApplication.didChangeScreenParametersNotification,
+                object: nil
+            )
             window = newWindow
             hostingController = hosting
         }
@@ -113,6 +119,11 @@ final class FloatingWidgetController {
         FloatingWidgetPositionStore.saveFrame(movedWindow.frame)
     }
 
+    @objc private func screenParametersDidChange(_ notification: Notification) {
+        guard let window else { return }
+        window.setFrame(FloatingWidgetPositionStore.visibleFrame(for: window.frame), display: true)
+    }
+
     deinit {
         NotificationCenter.default.removeObserver(self)
     }
@@ -140,7 +151,7 @@ private enum FloatingWidgetPositionStore {
             width: FloatingWidgetLayout.size.width,
             height: FloatingWidgetLayout.size.height
         )
-        return validatedFrame(frame)
+        return visibleFrame(for: frame)
     }
 
     static func saveFrame(_ frame: NSRect) {
@@ -148,15 +159,12 @@ private enum FloatingWidgetPositionStore {
         UserDefaults.standard.set(frame.origin.y, forKey: originYKey)
     }
 
-    private static func validatedFrame(_ frame: NSRect) -> NSRect {
-        let visibleFrames = NSScreen.screens.map(\.visibleFrame)
-        guard visibleFrames.isEmpty == false else {
-            return FloatingWidgetLayout.initialFrame
-        }
-        guard visibleFrames.contains(where: { $0.intersects(frame) }) else {
-            return defaultFrame()
-        }
-        return frame
+    static func visibleFrame(for frame: NSRect) -> NSRect {
+        WidgetFramePlacement.clampedFrame(
+            frame,
+            visibleFrames: NSScreen.screens.map(\.visibleFrame),
+            fallback: defaultFrame()
+        )
     }
 
     private static func defaultFrame() -> NSRect {

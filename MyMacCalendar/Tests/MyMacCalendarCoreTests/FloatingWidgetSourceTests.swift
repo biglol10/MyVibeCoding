@@ -67,10 +67,11 @@ final class FloatingWidgetSourceTests: XCTestCase {
         XCTAssertTrue(viewSource.contains("Calendar.current.isDate(occurrence.startDate, inSameDayAs: now)"))
         XCTAssertTrue(coordinatorSource.contains("Timer.scheduledTimer"))
         XCTAssertTrue(coordinatorSource.contains("render()"))
-        XCTAssertTrue(controllerSource.contains("validatedFrame"))
+        XCTAssertTrue(controllerSource.contains("WidgetFramePlacement.clampedFrame"))
         XCTAssertTrue(controllerSource.contains("NSScreen.screens"))
         XCTAssertTrue(controllerSource.contains("visibleFrame"))
-        XCTAssertTrue(controllerSource.contains("intersects(frame)"))
+        XCTAssertTrue(controllerSource.contains("NSApplication.didChangeScreenParametersNotification"))
+        XCTAssertTrue(controllerSource.contains("screenParametersDidChange"))
     }
 
     func testFloatingWidgetShowAllUsesLatestOccurrencesAfterRefresh() throws {

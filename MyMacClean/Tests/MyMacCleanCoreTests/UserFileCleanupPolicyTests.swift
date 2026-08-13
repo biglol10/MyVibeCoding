@@ -28,4 +28,31 @@ final class UserFileCleanupPolicyTests: XCTestCase {
 
         XCTAssertTrue(policy.isProtected(URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app")))
     }
+
+    func testRejectsBroadCleanupRoots() {
+        for path in [
+            "/", "/Users", "/Users/tester", "/Applications", "/Applications/Utilities",
+            "/Library", "/Library/Caches", "/System", "/System/Library", "/usr/local",
+            "/private", "/var", "/Volumes", "/Volumes/External"
+        ] {
+            XCTAssertFalse(
+                UserFileCleanupPolicy.accepts(root: URL(fileURLWithPath: path, isDirectory: true)),
+                "\(path) must not be accepted as a broad cleanup root"
+            )
+        }
+
+        XCTAssertTrue(
+            UserFileCleanupPolicy.accepts(
+                root: URL(fileURLWithPath: "/Users/tester/Downloads", isDirectory: true)
+            )
+        )
+    }
+
+    func testRejectedBroadRootDoesNotAllowDescendantDeletion() {
+        let policy = UserFileCleanupPolicy(
+            allowedRoots: [URL(fileURLWithPath: "/Users", isDirectory: true)]
+        )
+
+        XCTAssertTrue(policy.isProtected(URL(fileURLWithPath: "/Users/other/Documents/file.txt")))
+    }
 }

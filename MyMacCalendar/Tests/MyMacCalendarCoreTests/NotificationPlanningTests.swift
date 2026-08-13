@@ -141,6 +141,24 @@ final class NotificationPlanningTests: XCTestCase {
         XCTAssertTrue(plans.isEmpty)
     }
 
+    func testExtremeOffsetDoesNotSuppressOtherValidReminders() throws {
+        let event = snapshot(
+            id: "60000000-0000-0000-0000-000000000002",
+            title: "Partially corrupted offsets",
+            start: try date(2026, 7, 10),
+            recurrence: .none,
+            offsets: [Int.max, 1]
+        )
+
+        let plans = planner.plans(
+            for: [event], defaultHour: 9, defaultMinute: 0,
+            now: try date(2026, 7, 1), horizonDays: 90, maximumPlans: 10, batchID: "partial-overflow"
+        )
+
+        XCTAssertEqual(plans.map(\.offsetDays), [1])
+        XCTAssertEqual(plans.first?.fireDate, try date(2026, 7, 9, hour: 9))
+    }
+
     private var planner: NotificationPlanner {
         NotificationPlanner(calendar: calendar)
     }

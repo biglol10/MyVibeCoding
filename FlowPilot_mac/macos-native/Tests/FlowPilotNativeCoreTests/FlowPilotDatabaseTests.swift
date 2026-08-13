@@ -446,6 +446,72 @@ final class FlowPilotDatabaseTests: XCTestCase {
         }
     }
 
+    func testWindowObservationBatchRollsBackWhenLaterInsertFails() throws {
+        let databaseURL = temporaryDatabaseURL()
+        let database = FlowPilotDatabase(path: databaseURL.path)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let session = testSession(id: "atomic-session", at: now)
+        try database.saveSessions([session])
+        try withWritableDatabase(databaseURL) { db in
+            try execute(db, """
+                CREATE TRIGGER fail_bad_observation
+                BEFORE INSERT ON window_observations
+                WHEN NEW.app_name = 'Fail'
+                BEGIN
+                  SELECT RAISE(ABORT, 'forced failure');
+                END;
+                """)
+        }
+
+        let observations = [
+            testObservation(appName: "Good", at: now),
+            testObservation(appName: "Fail", at: now)
+        ]
+
+        XCTAssertThrowsError(
+            try database.saveWindowObservations(sessionID: session.id, observations: observations)
+        )
+        try withWritableDatabase(databaseURL) { db in
+            XCTAssertEqual(try intValue(db, "SELECT COUNT(*) FROM window_observations"), 0)
+        }
+    }
+
+    func testWriteWaitsForBriefSQLiteContention() throws {
+        let databaseURL = temporaryDatabaseURL()
+        let database = FlowPilotDatabase(path: databaseURL.path)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        try database.saveSessions([testSession(id: "seed", at: now)])
+
+        var lockDB: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &lockDB), SQLITE_OK)
+        guard let lockDB else { return }
+        defer { sqlite3_close(lockDB) }
+        try execute(lockDB, "BEGIN IMMEDIATE")
+
+        let saveCompleted = expectation(description: "write completed after lock release")
+        let saveStarted = expectation(description: "contended write started")
+        let completion = LockedSaveCompletion()
+        let session = testSession(id: "after-lock", at: now.addingTimeInterval(5))
+        let path = databaseURL.path
+        DispatchQueue.global(qos: .utility).async {
+            saveStarted.fulfill()
+            defer { saveCompleted.fulfill() }
+            do {
+                try FlowPilotDatabase(path: path).saveSessions([session])
+            } catch {
+                completion.record(error)
+            }
+        }
+
+        wait(for: [saveStarted], timeout: 1)
+        Thread.sleep(forTimeInterval: 0.1)
+        try execute(lockDB, "COMMIT")
+        wait(for: [saveCompleted], timeout: 2)
+        if let error = completion.error {
+            XCTFail("Unexpected lock failure: \(error)")
+        }
+    }
+
     private func temporaryDatabaseURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("flowpilot-native-\(UUID().uuidString)")
@@ -543,9 +609,18 @@ final class FlowPilotDatabaseTests: XCTestCase {
 
     private func withWritableDatabase(_ url: URL, body: (OpaquePointer) throws -> Void) throws {
         var db: OpaquePointer?
-        XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
+        let openResult = sqlite3_open(url.path, &db)
+        guard openResult == SQLITE_OK else {
+            let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown sqlite error"
+            XCTFail(message)
+            if let db {
+                sqlite3_close(db)
+            }
+            throw FlowPilotDatabaseError.openFailed(message)
+        }
         guard let db else {
-            return
+            XCTFail("sqlite3_open returned success without a database handle")
+            throw FlowPilotDatabaseError.openFailed("missing database handle")
         }
         defer { sqlite3_close(db) }
         try body(db)
@@ -558,18 +633,59 @@ final class FlowPilotDatabaseTests: XCTestCase {
             let message = error.map { String(cString: $0) } ?? "unknown sqlite error"
             sqlite3_free(error)
             XCTFail(message)
+            throw FlowPilotDatabaseError.stepFailed(message)
         }
     }
 
     private func intValue(_ db: OpaquePointer, _ sql: String) throws -> Int {
         var statement: OpaquePointer?
-        XCTAssertEqual(sqlite3_prepare_v2(db, sql, -1, &statement, nil), SQLITE_OK)
+        let prepareResult = sqlite3_prepare_v2(db, sql, -1, &statement, nil)
+        guard prepareResult == SQLITE_OK else {
+            let message = String(cString: sqlite3_errmsg(db))
+            XCTFail(message)
+            throw FlowPilotDatabaseError.prepareFailed(message)
+        }
         guard let statement else {
-            return 0
+            XCTFail("sqlite3_prepare_v2 returned success without a statement")
+            throw FlowPilotDatabaseError.prepareFailed("missing statement")
         }
         defer { sqlite3_finalize(statement) }
-        XCTAssertEqual(sqlite3_step(statement), SQLITE_ROW)
+        let stepResult = sqlite3_step(statement)
+        guard stepResult == SQLITE_ROW else {
+            let message = String(cString: sqlite3_errmsg(db))
+            XCTFail(message)
+            throw FlowPilotDatabaseError.stepFailed(message)
+        }
         return Int(sqlite3_column_int64(statement, 0))
+    }
+
+    private func testSession(id: String, at date: Date) -> ActivitySessionRecord {
+        ActivitySessionRecord(
+            id: id,
+            startedAt: date,
+            endedAt: date.addingTimeInterval(5),
+            durationSeconds: 5,
+            appName: "Codex",
+            processName: "Codex",
+            windowTitle: "Project",
+            domain: nil,
+            url: nil,
+            isIdle: false
+        )
+    }
+
+    private func testObservation(appName: String, at date: Date) -> WindowObservationRecord {
+        WindowObservationRecord(
+            observedAt: date,
+            appName: appName,
+            processName: appName,
+            pid: 42,
+            bundleIdentifier: "com.example.\(appName.lowercased())",
+            windowTitle: appName,
+            isVisible: true,
+            isFrontmost: appName == "Good",
+            isPrimary: appName == "Good"
+        )
     }
 
     private static let formatter: ISO8601DateFormatter = {
@@ -578,4 +694,21 @@ final class FlowPilotDatabaseTests: XCTestCase {
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         return formatter
     }()
+}
+
+private final class LockedSaveCompletion: @unchecked Sendable {
+    private let lock = NSLock()
+    private var savedError: Error?
+
+    var error: Error? {
+        lock.lock()
+        defer { lock.unlock() }
+        return savedError
+    }
+
+    func record(_ error: Error) {
+        lock.lock()
+        defer { lock.unlock() }
+        savedError = error
+    }
 }

@@ -9,6 +9,7 @@ struct MyMacFinderApp: App {
         _explorerStore = StateObject(
             wrappedValue: ExplorerStore(
                 fileOperationService: FileOperationService(conflictResolver: AppKitFileConflictResolver()),
+                sessionStore: UserDefaultsExplorerSessionStore(),
                 zipExtractor: ZipExtractionService(conflictResolver: AppKitFileConflictResolver()),
                 zipCompressor: ZipCompressionService(conflictResolver: AppKitFileConflictResolver())
             )
@@ -253,6 +254,16 @@ struct MyMacFinderApp: App {
                             }
                         }
                     }
+
+                    SavedDataRecoveryView(
+                        restorePreviousSession: restorePreviousSessionBinding,
+                        settingsErrorMessage: explorerStore.settingsPersistenceErrorMessage,
+                        sidebarErrorMessage: explorerStore.sidebarPersistenceErrorMessage,
+                        sessionErrorMessage: explorerStore.sessionPersistenceErrorMessage,
+                        onResetSettings: explorerStore.resetSavedSettings,
+                        onResetSidebar: explorerStore.resetSavedSidebar,
+                        onResetSession: explorerStore.resetSavedSession
+                    )
                 }
                 .padding(.top, 8)
                 .tabItem {
@@ -372,6 +383,17 @@ struct MyMacFinderApp: App {
                 Task {
                     await explorerStore.setShowHiddenFiles(showHiddenFiles)
                 }
+            }
+        )
+    }
+
+    private var restorePreviousSessionBinding: Binding<Bool> {
+        Binding(
+            get: {
+                explorerStore.restorePreviousSession
+            },
+            set: { restorePreviousSession in
+                explorerStore.setRestorePreviousSession(restorePreviousSession)
             }
         )
     }

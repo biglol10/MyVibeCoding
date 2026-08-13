@@ -39,8 +39,23 @@ public struct DeletionHistoryReceiptSummary: Equatable, Sendable {
         return status.title
     }
 
+    public var actionTitle: String {
+        switch receipt.action {
+        case .uninstall: "Uninstall"
+        case .appReset: "App Data Reset"
+        case .orphanCleanup: "Orphan Cleanup"
+        case .largeFileCleanup: "Large File Cleanup"
+        case .developerCacheCleanup: "Developer Cache Cleanup"
+        case .startupItemDisable: "Startup Item Disabled"
+        case .startupItemEnable: "Startup Item Enabled"
+        }
+    }
+
     public var primaryCountTitle: String {
-        receipt.action.isStartupItemChange ? "Changed" : "Deleted"
+        if receipt.action.isStartupItemChange {
+            return "Changed"
+        }
+        return receipt.action == .appReset ? "Reset" : "Deleted"
     }
 
     public var primaryCount: Int {

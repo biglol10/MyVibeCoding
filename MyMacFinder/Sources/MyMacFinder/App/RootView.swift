@@ -3,6 +3,7 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var explorerStore: ExplorerStore
+    @Environment(\.scenePhase) private var scenePhase
     @FocusState private var focusedToolbarField: ToolbarField?
     @State private var toolbarFocusClearSequence = 0
 
@@ -72,6 +73,14 @@ struct RootView: View {
         }
         .onChange(of: focusedToolbarField) { _, field in
             explorerStore.setToolbarTextInputFocused(field != nil)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase != .active else {
+                return
+            }
+            Task {
+                await explorerStore.flushSessionPersistence()
+            }
         }
         .background(
             ExplorerShortcutMonitor(

@@ -130,7 +130,12 @@ final class CaptureCoordinatorPersonalWorkflowTests: XCTestCase {
 
     @MainActor
     func testTrimmingUnsavedTemporaryRecordingRemovesOwnedSource() async throws {
-        let sourceURL = temporaryFile(name: "unsaved-source.mp4", data: Data("original".utf8))
+        let pendingDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CaptureCoordinatorPersonalWorkflowTests-pending-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: pendingDirectory) }
+        let pendingRecordingStore = PendingRecordingStore(directoryURL: pendingDirectory)
+        let sourceURL = try pendingRecordingStore.allocateRecordingURL()
+        try Data("original".utf8).write(to: sourceURL)
         let sourceIdentity = try CaptureFileIdentity.existingFile(at: sourceURL)
         let appState = AppState(
             currentDocument: EditorDocument(
@@ -145,7 +150,8 @@ final class CaptureCoordinatorPersonalWorkflowTests: XCTestCase {
             settingsStore: makeSettingsStore("trimUnsavedSourceCleanup"),
             screenshotService: MockPersonalScreenshotService(),
             selectionService: MockPersonalSelectionService(),
-            recordingExportService: MockRecordingExportService()
+            recordingExportService: MockRecordingExportService(),
+            pendingRecordingStore: pendingRecordingStore
         )
 
         await coordinator.trimCurrentRecording(startSeconds: 0, endSeconds: 1)
@@ -597,6 +603,135 @@ final class CaptureCoordinatorPersonalWorkflowTests: XCTestCase {
     }
 
     @MainActor
+    func testRecoversNewestPendingRecordingAsUnsavedDocument() async throws {
+        let pendingDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CaptureCoordinatorPersonalWorkflowTests-pending-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: pendingDirectory) }
+        let pendingRecordingStore = PendingRecordingStore(directoryURL: pendingDirectory)
+        let olderURL = try pendingRecordingStore.allocateRecordingURL()
+        let newerURL = try pendingRecordingStore.allocateRecordingURL()
+        try Data("older".utf8).write(to: olderURL)
+        try Data("newer".utf8).write(to: newerURL)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 100)],
+            ofItemAtPath: olderURL.path
+        )
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 200)],
+            ofItemAtPath: newerURL.path
+        )
+        let appState = AppState()
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: makeSettingsStore("pendingRecovery"),
+            screenshotService: MockPersonalScreenshotService(),
+            selectionService: MockPersonalSelectionService(),
+            pendingRecordingStore: pendingRecordingStore,
+            pendingRecordingValidator: PendingRecordingMediaValidator { _ in true }
+        )
+
+        await coordinator.recoverPendingRecordingIfAvailable()
+
+        XCTAssertEqual(appState.currentDocument?.kind, .recording)
+        XCTAssertEqual(appState.currentDocument?.fileURL, newerURL)
+        XCTAssertTrue(appState.currentDocument?.isDirty == true)
+        XCTAssertEqual(appState.statusMessage, "Recovered an unsaved recording. Save or delete it before starting another capture.")
+    }
+
+    @MainActor
+    func testPendingRecordingRecoverySkipsDamagedNewestCandidate() async throws {
+        let pendingDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CaptureCoordinatorPersonalWorkflowTests-pending-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: pendingDirectory) }
+        let pendingRecordingStore = PendingRecordingStore(directoryURL: pendingDirectory)
+        let olderURL = try pendingRecordingStore.allocateRecordingURL()
+        let newerURL = try pendingRecordingStore.allocateRecordingURL()
+        try Data("valid fixture".utf8).write(to: olderURL)
+        try Data("damaged fixture".utf8).write(to: newerURL)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 100)], ofItemAtPath: olderURL.path)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 200)], ofItemAtPath: newerURL.path)
+        let appState = AppState()
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: makeSettingsStore("pendingRecoveryDamagedNewest"),
+            screenshotService: MockPersonalScreenshotService(),
+            selectionService: MockPersonalSelectionService(),
+            pendingRecordingStore: pendingRecordingStore,
+            pendingRecordingValidator: PendingRecordingMediaValidator { url in
+                url == olderURL
+            }
+        )
+
+        await coordinator.recoverPendingRecordingIfAvailable()
+
+        XCTAssertEqual(appState.currentDocument?.fileURL, olderURL)
+        XCTAssertTrue(appState.currentDocument?.isDirty == true)
+    }
+
+    @MainActor
+    func testPendingRecordingRecoveryRetriesAfterConcurrentDocumentIsClosed() async throws {
+        let pendingDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CaptureCoordinatorPersonalWorkflowTests-pending-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: pendingDirectory) }
+        let pendingRecordingStore = PendingRecordingStore(directoryURL: pendingDirectory)
+        let pendingURL = try pendingRecordingStore.allocateRecordingURL()
+        try Data("recording fixture".utf8).write(to: pendingURL)
+        let validator = SuspendingPendingRecordingValidator()
+        let appState = AppState()
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: makeSettingsStore("pendingRecoveryRetry"),
+            screenshotService: MockPersonalScreenshotService(),
+            selectionService: MockPersonalSelectionService(),
+            pendingRecordingStore: pendingRecordingStore,
+            pendingRecordingValidator: PendingRecordingMediaValidator { url in
+                await validator.validate(url)
+            }
+        )
+
+        let recoveryTask = Task { @MainActor in
+            await coordinator.recoverPendingRecordingIfAvailable()
+        }
+        await validator.waitUntilValidationStarted()
+        let concurrentDocument = EditorDocument(kind: .screenshot, data: Data([1, 2, 3]), isDirty: true)
+        appState.currentDocument = concurrentDocument
+        validator.finishValidation()
+        await recoveryTask.value
+        XCTAssertEqual(appState.currentDocument, concurrentDocument)
+
+        appState.currentDocument = nil
+        await coordinator.recoverPendingRecordingIfAvailable()
+
+        XCTAssertEqual(appState.currentDocument?.fileURL, pendingURL)
+        XCTAssertTrue(appState.currentDocument?.isDirty == true)
+    }
+
+    @MainActor
+    func testPendingRecordingRecoveryNeverOverwritesCurrentDocument() async throws {
+        let pendingDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CaptureCoordinatorPersonalWorkflowTests-pending-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: pendingDirectory) }
+        let pendingRecordingStore = PendingRecordingStore(directoryURL: pendingDirectory)
+        let pendingURL = try pendingRecordingStore.allocateRecordingURL()
+        try Data("pending".utf8).write(to: pendingURL)
+        let original = EditorDocument(kind: .screenshot, data: Data([1, 2, 3]))
+        let appState = AppState(currentDocument: original)
+        let coordinator = CaptureCoordinator(
+            appState: appState,
+            settingsStore: makeSettingsStore("pendingRecoveryExistingDocument"),
+            screenshotService: MockPersonalScreenshotService(),
+            selectionService: MockPersonalSelectionService(),
+            pendingRecordingStore: pendingRecordingStore
+        )
+
+        await coordinator.recoverPendingRecordingIfAvailable()
+
+        XCTAssertEqual(appState.currentDocument, original)
+        XCTAssertNil(appState.statusMessage)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pendingURL.path))
+    }
+
+    @MainActor
     private func makeSettingsStore(_ name: String) -> SettingsStore {
         let store = SettingsStore(defaults: isolatedDefaults("settings-\(name)"))
         let temporaryDirectory = FileManager.default.temporaryDirectory
@@ -626,6 +761,59 @@ final class CaptureCoordinatorPersonalWorkflowTests: XCTestCase {
         let url = directory.appendingPathComponent(name)
         try? data.write(to: url)
         return url
+    }
+}
+
+private final class SuspendingPendingRecordingValidator: @unchecked Sendable {
+    private let lock = NSLock()
+    private var validationContinuation: CheckedContinuation<Void, Never>?
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var shouldSuspend = true
+    private var didStart = false
+
+    func validate(_ url: URL) async -> Bool {
+        let suspend = beginValidation()
+        if suspend {
+            await withCheckedContinuation { continuation in
+                lock.lock()
+                validationContinuation = continuation
+                didStart = true
+                let waiters = startWaiters
+                startWaiters.removeAll()
+                lock.unlock()
+                waiters.forEach { $0.resume() }
+            }
+        }
+        return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    private func beginValidation() -> Bool {
+        lock.lock()
+        let suspend = shouldSuspend
+        shouldSuspend = false
+        lock.unlock()
+        return suspend
+    }
+
+    func waitUntilValidationStarted() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if didStart {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                startWaiters.append(continuation)
+                lock.unlock()
+            }
+        }
+    }
+
+    func finishValidation() {
+        lock.lock()
+        let continuation = validationContinuation
+        validationContinuation = nil
+        lock.unlock()
+        continuation?.resume()
     }
 }
 

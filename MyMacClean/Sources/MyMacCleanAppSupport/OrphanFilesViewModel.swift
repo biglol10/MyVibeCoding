@@ -7,7 +7,7 @@ import MyMacCleanCore
 public final class OrphanFilesViewModel {
     private let homeDirectory: URL
     private var installedApps: [InstalledApp]
-    private let excludedBundleIdentifiers: [String]
+    private let orphanFileScanning: OrphanFileScanning
     private let planner: DeletionPlanner
     private let executor: DeletionExecutor
     private let verifier: DeletionVerifier
@@ -17,6 +17,7 @@ public final class OrphanFilesViewModel {
     public var selectedCandidateIDs: Set<RelatedFileCandidate.ID> = []
     public var deletionReport: DeletionReportViewModel?
     public var errorMessage: String?
+    public var scanIssues: [ScanIssue] = []
     public var hasScanned = false
     public var isScanning = false
     public var isDeleting = false
@@ -28,11 +29,15 @@ public final class OrphanFilesViewModel {
         planner: DeletionPlanner = DeletionPlanner(),
         executor: DeletionExecutor = DeletionExecutor(),
         verifier: DeletionVerifier = DeletionVerifier(),
-        receiptStore: DeletionReceiptStore = .default()
+        receiptStore: DeletionReceiptStore = .default(),
+        orphanFileScanning: OrphanFileScanning? = nil
     ) {
         self.homeDirectory = homeDirectory
         self.installedApps = installedApps
-        self.excludedBundleIdentifiers = excludedBundleIdentifiers
+        self.orphanFileScanning = orphanFileScanning ?? .live(
+            homeDirectory: homeDirectory,
+            excludedBundleIdentifiers: excludedBundleIdentifiers
+        )
         self.planner = planner
         self.executor = executor
         self.verifier = verifier
@@ -45,19 +50,13 @@ public final class OrphanFilesViewModel {
         groups = []
         selectedCandidateIDs = []
         deletionReport = nil
-        do {
-            groups = try await OrphanFileScanner(
-                homeDirectory: homeDirectory,
-                installedApps: installedApps,
-                excludedBundleIdentifiers: excludedBundleIdentifiers
-            ).scan()
-            selectedCandidateIDs = Set(groups.flatMap(\.candidates).filter(\.defaultSelected).map(\.id))
-            hasScanned = true
-            errorMessage = nil
-        } catch {
-            errorMessage = error.localizedDescription
-            hasScanned = true
-        }
+        scanIssues = []
+        let result = await orphanFileScanning.scan(installedApps)
+        groups = result.value
+        scanIssues = result.issues
+        selectedCandidateIDs = Set(groups.flatMap(\.candidates).filter(\.defaultSelected).map(\.id))
+        hasScanned = true
+        errorMessage = nil
     }
 
     public func updateInstalledApps(_ installedApps: [InstalledApp]) {
@@ -178,6 +177,7 @@ public final class OrphanFilesViewModel {
         groups = []
         selectedCandidateIDs = []
         deletionReport = nil
+        scanIssues = []
         hasScanned = false
     }
 }

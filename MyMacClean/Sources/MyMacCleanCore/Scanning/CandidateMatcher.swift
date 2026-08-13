@@ -24,7 +24,8 @@ public struct CandidateMatcher: Sendable {
         let normalizedPath = url.lastPathComponent.lowercased()
         let fullPath = url.path.lowercased()
 
-        if let bundleIdentifier = app.bundleIdentifier?.lowercased(), fullPath.contains(bundleIdentifier) {
+        if let bundleIdentifier = app.bundleIdentifier?.lowercased(),
+           containsBoundedIdentifier(bundleIdentifier, in: fullPath) {
             let evidence = MatchEvidence(
                 type: .bundleIdentifier,
                 matchedValue: bundleIdentifier,
@@ -47,7 +48,7 @@ public struct CandidateMatcher: Sendable {
             .filter { !$0.tokens.isEmpty }
 
         if let matchedName = nameSequences.first(where: { sequence in
-            candidateTokens.containsContiguous(sequence.tokens) || compactNameMatch(sequence.tokens, in: candidateCompact)
+            fullNameMatch(sequence.tokens, candidateTokens: candidateTokens, candidateCompact: candidateCompact)
         }) {
             if isKnownSharedVendorFolder(normalizedPath, matchedNameTokens: matchedName.tokens) {
                 let evidence = MatchEvidence(
@@ -95,6 +96,33 @@ public struct CandidateMatcher: Sendable {
         guard sequence.count > 1 else { return false }
         let compactName = sequence.joined()
         return compactName.count >= 6 && candidateCompact.contains(compactName)
+    }
+
+    private func containsBoundedIdentifier(_ identifier: String, in value: String) -> Bool {
+        var searchStart = value.startIndex
+        while searchStart < value.endIndex,
+              let range = value.range(of: identifier, range: searchStart..<value.endIndex) {
+            let beforeIsBoundary = range.lowerBound == value.startIndex
+                || isIdentifierBoundary(value[value.index(before: range.lowerBound)])
+            let afterIsBoundary = range.upperBound == value.endIndex
+                || isIdentifierBoundary(value[range.upperBound])
+            if beforeIsBoundary && afterIsBoundary {
+                return true
+            }
+            searchStart = range.upperBound
+        }
+        return false
+    }
+
+    private func isIdentifierBoundary(_ character: Character) -> Bool {
+        !character.isLetter && !character.isNumber && character != "-" && character != "_"
+    }
+
+    private func fullNameMatch(_ sequence: [String], candidateTokens: [String], candidateCompact: String) -> Bool {
+        if sequence.count == 1 {
+            return candidateTokens == sequence
+        }
+        return candidateTokens.containsContiguous(sequence) || compactNameMatch(sequence, in: candidateCompact)
     }
 
     private func isKnownSharedVendorFolder(_ normalizedPath: String, matchedNameTokens: [String]) -> Bool {

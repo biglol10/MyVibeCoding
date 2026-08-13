@@ -33,6 +33,12 @@ public final class ExplorerStore: ObservableObject {
         var explicitTagQuery: String
     }
 
+    private struct RestoredLocationValidationTarget: Sendable {
+        var tabID: ExplorerTabID
+        var paneID: PaneID
+        var location: PaneLocation
+    }
+
     private struct QuickLookContext: Sendable {
         var tabID: ExplorerTabID
         var paneID: PaneID
@@ -78,7 +84,7 @@ public final class ExplorerStore: ObservableObject {
     }
     @Published public var pathInput: String {
         didSet {
-            syncActiveTabState()
+            syncActiveTabState(scheduleSessionPersistence: false)
         }
     }
     @Published public private(set) var visibleError: ExplorerError?
@@ -87,15 +93,16 @@ public final class ExplorerStore: ObservableObject {
     @Published public private(set) var defaultSort: EntrySortDescriptor
     @Published public private(set) var previewMode: FilePreviewMode
     @Published public private(set) var previewByteLimit: FilePreviewByteLimit
+    @Published public private(set) var restorePreviousSession: Bool
     @Published public private(set) var calculatedFolderSizes: [URL: Int64]
     @Published public private(set) var searchQuery: String {
         didSet {
-            syncActiveTabState()
+            syncActiveTabState(scheduleSessionPersistence: false)
         }
     }
     @Published public private(set) var searchOptions: ExplorerSearchOptions {
         didSet {
-            syncActiveTabState()
+            syncActiveTabState(scheduleSessionPersistence: false)
         }
     }
     @Published public private(set) var recursiveSearchResults: [FileEntry]?
@@ -124,6 +131,9 @@ public final class ExplorerStore: ObservableObject {
     @Published public private(set) var grantedFolderSummaries: [FolderAccessGrantSummary]
     @Published public private(set) var folderAccessPersistenceErrorMessage: String?
     @Published public private(set) var pendingPermissionRecoveryPath: String?
+    @Published public private(set) var settingsPersistenceErrorMessage: String?
+    @Published public private(set) var sidebarPersistenceErrorMessage: String?
+    @Published public private(set) var sessionPersistenceErrorMessage: String?
     @Published private var fileClipboard: FileClipboard?
     public let sandboxPolicy: SandboxPolicySummary
 
@@ -141,6 +151,8 @@ public final class ExplorerStore: ObservableObject {
     private let quickLookService: (any QuickLooking)?
     private let settingsStore: ExplorerSettingsStoring
     private let sidebarFavoritesStore: SidebarFavoritesStoring
+    private let sessionStore: ExplorerSessionStoring
+    private let initialLocation: PaneLocation
     private let pathResolver: PathResolver
     private let pathInputCommandResolver: PathInputCommandResolver
     private let externalAppLauncher: any ExternalAppLaunching
@@ -151,8 +163,11 @@ public final class ExplorerStore: ObservableObject {
     private let filePasteboardWriter: FilePasteboardWriter
     private let watcherDebounceNanoseconds: UInt64
     private let operationProgressAutoDismissNanoseconds: UInt64
+    private let sessionPersistenceDebounceNanoseconds: UInt64
     private var watcherRefreshTask: Task<Void, Never>?
     private var operationProgressAutoDismissTask: Task<Void, Never>?
+    private var sessionPersistenceTask: Task<Void, Never>?
+    private var sessionPersistenceGeneration: UInt64
     private var watchedDirectoryURLs: Set<URL>
     private var isApplyingTabState: Bool
     private var searchTask: Task<Void, Never>?
@@ -166,6 +181,13 @@ public final class ExplorerStore: ObservableObject {
     private var undoOwnershipStack: [UndoOwnershipSnapshot]
     private var sidebarState: SidebarState
     private var missingFavoriteURLs: Set<URL>
+    private var isSettingsPersistenceBlocked: Bool
+    private var isSidebarPersistenceBlocked: Bool
+    private var isSessionPersistenceBlocked: Bool
+    private var pendingRestoredSessionSnapshot: ExplorerSessionSnapshot?
+    private var isRestoredSessionPendingValidation: Bool
+    private var lastPersistedSessionSnapshot: ExplorerSessionSnapshot?
+    private var restoredPaneIDsAwaitingInitialLoad: Set<PaneID>
     private static let maxRecentFolders = 5
 
     public init(
@@ -175,6 +197,7 @@ public final class ExplorerStore: ObservableObject {
         archiveBrowser: any ArchiveBrowsing = ArchiveBrowsingService(),
         settingsStore: ExplorerSettingsStoring = UserDefaultsExplorerSettingsStore(),
         sidebarFavoritesStore: SidebarFavoritesStoring = UserDefaultsSidebarFavoritesStore(),
+        sessionStore: ExplorerSessionStoring = TransientExplorerSessionStore(),
         directoryWatcher: DirectoryWatching? = DirectoryWatcherService(),
         finderTagService: any FinderTagServicing = FinderTagService(),
         finderTagPrompt: FinderTagPrompt? = nil,
@@ -197,6 +220,7 @@ public final class ExplorerStore: ObservableObject {
         },
         watcherDebounceNanoseconds: UInt64 = 250_000_000,
         operationProgressAutoDismissNanoseconds: UInt64 = 1_000_000_000,
+        sessionPersistenceDebounceNanoseconds: UInt64 = 350_000_000,
         pathResolver: PathResolver = PathResolver(
             aliases: [
                 "@home": FileManager.default.homeDirectoryForCurrentUser,
@@ -207,16 +231,67 @@ public final class ExplorerStore: ObservableObject {
         pathInputCommandResolver: PathInputCommandResolver? = nil,
         externalAppLauncher: any ExternalAppLaunching = AppKitExternalAppLauncher()
     ) {
-        let settings = settingsStore.load()
-        let loadedSidebarState = sidebarFavoritesStore.load()
+        let settings: ExplorerSettings
+        let settingsPersistenceErrorMessage: String?
+        do {
+            settings = try settingsStore.load()
+            settingsPersistenceErrorMessage = nil
+        } catch {
+            settings = ExplorerSettings()
+            settingsPersistenceErrorMessage = Self.persistenceErrorMessage(area: "General Settings", error: error)
+        }
+
+        let loadedSidebarState: SidebarState
+        let sidebarPersistenceErrorMessage: String?
+        do {
+            loadedSidebarState = try sidebarFavoritesStore.load()
+            sidebarPersistenceErrorMessage = nil
+        } catch {
+            loadedSidebarState = SidebarState()
+            sidebarPersistenceErrorMessage = Self.persistenceErrorMessage(area: "Sidebar", error: error)
+        }
+
+        let pendingRestoredSessionSnapshot: ExplorerSessionSnapshot?
+        let sessionPersistenceErrorMessage: String?
+        do {
+            pendingRestoredSessionSnapshot = try sessionStore.load()
+            sessionPersistenceErrorMessage = nil
+        } catch {
+            pendingRestoredSessionSnapshot = nil
+            sessionPersistenceErrorMessage = Self.persistenceErrorMessage(area: "Previous Session", error: error)
+        }
         let sidebarState = Self.normalizedSidebarState(loadedSidebarState)
         let initialLocation = PaneLocation.fileSystem(initialURL.standardizedFileURL)
-        var panes = [PaneState(location: initialLocation, sort: settings.defaultSort)]
-        if settings.paneMode == .dual {
-            panes.append(PaneState(location: initialLocation, sort: settings.defaultSort))
+        let initialTabs: [ExplorerTab]
+        let initialActiveTabIndex: Int
+        let isRestoredSessionPendingValidation: Bool
+        if settings.restorePreviousSession, let pendingRestoredSessionSnapshot {
+            let restoredWorkspace = pendingRestoredSessionSnapshot.restoredWorkspace(
+                fallbackLocation: initialLocation,
+                paneMode: settings.paneMode
+            )
+            initialTabs = restoredWorkspace.tabs
+            initialActiveTabIndex = restoredWorkspace.activeTabIndex
+            isRestoredSessionPendingValidation = true
+        } else {
+            var initialPanes = [PaneState(location: initialLocation, sort: settings.defaultSort)]
+            if settings.paneMode == .dual {
+                initialPanes.append(PaneState(location: initialLocation, sort: settings.defaultSort))
+            }
+            initialTabs = [
+                ExplorerTab(
+                    panes: initialPanes,
+                    activePaneIndex: 0,
+                    pathInput: initialLocation.displayPath
+                )
+            ]
+            initialActiveTabIndex = 0
+            isRestoredSessionPendingValidation = false
         }
-        let initialPathInput = initialURL.path
-        let initialActivePaneIndex = 0
+        let initialTab = initialTabs[initialActiveTabIndex]
+        let panes = initialTab.panes
+        let initialPathInput = initialTab.pathInput
+        let initialActivePaneIndex = initialTab.activePaneIndex
 
         self.panes = panes
         self.pathInput = initialPathInput
@@ -226,6 +301,7 @@ public final class ExplorerStore: ObservableObject {
         self.defaultSort = settings.defaultSort
         self.previewMode = settings.previewMode
         self.previewByteLimit = settings.previewByteLimit
+        self.restorePreviousSession = settings.restorePreviousSession
         self.calculatedFolderSizes = [:]
         self.searchQuery = ""
         self.searchOptions = ExplorerSearchOptions()
@@ -237,14 +313,8 @@ public final class ExplorerStore: ObservableObject {
         self.undoOwnershipStack = []
         self.isInspectorVisible = settings.isInspectorVisible
         self.activePaneIndex = initialActivePaneIndex
-        self.tabs = [
-            ExplorerTab(
-                panes: panes,
-                activePaneIndex: initialActivePaneIndex,
-                pathInput: initialPathInput
-            )
-        ]
-        self.activeTabIndex = 0
+        self.tabs = initialTabs
+        self.activeTabIndex = initialActiveTabIndex
         self.mountedVolumes = []
         self.volumeError = nil
         self.favoriteSidebarItems = Self.favoriteItems(from: sidebarState.favorites, missingURLs: [])
@@ -254,6 +324,9 @@ public final class ExplorerStore: ObservableObject {
         self.grantedFolderSummaries = []
         self.folderAccessPersistenceErrorMessage = nil
         self.pendingPermissionRecoveryPath = nil
+        self.settingsPersistenceErrorMessage = settingsPersistenceErrorMessage
+        self.sidebarPersistenceErrorMessage = sidebarPersistenceErrorMessage
+        self.sessionPersistenceErrorMessage = sessionPersistenceErrorMessage
         self.sandboxPolicy = sandboxPolicy
         self.fileSystemService = fileSystemService
         self.finderTagService = finderTagService
@@ -271,6 +344,8 @@ public final class ExplorerStore: ObservableObject {
         self.filePasteboardWriter = filePasteboardWriter
         self.settingsStore = settingsStore
         self.sidebarFavoritesStore = sidebarFavoritesStore
+        self.sessionStore = sessionStore
+        self.initialLocation = initialLocation
         self.pathResolver = pathResolver
         self.pathInputCommandResolver = pathInputCommandResolver ?? PathInputCommandResolver(pathResolver: pathResolver)
         self.externalAppLauncher = externalAppLauncher
@@ -279,9 +354,12 @@ public final class ExplorerStore: ObservableObject {
         self.folderAccessService = folderAccessService
         self.watcherDebounceNanoseconds = watcherDebounceNanoseconds
         self.operationProgressAutoDismissNanoseconds = operationProgressAutoDismissNanoseconds
+        self.sessionPersistenceDebounceNanoseconds = sessionPersistenceDebounceNanoseconds
         self.fileClipboard = nil
         self.watcherRefreshTask = nil
         self.operationProgressAutoDismissTask = nil
+        self.sessionPersistenceTask = nil
+        self.sessionPersistenceGeneration = 0
         self.watchedDirectoryURLs = []
         self.isApplyingTabState = false
         self.searchTask = nil
@@ -294,6 +372,15 @@ public final class ExplorerStore: ObservableObject {
         self.unavailableFolderGrantIDs = []
         self.sidebarState = sidebarState
         self.missingFavoriteURLs = []
+        self.isSettingsPersistenceBlocked = settingsPersistenceErrorMessage != nil
+        self.isSidebarPersistenceBlocked = sidebarPersistenceErrorMessage != nil
+        self.isSessionPersistenceBlocked = sessionPersistenceErrorMessage != nil
+        self.pendingRestoredSessionSnapshot = pendingRestoredSessionSnapshot
+        self.isRestoredSessionPendingValidation = isRestoredSessionPendingValidation
+        self.lastPersistedSessionSnapshot = pendingRestoredSessionSnapshot
+        self.restoredPaneIDsAwaitingInitialLoad = isRestoredSessionPendingValidation
+            ? Set(initialTabs.flatMap(\.panes).map(\.id))
+            : []
 
         loadPersistedFolderGrants()
         if sidebarState != loadedSidebarState {
@@ -335,6 +422,67 @@ public final class ExplorerStore: ObservableObject {
         }
         previewMode = mode
         persistSettings()
+    }
+
+    public func setRestorePreviousSession(_ restorePreviousSession: Bool) {
+        guard self.restorePreviousSession != restorePreviousSession else {
+            return
+        }
+        self.restorePreviousSession = restorePreviousSession
+        persistSettings()
+    }
+
+    public func resetSavedSettings() {
+        do {
+            try settingsStore.reset()
+            isSettingsPersistenceBlocked = false
+            settingsPersistenceErrorMessage = nil
+            persistSettings()
+        } catch {
+            isSettingsPersistenceBlocked = true
+            settingsPersistenceErrorMessage = Self.persistenceErrorMessage(area: "General Settings", error: error)
+        }
+    }
+
+    public func resetSavedSidebar() {
+        do {
+            try sidebarFavoritesStore.reset()
+            isSidebarPersistenceBlocked = false
+            sidebarPersistenceErrorMessage = nil
+            sidebarState = SidebarState()
+            missingFavoriteURLs = []
+            persistSidebarState()
+        } catch {
+            isSidebarPersistenceBlocked = true
+            sidebarPersistenceErrorMessage = Self.persistenceErrorMessage(area: "Sidebar", error: error)
+        }
+    }
+
+    public func resetSavedSession() {
+        do {
+            try sessionStore.reset()
+            isSessionPersistenceBlocked = false
+            sessionPersistenceErrorMessage = nil
+            pendingRestoredSessionSnapshot = nil
+            let snapshot = makeSessionSnapshot()
+            try sessionStore.save(snapshot)
+            lastPersistedSessionSnapshot = snapshot
+        } catch {
+            isSessionPersistenceBlocked = true
+            sessionPersistenceErrorMessage = Self.persistenceErrorMessage(area: "Previous Session", error: error)
+        }
+    }
+
+    public func flushSessionPersistence() async {
+        sessionPersistenceGeneration &+= 1
+        sessionPersistenceTask?.cancel()
+        sessionPersistenceTask = nil
+        persistSessionSnapshotIfNeeded()
+    }
+
+    func waitForPendingSessionPersistence() async {
+        let task = sessionPersistenceTask
+        await task?.value
     }
 
     public func requestToolbarFocusClear() {
@@ -470,7 +618,14 @@ public final class ExplorerStore: ObservableObject {
     public func loadInitialDirectory() async {
         await refreshMountedVolumes()
         await refreshFavoriteSidebarItemStatuses()
-        await reloadAllPanes()
+        if isRestoredSessionPendingValidation {
+            await validateRestoredSessionLocations()
+            await reloadInitialRestoredPanesWithFallback()
+            isRestoredSessionPendingValidation = false
+            pendingRestoredSessionSnapshot = nil
+        } else {
+            await reloadAllPanes()
+        }
     }
 
     public func cleanupExpiredArchiveArtifacts(now: Date = Date()) async {
@@ -1759,7 +1914,16 @@ public final class ExplorerStore: ObservableObject {
     private func persistSidebarState() {
         favoriteSidebarItems = Self.favoriteItems(from: sidebarState.favorites, missingURLs: missingFavoriteURLs)
         recentFolders = sidebarState.recentFolders
-        sidebarFavoritesStore.save(sidebarState)
+        guard !isSidebarPersistenceBlocked else {
+            return
+        }
+
+        do {
+            try sidebarFavoritesStore.save(sidebarState)
+        } catch {
+            isSidebarPersistenceBlocked = true
+            sidebarPersistenceErrorMessage = Self.persistenceErrorMessage(area: "Sidebar", error: error)
+        }
     }
 
     private static func normalizedSidebarState(_ state: SidebarState) -> SidebarState {
@@ -1858,16 +2022,96 @@ public final class ExplorerStore: ObservableObject {
     }
 
     private func persistSettings() {
-        settingsStore.save(
-            ExplorerSettings(
-                paneMode: paneMode,
-                isInspectorVisible: isInspectorVisible,
-                showHiddenFiles: showHiddenFiles,
-                defaultSort: defaultSort,
-                previewMode: previewMode,
-                previewByteLimit: previewByteLimit
+        guard !isSettingsPersistenceBlocked else {
+            return
+        }
+
+        do {
+            try settingsStore.save(
+                ExplorerSettings(
+                    paneMode: paneMode,
+                    isInspectorVisible: isInspectorVisible,
+                    showHiddenFiles: showHiddenFiles,
+                    defaultSort: defaultSort,
+                    previewMode: previewMode,
+                    previewByteLimit: previewByteLimit,
+                    restorePreviousSession: restorePreviousSession
+                )
             )
+        } catch {
+            isSettingsPersistenceBlocked = true
+            settingsPersistenceErrorMessage = Self.persistenceErrorMessage(area: "General Settings", error: error)
+        }
+    }
+
+    private static func persistenceErrorMessage(area: String, error: Error) -> String {
+        "\(area) saved data is unavailable: \(error.localizedDescription)"
+    }
+
+    private func makeSessionSnapshot() -> ExplorerSessionSnapshot {
+        syncActiveTabState(scheduleSessionPersistence: false)
+        return ExplorerSessionSnapshot(
+            tabs: tabs.map { tab in
+                ExplorerSessionTab(
+                    panes: tab.panes.map { pane in
+                        ExplorerSessionPane(
+                            location: canonicalized(pane.location),
+                            sort: pane.sort,
+                            group: pane.group
+                        )
+                    },
+                    activePaneIndex: tab.activePaneIndex
+                )
+            },
+            activeTabIndex: activeTabIndex
         )
+    }
+
+    private func scheduleSessionPersistence() {
+        guard restorePreviousSession, !isSessionPersistenceBlocked else {
+            return
+        }
+
+        sessionPersistenceGeneration &+= 1
+        let generation = sessionPersistenceGeneration
+        sessionPersistenceTask?.cancel()
+        sessionPersistenceTask = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+            if sessionPersistenceDebounceNanoseconds > 0 {
+                do {
+                    try await Task.sleep(nanoseconds: sessionPersistenceDebounceNanoseconds)
+                } catch {
+                    return
+                }
+            }
+            guard !Task.isCancelled, generation == sessionPersistenceGeneration else {
+                return
+            }
+            persistSessionSnapshotIfNeeded()
+        }
+    }
+
+    private func persistSessionSnapshotIfNeeded() {
+        guard restorePreviousSession, !isSessionPersistenceBlocked else {
+            return
+        }
+
+        let snapshot = makeSessionSnapshot()
+        guard snapshot != lastPersistedSessionSnapshot else {
+            return
+        }
+
+        do {
+            try sessionStore.save(snapshot)
+            lastPersistedSessionSnapshot = snapshot
+        } catch {
+            isSessionPersistenceBlocked = true
+            sessionPersistenceErrorMessage = Self.persistenceErrorMessage(area: "Previous Session", error: error)
+            sessionPersistenceTask?.cancel()
+            sessionPersistenceTask = nil
+        }
     }
 
     private func canGoUp(from location: PaneLocation) -> Bool {
@@ -1911,7 +2155,7 @@ public final class ExplorerStore: ObservableObject {
         )
     }
 
-    private func syncActiveTabState() {
+    private func syncActiveTabState(scheduleSessionPersistence shouldScheduleSessionPersistence: Bool = true) {
         guard !isApplyingTabState, tabs.indices.contains(activeTabIndex) else {
             return
         }
@@ -1923,6 +2167,9 @@ public final class ExplorerStore: ObservableObject {
         tab.searchQuery = searchQuery
         tab.searchOptions = searchOptions
         tabs[activeTabIndex] = tab
+        if shouldScheduleSessionPersistence {
+            scheduleSessionPersistence()
+        }
     }
 
     private func applyTabState(_ tab: ExplorerTab) {
@@ -2855,11 +3102,132 @@ public final class ExplorerStore: ObservableObject {
         }
     }
 
+    private func validateRestoredSessionLocations() async {
+        let targets = tabs.flatMap { tab in
+            tab.panes.map { pane in
+                RestoredLocationValidationTarget(
+                    tabID: tab.id,
+                    paneID: pane.id,
+                    location: pane.location
+                )
+            }
+        }
+
+        for target in targets where !(await isValidRestoredLocation(target.location)) {
+            replaceInvalidRestoredLocationIfCurrent(target)
+        }
+    }
+
+    private func replaceInvalidRestoredLocationIfCurrent(_ target: RestoredLocationValidationTarget) {
+        guard let tabIndex = tabs.firstIndex(where: { $0.id == target.tabID }) else {
+            return
+        }
+
+        if tabIndex == activeTabIndex {
+            guard let paneIndex = panes.firstIndex(where: { $0.id == target.paneID }),
+                  canonicalized(panes[paneIndex].location) == canonicalized(target.location) else {
+                return
+            }
+            resetRestoredPane(&panes[paneIndex])
+            if paneIndex == activePaneIndex {
+                pathInput = initialLocation.displayPath
+            }
+            return
+        }
+
+        guard let paneIndex = tabs[tabIndex].panes.firstIndex(where: { $0.id == target.paneID }),
+              canonicalized(tabs[tabIndex].panes[paneIndex].location) == canonicalized(target.location) else {
+            return
+        }
+        resetRestoredPane(&tabs[tabIndex].panes[paneIndex])
+        if paneIndex == tabs[tabIndex].activePaneIndex {
+            tabs[tabIndex].pathInput = initialLocation.displayPath
+        }
+    }
+
+    private func resetRestoredPane(_ pane: inout PaneState) {
+        pane.location = initialLocation
+        pane.entries = []
+        pane.selectedURLs = []
+        pane.backStack = []
+        pane.forwardStack = []
+        pane.isLoading = false
+        pane.error = nil
+    }
+
+    private func isValidRestoredLocation(_ location: PaneLocation) async -> Bool {
+        switch location {
+        case .fileSystem(let url):
+            let status = await pathStatusChecker.status(for: url)
+            return status.exists && status.isDirectory && status.isReadable
+        case .archive(let archiveLocation):
+            let status = await pathStatusChecker.status(for: archiveLocation.archiveURL)
+            return status.exists
+                && !status.isDirectory
+                && status.isReadable
+                && archiveLocation.archiveURL.pathExtension.localizedCaseInsensitiveCompare("zip") == .orderedSame
+        }
+    }
+
+    private func reloadInitialRestoredPanesWithFallback() async {
+        let targets = panes.map { PaneReloadTarget(paneID: $0.id, location: $0.location) }
+        for target in targets {
+            do {
+                if try await reloadPaneHandlingRestoredFallback(target) {
+                    visibleError = nil
+                }
+            } catch let error as ExplorerError {
+                present(error)
+            } catch {
+                visibleError = .readFailed(error.localizedDescription)
+            }
+        }
+    }
+
+    private func reloadPaneHandlingRestoredFallback(_ target: PaneReloadTarget) async throws -> Bool {
+        do {
+            let didReload = try await reloadCapturedPane(target)
+            if didReload {
+                restoredPaneIDsAwaitingInitialLoad.remove(target.paneID)
+            }
+            return false
+        } catch {
+            guard restoredPaneIDsAwaitingInitialLoad.remove(target.paneID) != nil,
+                  let fallbackTarget = replaceRestoredPaneWithInitialLocation(target) else {
+                throw error
+            }
+            try await reloadCapturedPane(fallbackTarget)
+            return true
+        }
+    }
+
+    private func replaceRestoredPaneWithInitialLocation(_ target: PaneReloadTarget) -> PaneReloadTarget? {
+        guard let paneIndex = panes.firstIndex(where: { $0.id == target.paneID }),
+              canonicalized(panes[paneIndex].location) == canonicalized(target.location) else {
+            return nil
+        }
+
+        panes[paneIndex].location = initialLocation
+        panes[paneIndex].entries = []
+        panes[paneIndex].selectedURLs = []
+        panes[paneIndex].backStack = []
+        panes[paneIndex].forwardStack = []
+        panes[paneIndex].isLoading = false
+        panes[paneIndex].error = nil
+        if paneIndex == activePaneIndex {
+            pathInput = initialLocation.displayPath
+        }
+        syncActiveTabState()
+        return PaneReloadTarget(paneID: target.paneID, location: initialLocation)
+    }
+
     private func reloadAllPanes() async {
         let targets = panes.map { PaneReloadTarget(paneID: $0.id, location: $0.location) }
         for target in targets {
             do {
-                try await reloadCapturedPane(target)
+                if try await reloadPaneHandlingRestoredFallback(target) {
+                    visibleError = nil
+                }
             } catch let error as ExplorerError {
                 present(error)
             } catch {
@@ -2994,6 +3362,7 @@ public final class ExplorerStore: ObservableObject {
         pane.error = nil
         pane.isLoading = false
         panes[targetPaneIndex] = pane
+        restoredPaneIDsAwaitingInitialLoad.remove(targetPaneID)
 
         if targetPaneIndex == activePaneIndex {
             pathInput = location.displayPath

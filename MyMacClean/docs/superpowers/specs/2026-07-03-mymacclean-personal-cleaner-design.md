@@ -1,9 +1,17 @@
 # MyMacClean Personal Cleaner Design
 
-Status: updated after implementation on 2026-07-03. This document describes
-the current personal-use direction and notes where the implemented app is more
-limited than the original plan. Older files under `docs/superpowers/plans` are
-historical execution records, not current product documentation.
+Status: historical baseline, implemented and reviewed on 2026-07-03.
+
+This document records the original five-pillar personal-cleaner direction. Its
+implementation-status and remaining-work sections are preserved as historical
+context and are not the current product contract. Current behavior is described
+by `../../../README.md` and
+`2026-08-13-mymacclean-safety-and-utility-expansion-design.md`.
+
+Since this baseline, the app added bounded related-file matching, fail-closed
+cleanup roots, visible partial-scan coverage, nested app discovery, Trash-only
+App Reset with `RESET` confirmation, and session-only Large Files folder
+selection with optional recursion.
 
 ## Context
 
@@ -95,6 +103,11 @@ Improvements in this phase:
 - Keep uninstall and leftover cleanup receipts visually consistent.
 - Keep tests around post-delete list refresh and detail clearing.
 
+Current extension: the Applications inspector also provides `Reset Data` mode.
+It excludes the app bundle, requires `RESET`, moves only reviewed related data
+to Trash, hides permanent/force controls, and refreshes the inspector while
+keeping the app installed and selected.
+
 ### 2. Orphan Files
 
 The existing Orphan Files screen remains the leftover cleanup workflow.
@@ -112,10 +125,12 @@ Current behavior to preserve:
 - Remove verified-deleted groups from the UI.
 - Record cleanup receipts.
 
-Remaining improvements:
+Later implementation notes:
 
-- Surface scan coverage limitations when roots are inaccessible.
-- Keep LaunchAgent leftovers manual-review by default.
+- Inaccessible existing roots now appear in an expandable `Scan incomplete`
+  banner with copyable path-level diagnostics and a Full Disk Access shortcut
+  for permission-related issues.
+- LaunchAgent leftovers remain manual-review by default.
 
 ### 3. Large Files
 
@@ -124,8 +139,8 @@ Purpose: find large files that are worth manual review.
 Scanner:
 
 - The current app scans top-level files in `~/Downloads` by default.
-- `LargeFileScanner` supports recursive scanning internally, but
-  `LargeFilesViewModel` currently calls it with `recursive: false`.
+- The default scan is non-recursive. The UI can enable `Include Subfolders` for
+  the active folder.
 - Exclude system roots and package internals.
 - Ignore package contents such as `.app`, `.framework`, `.bundle`, and
   `.photoslibrary`.
@@ -140,6 +155,9 @@ UI:
 - Sort is currently size descending in the main UI.
 - Actions: Reveal in Finder, Copy Path, Move Selected to Trash.
 - No default selection.
+- The user can choose one active folder for the current session. Folder access
+  is not persisted, and changing the folder or recursion setting clears stale
+  results.
 
 Deletion:
 
@@ -320,9 +338,12 @@ Implemented:
 
 Current limits:
 
-- Default scan root is top-level `~/Downloads` only.
-- UI does not yet expose root selection, kind filters, older-than filters, or a
-  minimum-size control.
+- Default scan root is top-level `~/Downloads`; the UI can select one different
+  folder for the current session and optionally include subfolders.
+- The UI does not expose kind filters, older-than filters, or a minimum-size
+  control.
+- Broad roots such as the home directory and system-owned locations are
+  rejected. Deletion protection is rebuilt from the exact active folder.
 - Permanent deletion and force-delete are not available for this cleanup type.
 
 ### Developer Cache
@@ -367,12 +388,13 @@ Current limits:
 - Disable/enable actions require confirmation and explain that already loaded
   agents may continue until next login or restart.
 
-### Remaining Cleanup UX Polish
+### Remaining Cleanup UX Polish At This Baseline
 
 Still useful to refine:
 
 - Consistent receipts and report panels.
-- More visible permission/coverage notices.
+- More visible permission/coverage notices. This was implemented in the
+  2026-08-13 safety expansion.
 
 ## Testing Strategy
 

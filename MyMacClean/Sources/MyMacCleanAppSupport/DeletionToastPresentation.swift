@@ -35,7 +35,11 @@ public struct DeletionToastPresentation: Equatable, Identifiable, Sendable {
     public init(report: DeletionReportViewModel, id: UUID = UUID()) {
         self.id = id
         self.severity = report.isFullySuccessful ? .success : .error
-        self.title = report.isFullySuccessful ? "Deletion succeeded" : "Deletion failed"
+        if report.receipt.action == .appReset {
+            self.title = report.isFullySuccessful ? "App data reset succeeded" : "App data reset failed"
+        } else {
+            self.title = report.isFullySuccessful ? "Deletion succeeded" : "Deletion failed"
+        }
         self.message = report.summaryLine
         self.detailLines = report.errorLogLines.isEmpty
             ? report.remainingPaths.map { "Remaining: \($0)" }

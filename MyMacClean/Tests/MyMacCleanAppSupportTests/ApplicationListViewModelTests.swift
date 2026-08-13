@@ -511,6 +511,82 @@ final class ApplicationListViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.deletionReport?.remainingPaths, [cacheURL.path])
     }
 
+    func testPartialRelatedFileDeletionRemovesOnlyVerifiedDeletedRows() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("MyMacCleanPartialRelatedDeletionTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let appURL = root.appendingPathComponent("Partial Related.app", isDirectory: true)
+        let deletedCacheURL = root.appendingPathComponent("Library/Caches/com.example.partial-related", isDirectory: true)
+        let remainingLogURL = root.appendingPathComponent("Library/Logs/com.example.partial-related", isDirectory: true)
+        try FileManager.default.createDirectory(at: appURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: deletedCacheURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: remainingLogURL, withIntermediateDirectories: true)
+
+        let failingPath = remainingLogURL.resolvingSymlinksInPath().standardizedFileURL
+        let remover = DeletionFileRemover(
+            trash: { url in
+                if url.resolvingSymlinksInPath().standardizedFileURL == failingPath {
+                    throw CocoaError(.fileWriteNoPermission)
+                }
+                try FileManager.default.removeItem(at: url)
+            },
+            remove: { url in
+                if url.resolvingSymlinksInPath().standardizedFileURL == failingPath {
+                    throw CocoaError(.fileWriteNoPermission)
+                }
+                try FileManager.default.removeItem(at: url)
+            }
+        )
+        let app = InstalledApp(
+            displayName: "Partial Related",
+            bundleIdentifier: "com.example.partial-related",
+            version: nil,
+            executableName: nil,
+            bundleURL: appURL,
+            iconIdentifier: nil,
+            bundleSize: 1,
+            lastOpenedAt: nil
+        )
+        let deletedCandidate = RelatedFileCandidate(
+            url: deletedCacheURL,
+            kind: .cache,
+            size: 1,
+            matchReason: "bundle identifier match",
+            confidence: .high,
+            defaultSelected: true,
+            requiresManualReview: false,
+            isProtected: false
+        )
+        let remainingCandidate = RelatedFileCandidate(
+            url: remainingLogURL,
+            kind: .log,
+            size: 1,
+            matchReason: "bundle identifier match",
+            confidence: .high,
+            defaultSelected: true,
+            requiresManualReview: false,
+            isProtected: false
+        )
+        let viewModel = ApplicationListViewModel(
+            executor: DeletionExecutor(fileRemover: remover),
+            receiptStore: DeletionReceiptStore(fileURL: root.appendingPathComponent("receipts.jsonl"))
+        )
+
+        viewModel.apps = [app]
+        viewModel.selectApp(app)
+        viewModel.candidates = [deletedCandidate, remainingCandidate]
+        viewModel.selectedCandidateIDs = [deletedCandidate.id, remainingCandidate.id]
+
+        await viewModel.deleteConfirmedItems(confirmation: "DELETE", mode: .permanent)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: deletedCacheURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: remainingLogURL.path))
+        XCTAssertEqual(viewModel.selectedApp, app)
+        XCTAssertEqual(viewModel.candidates.map(\.id), [remainingCandidate.id])
+        XCTAssertEqual(viewModel.selectedCandidateIDs, [remainingCandidate.id])
+        XCTAssertEqual(viewModel.deletionReport?.statusTitle, "Deleted with remaining items")
+    }
+
     func testSuccessfulAppDeletionRecordsReceiptAndReturnsReportWithoutLeavingInspectorReport() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("MyMacCleanReportTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
