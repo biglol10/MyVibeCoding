@@ -582,7 +582,7 @@ private final class SnapshotSampler: SystemSampler {
     func sampleNetwork() async -> NetworkSnapshot? { nil }
     func sampleBattery() async -> BatterySnapshot? { nil }
     func sampleDiskSpaceCandidates() async -> [DiskSpaceCandidate] { [] }
-    func sampleProcesses() async -> [ProcessMetric] { processes }
+    func sampleProcesses() async -> [ProcessMetric]? { processes }
 }
 
 private final class RecordingApplicationTerminator: ApplicationTerminating {

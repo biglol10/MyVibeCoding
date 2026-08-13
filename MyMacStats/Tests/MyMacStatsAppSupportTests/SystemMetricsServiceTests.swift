@@ -121,6 +121,78 @@ final class SystemMetricsServiceTests: XCTestCase {
         XCTAssertEqual(third.summary(for: .memory)?.health, .critical)
     }
 
+    func testScheduledRefreshUsesMetricSpecificCadence() async {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let process = ProcessMetric(
+            pid: 1,
+            name: "launchd",
+            cpuPercent: 1,
+            memoryBytes: 100,
+            path: "/sbin/launchd",
+            bundleIdentifier: nil
+        )
+        let sampler = RecordingSystemSampler(
+            cpu: CPUSnapshot(totalUsagePercent: 10, userPercent: 5, systemPercent: 5, idlePercent: 90, sampledAt: now),
+            memory: MemorySnapshot(totalBytes: 100, usedBytes: 50, freeBytes: 50, compressedBytes: nil, cachedBytes: nil, swapUsedBytes: nil, pressure: .normal, sampledAt: now),
+            disk: DiskSnapshot(volumeName: "Macintosh HD", mountPoint: "/", totalBytes: 100, freeBytes: 50, readBytesPerSecond: nil, writeBytesPerSecond: nil, sampledAt: now),
+            network: NetworkSnapshot(interfaceName: "en0", downloadBytesPerSecond: 1, uploadBytesPerSecond: 1, receivedBytes: 1, sentBytes: 1, isConnected: true, sampledAt: now),
+            battery: BatterySnapshot(isPresent: true, percentage: 50, isCharging: false, powerSource: "Battery Power", timeRemainingMinutes: nil, cycleCount: nil, serviceRecommended: false, sampledAt: now),
+            processes: [process]
+        )
+        let service = SystemMetricsService(
+            sampler: sampler,
+            evaluator: HealthEvaluator(debounceSamples: 1)
+        )
+
+        _ = await service.refresh(now: now, reason: .scheduled(baseInterval: 1))
+        _ = await service.refresh(now: now.addingTimeInterval(1), reason: .scheduled(baseInterval: 1))
+
+        XCTAssertEqual(sampler.cpuCallCount, 2)
+        XCTAssertEqual(sampler.memoryCallCount, 2)
+        XCTAssertEqual(sampler.networkCallCount, 2)
+        XCTAssertEqual(sampler.processCallCount, 1)
+        XCTAssertEqual(sampler.diskCallCount, 1)
+        XCTAssertEqual(sampler.batteryCallCount, 1)
+
+        _ = await service.refresh(now: now.addingTimeInterval(2), reason: .scheduled(baseInterval: 1))
+        XCTAssertEqual(sampler.processCallCount, 2)
+
+        _ = await service.refresh(now: now.addingTimeInterval(10), reason: .scheduled(baseInterval: 1))
+        XCTAssertEqual(sampler.diskCallCount, 2)
+        XCTAssertEqual(sampler.batteryCallCount, 2)
+    }
+
+    func testCadenceSkipReusesSuccessfulUnavailableBatterySummary() async {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let sampler = RecordingSystemSampler(
+            cpu: nil,
+            memory: nil,
+            disk: nil,
+            network: nil,
+            battery: BatterySnapshot(
+                isPresent: false,
+                percentage: nil,
+                isCharging: nil,
+                powerSource: "Battery Power",
+                timeRemainingMinutes: nil,
+                cycleCount: nil,
+                serviceRecommended: false,
+                sampledAt: now
+            ),
+            processes: nil
+        )
+        let service = SystemMetricsService(
+            sampler: sampler,
+            evaluator: HealthEvaluator(debounceSamples: 1)
+        )
+
+        let first = await service.refresh(now: now, reason: .scheduled(baseInterval: 1))
+        let second = await service.refresh(now: now.addingTimeInterval(1), reason: .scheduled(baseInterval: 1))
+
+        XCTAssertEqual(sampler.batteryCallCount, 1)
+        XCTAssertEqual(second.summary(for: .battery), first.summary(for: .battery))
+    }
+
     private func gib(_ value: UInt64) -> UInt64 {
         value * 1_024 * 1_024 * 1_024
     }
@@ -159,7 +231,72 @@ private struct MockSystemSampler: SystemSampler {
     func sampleNetwork() async -> NetworkSnapshot? { network }
     func sampleBattery() async -> BatterySnapshot? { battery }
     func sampleDiskSpaceCandidates() async -> [DiskSpaceCandidate] { diskSpaceCandidates }
-    func sampleProcesses() async -> [ProcessMetric] { processes }
+    func sampleProcesses() async -> [ProcessMetric]? { processes }
+}
+
+@MainActor
+private final class RecordingSystemSampler: SystemSampler {
+    var cpuResult: CPUSnapshot?
+    var memoryResult: MemorySnapshot?
+    var diskResult: DiskSnapshot?
+    var networkResult: NetworkSnapshot?
+    var batteryResult: BatterySnapshot?
+    var processResult: [ProcessMetric]?
+
+    private(set) var cpuCallCount = 0
+    private(set) var memoryCallCount = 0
+    private(set) var diskCallCount = 0
+    private(set) var networkCallCount = 0
+    private(set) var batteryCallCount = 0
+    private(set) var processCallCount = 0
+
+    init(
+        cpu: CPUSnapshot?,
+        memory: MemorySnapshot?,
+        disk: DiskSnapshot?,
+        network: NetworkSnapshot?,
+        battery: BatterySnapshot?,
+        processes: [ProcessMetric]?
+    ) {
+        cpuResult = cpu
+        memoryResult = memory
+        diskResult = disk
+        networkResult = network
+        batteryResult = battery
+        processResult = processes
+    }
+
+    func sampleCPU() async -> CPUSnapshot? {
+        cpuCallCount += 1
+        return cpuResult
+    }
+
+    func sampleMemory() async -> MemorySnapshot? {
+        memoryCallCount += 1
+        return memoryResult
+    }
+
+    func sampleDisk() async -> DiskSnapshot? {
+        diskCallCount += 1
+        return diskResult
+    }
+
+    func sampleNetwork() async -> NetworkSnapshot? {
+        networkCallCount += 1
+        return networkResult
+    }
+
+    func sampleBattery() async -> BatterySnapshot? {
+        batteryCallCount += 1
+        return batteryResult
+    }
+
+    func sampleDiskSpaceCandidates() async -> [DiskSpaceCandidate] { [] }
+
+    func sampleProcesses() async -> [ProcessMetric]? {
+        processCallCount += 1
+        return processResult
+    }
 }
 
 private struct SlowDiskCandidateSampler: SystemSampler {
@@ -176,7 +313,7 @@ private struct SlowDiskCandidateSampler: SystemSampler {
         ]
     }
 
-    func sampleProcesses() async -> [ProcessMetric] { [] }
+    func sampleProcesses() async -> [ProcessMetric]? { [] }
 }
 
 @MainActor
@@ -207,7 +344,7 @@ private final class SequenceMemorySampler: SystemSampler {
     func sampleNetwork() async -> NetworkSnapshot? { nil }
     func sampleBattery() async -> BatterySnapshot? { nil }
     func sampleDiskSpaceCandidates() async -> [DiskSpaceCandidate] { [] }
-    func sampleProcesses() async -> [ProcessMetric] { [] }
+    func sampleProcesses() async -> [ProcessMetric]? { [] }
 }
 
 @MainActor
@@ -228,5 +365,5 @@ private final class SequenceSystemSampler: SystemSampler {
     func sampleNetwork() async -> NetworkSnapshot? { nil }
     func sampleBattery() async -> BatterySnapshot? { nil }
     func sampleDiskSpaceCandidates() async -> [DiskSpaceCandidate] { [] }
-    func sampleProcesses() async -> [ProcessMetric] { [] }
+    func sampleProcesses() async -> [ProcessMetric]? { [] }
 }
