@@ -326,6 +326,203 @@ final class SystemMetricsServiceTests: XCTestCase {
         XCTAssertEqual(sampler.diskCallCount, 2)
     }
 
+    func testOverlappingRefreshesCommitInRequestOrder() async {
+        let start = Date(timeIntervalSince1970: 6_000)
+        let firstProcess = ProcessMetric(
+            pid: 10,
+            name: "First",
+            cpuPercent: 10,
+            memoryBytes: 100,
+            path: "/Applications/First.app/Contents/MacOS/First",
+            bundleIdentifier: "com.example.First"
+        )
+        let secondProcess = ProcessMetric(
+            pid: 20,
+            name: "Second",
+            cpuPercent: 20,
+            memoryBytes: 200,
+            path: "/Applications/Second.app/Contents/MacOS/Second",
+            bundleIdentifier: "com.example.Second"
+        )
+        let sampler = SuspendingProcessSampler(cpu: cpuSnapshot(usage: 40, at: start))
+        let service = SystemMetricsService(
+            sampler: sampler,
+            evaluator: HealthEvaluator(debounceSamples: 1)
+        )
+
+        let firstRefresh = Task { @MainActor in
+            await service.refresh(now: start, reason: .scheduled(baseInterval: 1))
+        }
+        await sampler.waitForProcessCallCount(1)
+
+        let secondRequestStarted = TestSignal()
+        let secondRefresh = Task { @MainActor in
+            secondRequestStarted.signal()
+            return await service.refresh(
+                now: start.addingTimeInterval(1),
+                reason: .terminationValidation(baseInterval: 1)
+            )
+        }
+        await secondRequestStarted.wait()
+
+        XCTAssertEqual(sampler.processCallCount, 1)
+        XCTAssertEqual(sampler.activeProcessCallCount, 1)
+
+        sampler.completeNextProcessCall(with: [firstProcess])
+        await sampler.waitForProcessCallCount(2)
+        XCTAssertEqual(sampler.activeProcessCallCount, 1)
+        sampler.completeNextProcessCall(with: [secondProcess])
+
+        let firstSnapshot = await firstRefresh.value
+        let secondSnapshot = await secondRefresh.value
+
+        XCTAssertEqual(firstSnapshot.processes.map(\.name), ["First"])
+        XCTAssertEqual(secondSnapshot.processes.map(\.name), ["Second"])
+        XCTAssertTrue(secondSnapshot.processesAreFresh)
+    }
+
+    func testCancelledQueuedRefreshDoesNotSampleAfterCurrentRefreshCompletes() async {
+        let start = Date(timeIntervalSince1970: 7_000)
+        let firstProcess = ProcessMetric(
+            pid: 10,
+            name: "First",
+            cpuPercent: 10,
+            memoryBytes: 100,
+            path: "/Applications/First.app/Contents/MacOS/First",
+            bundleIdentifier: "com.example.First"
+        )
+        let cancelledProcess = ProcessMetric(
+            pid: 20,
+            name: "Cancelled",
+            cpuPercent: 20,
+            memoryBytes: 200,
+            path: "/Applications/Cancelled.app/Contents/MacOS/Cancelled",
+            bundleIdentifier: "com.example.Cancelled"
+        )
+        let sampler = SuspendingProcessSampler(cpu: cpuSnapshot(usage: 40, at: start))
+        let service = SystemMetricsService(
+            sampler: sampler,
+            evaluator: HealthEvaluator(debounceSamples: 1)
+        )
+
+        let firstRefresh = Task { @MainActor in
+            await service.refresh(now: start, reason: .scheduled(baseInterval: 1))
+        }
+        await sampler.waitForProcessCallCount(1)
+        sampler.cpuResult = cpuSnapshot(usage: 90, at: start.addingTimeInterval(1))
+
+        let secondRequestStarted = TestSignal()
+        let cancelledRefresh = Task { @MainActor in
+            secondRequestStarted.signal()
+            return await service.refresh(
+                now: start.addingTimeInterval(1),
+                reason: .scheduled(baseInterval: 1)
+            )
+        }
+        await secondRequestStarted.wait()
+        cancelledRefresh.cancel()
+
+        XCTAssertEqual(sampler.processCallCount, 1)
+        sampler.completeNextProcessCall(with: [firstProcess])
+        let firstSnapshot = await firstRefresh.value
+
+        if sampler.activeProcessCallCount > 0 {
+            sampler.completeNextProcessCall(with: [cancelledProcess])
+        }
+        _ = await cancelledRefresh.value
+
+        let retainedSnapshot = await service.refresh(
+            now: start.addingTimeInterval(1.5),
+            reason: .scheduled(baseInterval: 10)
+        )
+
+        XCTAssertEqual(sampler.cpuCallCount, 1)
+        XCTAssertEqual(sampler.processCallCount, 1)
+        XCTAssertEqual(firstSnapshot.cpu?.totalUsagePercent, 40)
+        XCTAssertEqual(retainedSnapshot.cpu?.totalUsagePercent, 40)
+        XCTAssertEqual(retainedSnapshot.processes.map(\.name), ["First"])
+    }
+
+    func testChangingToSlowerBaseIntervalUsesNewFutureCadence() async {
+        let start = Date(timeIntervalSince1970: 8_000)
+        let sampler = recordingSampler(at: start)
+        let service = SystemMetricsService(
+            sampler: sampler,
+            evaluator: HealthEvaluator(debounceSamples: 1)
+        )
+
+        _ = await service.refresh(now: start, reason: .scheduled(baseInterval: 1))
+        sampler.cpuResult = cpuSnapshot(usage: 90, at: start.addingTimeInterval(1))
+        sampler.processResult = [
+            ProcessMetric(
+                pid: 2,
+                name: "Xcode",
+                cpuPercent: 90,
+                memoryBytes: 200,
+                path: "/Applications/Xcode.app/Contents/MacOS/Xcode",
+                bundleIdentifier: "com.apple.dt.Xcode"
+            )
+        ]
+
+        let retained = await service.refresh(
+            now: start.addingTimeInterval(1),
+            reason: .scheduled(baseInterval: 5)
+        )
+
+        XCTAssertEqual(sampler.cpuCallCount, 1)
+        XCTAssertEqual(sampler.processCallCount, 1)
+        XCTAssertEqual(retained.cpu?.totalUsagePercent, 40)
+        XCTAssertEqual(retained.processes.map(\.name), ["Safari"])
+
+        let refreshed = await service.refresh(
+            now: start.addingTimeInterval(5),
+            reason: .scheduled(baseInterval: 5)
+        )
+
+        XCTAssertEqual(sampler.cpuCallCount, 2)
+        XCTAssertEqual(sampler.processCallCount, 2)
+        XCTAssertEqual(refreshed.cpu?.totalUsagePercent, 90)
+        XCTAssertEqual(refreshed.processes.map(\.name), ["Xcode"])
+    }
+
+    func testCachedMemoryDoesNotAdvanceSwapIncreaseTracking() async {
+        let start = Date(timeIntervalSince1970: 9_000)
+        let sampler = recordingSampler(at: start)
+        sampler.memoryResult = memorySnapshot(swapUsedBytes: 100, at: start)
+        let service = SystemMetricsService(
+            sampler: sampler,
+            evaluator: HealthEvaluator(debounceSamples: 1)
+        )
+
+        let initial = await service.refresh(now: start, reason: .scheduled(baseInterval: 5))
+        sampler.memoryResult = memorySnapshot(
+            swapUsedBytes: 200,
+            at: start.addingTimeInterval(1)
+        )
+        let retained = await service.refresh(
+            now: start.addingTimeInterval(1),
+            reason: .scheduled(baseInterval: 5)
+        )
+
+        XCTAssertEqual(sampler.memoryCallCount, 1)
+        XCTAssertEqual(initial.summary(for: .memory)?.health, .normal)
+        XCTAssertEqual(retained.memory?.swapUsedBytes, 100)
+        XCTAssertEqual(retained.summary(for: .memory)?.health, .normal)
+
+        sampler.memoryResult = memorySnapshot(
+            swapUsedBytes: 150,
+            at: start.addingTimeInterval(5)
+        )
+        let increased = await service.refresh(
+            now: start.addingTimeInterval(5),
+            reason: .scheduled(baseInterval: 5)
+        )
+
+        XCTAssertEqual(sampler.memoryCallCount, 2)
+        XCTAssertEqual(increased.memory?.swapUsedBytes, 150)
+        XCTAssertEqual(increased.summary(for: .memory)?.health, .critical)
+    }
+
     private func recordingSampler(at now: Date) -> RecordingSystemSampler {
         RecordingSystemSampler(
             cpu: cpuSnapshot(usage: 40, at: now),
@@ -343,6 +540,19 @@ final class SystemMetricsServiceTests: XCTestCase {
 
     private func diskSnapshot(freeBytes: UInt64, at now: Date) -> DiskSnapshot {
         DiskSnapshot(volumeName: "Macintosh HD", mountPoint: "/", totalBytes: 100, freeBytes: freeBytes, readBytesPerSecond: nil, writeBytesPerSecond: nil, sampledAt: now)
+    }
+
+    private func memorySnapshot(swapUsedBytes: UInt64, at now: Date) -> MemorySnapshot {
+        MemorySnapshot(
+            totalBytes: 100,
+            usedBytes: 50,
+            freeBytes: 50,
+            compressedBytes: nil,
+            cachedBytes: nil,
+            swapUsedBytes: swapUsedBytes,
+            pressure: .normal,
+            sampledAt: now
+        )
     }
 
     private func gib(_ value: UInt64) -> UInt64 {
@@ -448,6 +658,86 @@ private final class RecordingSystemSampler: SystemSampler {
     func sampleProcesses() async -> [ProcessMetric]? {
         processCallCount += 1
         return processResult
+    }
+}
+
+@MainActor
+private final class SuspendingProcessSampler: SystemSampler {
+    var cpuResult: CPUSnapshot?
+    private(set) var cpuCallCount = 0
+    private(set) var processCallCount = 0
+
+    private var processContinuations: [CheckedContinuation<[ProcessMetric]?, Never>] = []
+    private var processCallCountWaiters: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
+
+    var activeProcessCallCount: Int {
+        processContinuations.count
+    }
+
+    init(cpu: CPUSnapshot?) {
+        cpuResult = cpu
+    }
+
+    func sampleCPU() async -> CPUSnapshot? {
+        cpuCallCount += 1
+        return cpuResult
+    }
+
+    func sampleMemory() async -> MemorySnapshot? { nil }
+    func sampleDisk() async -> DiskSnapshot? { nil }
+    func sampleNetwork() async -> NetworkSnapshot? { nil }
+    func sampleBattery() async -> BatterySnapshot? { nil }
+    func sampleDiskSpaceCandidates() async -> [DiskSpaceCandidate] { [] }
+
+    func sampleProcesses() async -> [ProcessMetric]? {
+        processCallCount += 1
+        resumeSatisfiedProcessCallCountWaiters()
+        return await withCheckedContinuation { continuation in
+            processContinuations.append(continuation)
+        }
+    }
+
+    func waitForProcessCallCount(_ expectedCount: Int) async {
+        guard processCallCount < expectedCount else { return }
+        await withCheckedContinuation { continuation in
+            processCallCountWaiters.append((expectedCount, continuation))
+        }
+    }
+
+    func completeNextProcessCall(with result: [ProcessMetric]?) {
+        precondition(!processContinuations.isEmpty)
+        processContinuations.removeFirst().resume(returning: result)
+    }
+
+    private func resumeSatisfiedProcessCallCountWaiters() {
+        var remaining: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
+        for waiter in processCallCountWaiters {
+            if processCallCount >= waiter.count {
+                waiter.continuation.resume()
+            } else {
+                remaining.append(waiter)
+            }
+        }
+        processCallCountWaiters = remaining
+    }
+}
+
+@MainActor
+private final class TestSignal {
+    private var isSignalled = false
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+
+    func signal() {
+        isSignalled = true
+        continuations.forEach { $0.resume() }
+        continuations.removeAll()
+    }
+
+    func wait() async {
+        guard !isSignalled else { return }
+        await withCheckedContinuation { continuation in
+            continuations.append(continuation)
+        }
     }
 }
 

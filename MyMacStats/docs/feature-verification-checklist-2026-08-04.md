@@ -27,7 +27,8 @@
 
 - CPU/RAM/Network는 선택한 base interval, Processes는 최소 2초, Disk/Battery는 최소 10초 cadence로 샘플링한다. disk space candidate scan은 기존처럼 별도 60초 background cadence를 유지한다.
 - 정상 샘플 뒤 첫 due failure는 마지막 정상 값과 timestamp를 유지한다. retained last-success health가 `critical`이면 `critical`을 유지하고, 그 외에는 stale warning으로 표시하며, 두 번째 연속 due failure에서 unavailable로 전환한다. cadence skip은 failure가 아니며 health debounce와 CPU history는 새 성공 샘플에서만 진행한다.
-- 종료 확인은 process cadence를 우회해 새 프로세스 목록을 강제 수집한다. 이 수집이 실패하면 cached process 목록을 쓰지 않고 `SIGTERM`/`SIGKILL`을 보내지 않는다.
+- 전체 refresh는 private serialization gate를 통과해 한 번에 하나만 sampler와 cache에 접근한다. controllable overlap/cancellation XCTest가 request order와 cancelled waiter의 no-sample 동작을 검증하며, 별도 live concurrency instrumentation 결과를 주장하지 않는다.
+- 종료 확인은 process cadence를 우회해 새 프로세스 목록을 강제 수집한다. 이 수집이 실패하면 cached process 목록을 쓰지 않으며, Quit과 Force Quit 각각의 fail-closed XCTest가 어떤 signal도 보내지 않는 것을 검증한다.
 
 ## 판정 기준
 
@@ -38,8 +39,8 @@
 ## 이번에 실제로 실행한 검증
 
 - [x] `swift test`
-  - 결과: 92 tests, 0 failures.
-  - 확인 범위: health 판정, CPU/RAM/Network/Disk 핵심 sampler, metric별 cadence, one-failure stale/two-failure unavailable recovery, process 검색/정렬/grouping/termination, fresh process sampling 실패 시 fail-closed, dashboard view model, 원인 요약, RAM critical 알림 controller, 메뉴바 lifecycle source check, 패키징 script source check.
+  - 결과: 97 tests, 0 failures.
+  - 확인 범위: health 판정, CPU/RAM/Network/Disk 핵심 sampler, metric별 cadence, slower interval 전환, one-failure stale/two-failure unavailable recovery, fresh-only memory swap tracking, refresh overlap/queued cancellation serialization, process 검색/정렬/grouping/termination, Quit/Force Quit fresh process sampling 실패 시 fail-closed, dashboard view model, 원인 요약, RAM critical 알림 controller, 메뉴바 lifecycle source check, 패키징 script source check.
 - [x] `swift build -c release`
   - 결과: release build 성공.
 - [x] `./scripts/build-app-bundle.sh`
@@ -85,6 +86,9 @@
 - [x] 마지막 정상 값 1회 유지 정책이 구현되어 있다.
   - 정상 값 뒤 첫 due failure는 원래 timestamp와 last-success health를 유지한다. retained health가 `critical`이면 `critical`, 그 외에는 stale warning이며, 두 번째 연속 due failure는 unavailable이다. 새 성공 샘플은 회복하며 cadence skip은 failure가 아니다.
   - CPU history와 health debounce는 fresh successful sample에서만 진행한다.
+- [x] overlapping refresh는 complete refresh operation 단위로 직렬화된다.
+  - controllable suspending sampler XCTest에서 scheduled refresh가 block된 동안 termination-validation refresh가 두 번째 process sample을 시작하지 않고, 첫 snapshot 뒤 두 번째 forced snapshot 순서로 commit되는 것을 확인했다.
+  - waiting 중 cancel된 refresh는 현재 refresh 완료 뒤 sampler/cache에 접근하지 않으며, 이후 refresh가 정상 완료돼 gate가 stranded되지 않는 것을 확인했다. 이는 deterministic XCTest 근거이며 live concurrency instrumentation 근거는 아니다.
 
 ## 3. CPU
 
@@ -209,7 +213,7 @@
   - PID가 다른 이름/경로/bundle identity로 바뀌었으면 signal을 보내지 않는다.
   - 대상이 이미 종료됐으면 signal을 보내지 않고 "already exited" 상태를 표시한다.
 - [x] 종료 validation은 fresh process sample이 없으면 fail closed한다.
-  - termination refresh는 Process cadence를 강제로 우회한다. 새 샘플이 실패하면 cached process 목록을 사용하지 않고 `SIGTERM`/`SIGKILL`을 보내지 않는 테스트가 있다.
+  - termination refresh는 Process cadence를 강제로 우회한다. 별도의 Quit과 Force Quit 실패 테스트가 exact fail-closed message를 확인하며, 각각 `SIGTERM`, `SIGKILL`, 또는 다른 signal이 전혀 전송되지 않는 것을 검증한다.
 - [x] Quit App은 `NSRunningApplication.terminate()`를 먼저 사용한다.
   - 일반 앱 종료 UX가 기존 signal-only 방식보다 자연스럽다.
   - 앱 종료 API가 처리하지 못하면 기존 signal fallback을 사용한다.
@@ -277,7 +281,7 @@
 
 ## 15. 테스트 커버리지
 
-- [x] 총 92개 XCTest가 통과한다.
+- [x] 총 97개 XCTest가 통과한다.
 - [x] CPU sampler: tick delta, kernel sampling, first sample behavior.
 - [x] Memory sampler: host stats, pressure mapping, swap.
 - [x] Network sampler: 64-bit counters, active interface, speed reset.
@@ -285,8 +289,8 @@
 - [x] Disk candidate scanner: target restriction, timeout fallback.
 - [x] HealthEvaluator: CPU/RAM/Disk/Network/Battery/debounce.
 - [x] Process sorting/grouping: search, ordering basics, resource 동률 안정 정렬.
-- [x] SystemMetricsService: metric별 cadence, last-known-good stale/unavailable transition, fresh-only CPU history/debounce.
-- [x] Process termination: signal, protection, group behavior, stale PID identity recheck, forced fresh process validation, app quit fallback.
+- [x] SystemMetricsService: metric별 cadence, slower interval 전환, last-known-good stale/unavailable transition, fresh-only CPU history/debounce/swap tracking, refresh overlap serialization, queued cancellation.
+- [x] Process termination: signal, protection, group behavior, stale PID identity recheck, forced fresh process validation, Quit/Force Quit fail-closed, app quit fallback.
 - [x] DashboardViewModel: selection, sort/search, history, refresh interval, termination fail-closed state.
 - [x] Cause summary: CPU/RAM/Disk summary behavior.
 - [x] RAM alert controller: critical persistence and reset.

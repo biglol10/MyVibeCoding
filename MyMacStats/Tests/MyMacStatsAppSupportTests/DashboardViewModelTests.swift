@@ -470,6 +470,51 @@ final class DashboardViewModelTests: XCTestCase {
         )
     }
 
+    func testTerminationDoesNotSendSIGKILLWhenForcedRefreshFails() async {
+        var sent: [(Int32, Int32)] = []
+        let target = ProcessMetric(
+            pid: 500,
+            name: "Figma",
+            cpuPercent: 10,
+            memoryBytes: 100,
+            path: "/Applications/Figma.app/Contents/MacOS/Figma",
+            bundleIdentifier: "com.figma.Desktop"
+        )
+        let sampler = SnapshotSampler(processes: [target])
+        let service = SystemMetricsService(
+            sampler: sampler,
+            evaluator: HealthEvaluator(debounceSamples: 1)
+        )
+        _ = await service.refresh(reason: .scheduled(baseInterval: 10))
+        sampler.processResult = nil
+
+        let viewModel = DashboardViewModel(
+            snapshot: snapshot(processes: [target]),
+            service: service,
+            terminator: ProcessTerminator(
+                currentProcessID: 99,
+                signalSender: { pid, signal in
+                    sent.append((pid, signal))
+                    return 0
+                },
+                errnoProvider: { 0 }
+            )
+        )
+
+        await viewModel.confirmPendingTermination(
+            process: target,
+            group: nil,
+            mode: .forceQuit
+        )
+
+        XCTAssertEqual(sampler.processCallCount, 2)
+        XCTAssertTrue(sent.isEmpty)
+        XCTAssertEqual(
+            viewModel.terminationMessage,
+            "Could not refresh the process list. No termination signal was sent."
+        )
+    }
+
     func testTerminationValidationForcesFreshProcessSampling() async {
         var sent: [(Int32, Int32)] = []
         let target = ProcessMetric(

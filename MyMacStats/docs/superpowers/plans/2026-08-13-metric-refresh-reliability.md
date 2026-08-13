@@ -49,7 +49,7 @@
 - Consumes: `RefreshInterval.seconds`, existing `SystemSampler` metric methods, `SystemMetricsSnapshot`.
 - Produces: `SystemMetricsRefreshReason`, `SystemMetricsService.refresh(now:reason:)`, optional `SystemSampler.sampleProcesses()`, `SystemMetricsSnapshot.processesAreFresh`.
 
-- [ ] **Step 1: Write the failing cadence test**
+- [x] **Step 1: Write the failing cadence test**
 
 Add a main-actor recording sampler whose values can be changed and whose call counts are observable. The process return value is optional so a command failure differs from a successful empty list.
 
@@ -157,7 +157,7 @@ func testScheduledRefreshUsesMetricSpecificCadence() async {
 }
 ```
 
-- [ ] **Step 2: Run the cadence test and verify RED**
+- [x] **Step 2: Run the cadence test and verify RED**
 
 Run:
 
@@ -167,7 +167,7 @@ swift test --filter SystemMetricsServiceTests/testScheduledRefreshUsesMetricSpec
 
 Expected: compilation fails because `SystemMetricsRefreshReason`, the `reason:` argument, and optional `sampleProcesses()` do not exist.
 
-- [ ] **Step 3: Implement refresh reasons, cadence state, and optional process results**
+- [x] **Step 3: Implement refresh reasons, cadence state, and optional process results**
 
 Add these public contracts near `SystemSampler`:
 
@@ -254,7 +254,7 @@ Only invoke each sampler when its cache reports due. Force only process sampling
 
 Update every test `SystemSampler` conformance to return `[ProcessMetric]?`.
 
-- [ ] **Step 4: Run focused and full service tests to verify GREEN**
+- [x] **Step 4: Run focused and full service tests to verify GREEN**
 
 Run:
 
@@ -264,7 +264,7 @@ swift test --filter SystemMetricsServiceTests
 
 Expected: all service tests pass. Update old tests that expected every sampler to run on every timestamp so their timestamps cross the new cadence only when the test intends a fresh value.
 
-- [ ] **Step 5: Commit cadence behavior**
+- [x] **Step 5: Commit cadence behavior**
 
 ```bash
 git add Sources/MyMacStatsAppSupport/SystemMetricsService.swift Tests/MyMacStatsAppSupportTests/SystemMetricsServiceTests.swift Tests/MyMacStatsAppSupportTests/DashboardViewModelTests.swift
@@ -281,7 +281,7 @@ git commit -m "feat: add per-metric sampling cadence"
 - Consumes: `MetricSampleCache<Value>`, `SystemMetricsRefreshReason`, `SystemMetricsSnapshot.processesAreFresh` from Task 1.
 - Produces: one-failure stale presentation, two-failure unavailable transition, recovery behavior, fresh-only CPU history.
 
-- [ ] **Step 1: Write failing stale/recovery tests**
+- [x] **Step 1: Write failing stale/recovery tests**
 
 Add a test that proves stale data keeps its original timestamp and does not extend CPU history:
 
@@ -371,7 +371,7 @@ func testProcessFailuresRetainOnceThenBecomeUnavailableAndEmptySuccessRecovers()
 
 Add a disk test showing that a nil result while disk is not due does not count as a failure. At `start + 1`, the summary remains normal; at `start + 10`, the first due failure becomes stale warning rather than unavailable.
 
-- [ ] **Step 2: Run stale tests and verify RED**
+- [x] **Step 2: Run stale tests and verify RED**
 
 Run:
 
@@ -382,7 +382,7 @@ swift test --filter SystemMetricsServiceTests/testProcessFailuresRetainOnceThenB
 
 Expected: tests fail because cached values are still presented without explicit stale status or are removed immediately, and process freshness/failure transitions are not complete.
 
-- [ ] **Step 3: Implement cache presentation states**
+- [x] **Step 3: Implement cache presentation states**
 
 Add an internal presentation enum and computed state:
 
@@ -415,7 +415,7 @@ For Processes, present cached values only through the first failure and pass its
 
 Add `testSkippedDiskSampleDoesNotAdvanceHealthDebounce`: provide two low-free-space Disk results, refresh at `start`, `start + 1`, and `start + 10`, and assert the skipped `start + 1` refresh remains normal while the second real Disk sample at `start + 10` is the first debounce candidate and also remains normal. A third real Disk sample at `start + 20` must become critical.
 
-- [ ] **Step 4: Verify focused tests and all AppSupport tests**
+- [x] **Step 4: Verify focused tests and all AppSupport tests**
 
 Run:
 
@@ -426,7 +426,7 @@ swift test --filter MyMacStatsAppSupportTests
 
 Expected: all selected tests pass with no failures or concurrency warnings.
 
-- [ ] **Step 5: Commit stale-value behavior**
+- [x] **Step 5: Commit stale-value behavior**
 
 ```bash
 git add Sources/MyMacStatsAppSupport/SystemMetricsService.swift Tests/MyMacStatsAppSupportTests/SystemMetricsServiceTests.swift
@@ -445,7 +445,7 @@ git commit -m "feat: retain transiently stale metric samples"
 - Consumes: `SystemMetricsService.refresh(now:reason:)` and `SystemMetricsSnapshot.processesAreFresh` from Tasks 1-2.
 - Produces: scheduled refreshes that honor the selected interval and termination requests that fail closed on process sampling failure.
 
-- [ ] **Step 1: Write failing forced-refresh and fail-closed tests**
+- [x] **Step 1: Write failing forced-refresh and fail-closed tests**
 
 Make the existing `SnapshotSampler` mutable and observable:
 
@@ -521,7 +521,7 @@ func testTerminationDoesNotUseCachedProcessesWhenForcedRefreshFails() async {
 
 Add a second test where the sampler still returns the target. Call a scheduled refresh immediately before confirmation and assert that confirmation increments `processCallCount` again despite the two-second cadence, then sends exactly one `SIGTERM`.
 
-- [ ] **Step 2: Run termination tests and verify RED**
+- [x] **Step 2: Run termination tests and verify RED**
 
 Run:
 
@@ -532,7 +532,7 @@ swift test --filter DashboardViewModelTests/testTerminationValidationForcesFresh
 
 Expected: the first test fails because current confirmation cannot distinguish cached process data from a failed fresh sample; the second fails because confirmation does not yet use the explicit termination refresh reason.
 
-- [ ] **Step 3: Wire refresh reasons into the view model**
+- [x] **Step 3: Wire refresh reasons into the view model**
 
 Change normal refresh to:
 
@@ -581,7 +581,7 @@ do {
 }
 ```
 
-- [ ] **Step 4: Run all termination and view-model tests**
+- [x] **Step 4: Run all termination and view-model tests**
 
 Run:
 
@@ -592,7 +592,7 @@ swift test --filter ProcessTerminatorTests
 
 Expected: all selected tests pass; a failed process refresh sends neither `SIGTERM` nor `SIGKILL`.
 
-- [ ] **Step 5: Commit view-model safety wiring**
+- [x] **Step 5: Commit view-model safety wiring**
 
 ```bash
 git add Sources/MyMacStatsAppSupport/DashboardViewModel.swift Tests/MyMacStatsAppSupportTests/DashboardViewModelTests.swift

@@ -28,6 +28,58 @@ public enum SystemMetricsRefreshReason: Equatable, Sendable {
     }
 }
 
+@MainActor
+private final class RefreshSerializationGate {
+    private struct Waiter {
+        let id: UUID
+        let continuation: CheckedContinuation<Bool, Never>
+    }
+
+    private var isHeld = false
+    private var waiters: [Waiter] = []
+
+    func acquire() async -> Bool {
+        guard !Task.isCancelled else { return false }
+
+        if !isHeld {
+            isHeld = true
+            return true
+        }
+
+        let id = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if Task.isCancelled {
+                    continuation.resume(returning: false)
+                } else if !isHeld {
+                    isHeld = true
+                    continuation.resume(returning: true)
+                } else {
+                    waiters.append(Waiter(id: id, continuation: continuation))
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.cancelWaiter(id: id)
+            }
+        }
+    }
+
+    func release() {
+        guard !waiters.isEmpty else {
+            isHeld = false
+            return
+        }
+
+        waiters.removeFirst().continuation.resume(returning: true)
+    }
+
+    private func cancelWaiter(id: UUID) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        waiters.remove(at: index).continuation.resume(returning: false)
+    }
+}
+
 private struct MetricSampleCache<Value> {
     var value: Value?
     var lastSuccessAt: Date?
@@ -137,6 +189,7 @@ public struct SystemMetricsSnapshot: Equatable, Sendable {
 public final class SystemMetricsService {
     private let sampler: SystemSampler
     private var evaluator: HealthEvaluator
+    private let refreshGate = RefreshSerializationGate()
     private var cpuCache = MetricSampleCache<CPUSnapshot>()
     private var memoryCache = MetricSampleCache<MemorySnapshot>()
     private var diskCache = MetricSampleCache<DiskSnapshot>()
@@ -177,6 +230,16 @@ public final class SystemMetricsService {
         now: Date = Date(),
         reason: SystemMetricsRefreshReason = .scheduled(baseInterval: 1)
     ) async -> SystemMetricsSnapshot {
+        let acquiredRefreshGate = await refreshGate.acquire()
+        guard acquiredRefreshGate else {
+            return .empty(updatedAt: now)
+        }
+        guard !Task.isCancelled else {
+            refreshGate.release()
+            return .empty(updatedAt: now)
+        }
+        defer { refreshGate.release() }
+
         refreshDiskSpaceCandidatesIfNeeded(now: now)
 
         let base = max(reason.baseInterval, 1)
