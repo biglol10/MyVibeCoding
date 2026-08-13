@@ -59,6 +59,7 @@ The service stores the following for CPU, memory, disk, network, battery, and pr
 - Time of the last successful sample.
 - Time of the last attempted sample.
 - Number of consecutive failed due attempts.
+- Last summary produced from a successful sample.
 
 Skipping a sample because it is not due does not increment the failure count and does not mark the value stale.
 
@@ -89,6 +90,8 @@ For processes:
 `SystemMetricsSnapshot.updatedAt` remains the time the snapshot was assembled.
 
 Each `MetricSummary.updatedAt` represents the last successful sample time for that metric. This allows stale data to retain an accurate age instead of appearing newly measured.
+
+Health evaluation and health debounce advance only when a due sampler returns a new value. A cadence skip or retained stale value must not count as another health sample. A skipped metric reuses its last successful summary unchanged; a stale metric derives its warning from that summary without advancing `HealthEvaluator`.
 
 The Processes summary health can now be `warning` or `unavailable` when process sampling is stale or unavailable. Normal successful sampling remains `normal`.
 
@@ -123,6 +126,7 @@ Required behavior tests:
 - One-second scheduled refresh does not resample disk or battery before ten seconds.
 - Changing to a slower base interval changes future due times without discarding cached values.
 - Skipped samples do not increase failure counters.
+- Skipped disk and battery samples do not advance health debounce.
 - First due failure retains the last CPU value and exposes a stale warning with the original timestamp.
 - Second due failure makes the CPU summary unavailable.
 - A success after failures restores fresh state.
