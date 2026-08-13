@@ -56,7 +56,7 @@ swift run MyMacStatsApp
 - 메뉴바 상주 앱 + 대시보드 창
 - 메뉴바 미니 팝오버: CPU/RAM/Disk 요약과 Top Culprits 표시
 - 3-column 대시보드: 왼쪽 요약, 가운데 목록, 오른쪽 상세
-- CPU/RAM/Disk/Network/Battery/Processes 자동 갱신
+- CPU/RAM/Disk/Network/Battery/Processes 자동 갱신 및 metric별 sampling cadence
 - 앱 단위 프로세스 그룹화
 - CPU/RAM 원인 요약 배너
 - CPU 1분/5분 sparkline
@@ -79,11 +79,11 @@ swift run MyMacStatsApp
 - RAM pressure는 `kern.memorystatus_vm_pressure_level` 값을 사용합니다. `vm.memory_pressure`는 표시값 의미가 달라 health 판정에 사용하지 않습니다.
 - CPU/RAM sampler는 `mach_host_self()`로 얻은 send right를 해제합니다.
 - Network 카운터는 `NET_RT_IFLIST2`의 64-bit byte counter를 사용하고, 두 번째 샘플부터는 누적 총량이 아니라 현재 증가량이 있는 인터페이스를 우선 선택합니다.
-- Network 측정이 한 번 실패하면 warning으로 표시하고, 연속 실패하면 unavailable로 전환해 순간 실패로 인한 회색 깜빡임을 줄입니다.
+- 이전에 정상 값이 있던 metric은 due sampling이 한 번 실패해도 마지막 정상 값을 warning 상태로 유지하고, 두 번째 연속 due 실패에서 unavailable로 전환합니다. 이전 정상 값이 없는 첫 실패는 바로 unavailable입니다.
 - Disk 읽기/쓰기 속도는 IOKit block storage counter delta로 계산하고, 볼륨명 fallback은 하드코딩된 `Macintosh HD`가 아니라 mount point 이름을 사용합니다.
 - 디스크 공간 후보 스캔의 `du` 호출은 timeout 후 fallback scan으로 전환하며, UI refresh를 막지 않습니다.
 - 기본 자동 디스크 후보 스캔은 넓은 `~/Library/Caches` 전체를 훑지 않습니다. macOS가 media library 등 개인정보 보호 권한 프롬프트를 띄울 수 있어 Xcode DerivedData처럼 범위가 좁은 개발자 캐시만 기본 후보로 둡니다.
-- 프로세스 종료 직전에는 최신 프로세스 목록을 다시 샘플링해 PID, 이름, 실행 경로, 번들 ID가 같은 대상인지 확인합니다. PID가 재사용된 것으로 보이면 signal을 보내지 않습니다.
+- 프로세스 종료 직전에는 cadence와 관계없이 최신 프로세스 목록을 강제로 다시 샘플링해 PID, 이름, 실행 경로, 번들 ID가 같은 대상인지 확인합니다. 새 샘플을 얻지 못하면 cached 목록을 사용하지 않고 signal을 보내지 않습니다.
 - 프로세스 번들 ID는 임의 경로를 `Bundle(path:)`로 여는 대신 `.app/Contents/Info.plist`만 직접 읽어 불필요한 개인정보 권한 프롬프트 가능성을 줄입니다.
 - 메뉴바 `Open Dashboard`는 임의의 첫 번째 창이 아니라 `MyMacStats` 대시보드 창을 찾아 앞으로 가져옵니다.
 - 개인 배포 zip은 `scripts/check-distribution.sh`로 압축 해제, quarantine 제거, 설치, codesign 검증까지 확인합니다.
@@ -115,6 +115,19 @@ swift run MyMacStatsApp
 
 CPU 상태는 70%/90% 임계값이 10초 이상 유지될 때 warning/critical로 바뀝니다. RAM, Disk, Battery, Network는 각 샘플러 결과와 HealthEvaluator 규칙에 따라 상태가 정해집니다.
 
+## 갱신 주기와 일시 실패
+
+대시보드는 하나의 refresh loop를 유지하지만, 각 sampler는 다음 cadence가 되었을 때만 실행됩니다. 사용자가 설정한 refresh interval을 base interval로 사용하며, cadence를 건너뛴 tick은 실패로 세지 않습니다.
+
+| Metric | Sampling cadence |
+| --- | --- |
+| CPU, RAM, Network | `max(base interval, 1초)` |
+| Processes | `max(base interval, 2초)` |
+| Disk, Battery | `max(base interval, 10초)` |
+| Disk space candidates | 별도 백그라운드 60초 |
+
+정상 샘플 뒤 첫 due failure에서는 마지막 정상 값과 원래 시각을 유지하고 `warning`으로 표시합니다. 두 번째 연속 due failure에서는 `unavailable`로 전환합니다. 새 성공 샘플은 이 상태를 즉시 회복합니다. CPU history와 health debounce는 새 성공 샘플에서만 진행됩니다.
+
 ## 프로세스/앱 종료
 
 오른쪽 상세 패널에서 선택된 대상에 대해 `Quit Process` 또는 `Quit App`을 요청할 수 있습니다. 단일 프로세스는 해당 PID만 대상으로 하고, 앱 그룹으로 묶인 항목은 같은 앱의 관련 프로세스들을 함께 대상으로 합니다.
@@ -124,6 +137,7 @@ CPU 상태는 70%/90% 임계값이 10초 이상 유지될 때 warning/critical�
 - Quit 후 대상 앱/프로세스가 계속 남아 있으면 `Force Quit` 경로를 사용할 수 있습니다.
 - Force Quit은 대상 프로세스들에 `SIGKILL`을 보냅니다.
 - `launchd`, `WindowServer`, 앱 자신, 시스템 경로 프로세스 등 보호 대상이 포함되면 버튼이 비활성화됩니다.
+- 종료 확인 시에는 Processes cadence를 우회해 새 프로세스 목록을 반드시 수집합니다. 이 수집이 실패하면 종료를 거부하므로 stale cached 대상에는 signal을 보내지 않습니다.
 
 ## 디스크 공간 후보
 
@@ -175,9 +189,9 @@ swift test
 - HealthEvaluator 상태 판정
 - metric formatter
 - process sorting/grouping
-- 프로세스/앱 그룹 Quit / Force Quit 대상, 최신 PID identity 재확인, 앱 종료 fallback, signal 선택
-- dashboard view model 선택/정렬/검색/히스토리
-- system metrics snapshot 구성
+- 프로세스/앱 그룹 Quit / Force Quit 대상, 최신 PID identity 재확인, fresh process sampling 실패 시 fail-closed, 앱 종료 fallback, signal 선택
+- dashboard view model 선택/정렬/검색/히스토리와 선택 refresh interval
+- metric별 cadence, last-known-good stale/unavailable 전환, system metrics snapshot 구성
 - disk space candidate scanner
 - cause summary builder
 - RAM critical 지속 알림 컨트롤러
@@ -272,4 +286,4 @@ MyMacStats/
 - Dock 아이콘 숨김 설정은 아직 없습니다.
 - 알림센터 위젯과 iCloud 동기화는 없습니다.
 - 프로세스별 네트워크 사용량은 아직 표시하지 않습니다.
-- 시스템 API가 값을 계속 제공하지 않거나 권한상 읽을 수 없는 항목은 unavailable로 표시됩니다. Network는 첫 측정 실패를 warning으로 한 번 거친 뒤 unavailable로 전환합니다.
+- 시스템 API가 값을 계속 제공하지 않거나 권한상 읽을 수 없는 항목은 unavailable로 표시됩니다. 이전 정상 값이 있으면 첫 due failure에서만 warning으로 마지막 값을 보이고, 두 번째 연속 due failure에서 unavailable로 전환합니다.

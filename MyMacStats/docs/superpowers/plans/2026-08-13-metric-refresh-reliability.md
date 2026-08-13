@@ -610,15 +610,15 @@ git commit -m "fix: require fresh process data before termination"
 - Consumes: completed behavior from Tasks 1-3.
 - Produces: accurate user documentation, updated verification evidence, release-ready personal build artifacts.
 
-- [ ] **Step 1: Update README behavior descriptions**
+- [x] **Step 1: Update README behavior descriptions**
 
 Document the effective cadence table, one-failure retained-value policy, two-failure unavailable transition, and forced process refresh before termination. Remove the limitation claiming that per-metric cadence and short last-known-good retention are not implemented.
 
-- [ ] **Step 2: Update the verification checklist**
+- [x] **Step 2: Update the verification checklist**
 
 Record the new test count only after the full suite runs. Mark metric cadence and last-known-good handling as verified, keep UI automation and real notification delivery as remaining limitations, and record that termination validation fails closed when fresh process sampling fails.
 
-- [ ] **Step 3: Run full clean verification**
+- [x] **Step 3: Run full clean verification**
 
 Run:
 
@@ -631,7 +631,7 @@ git diff --check
 
 Expected: every command exits 0; XCTest reports zero failures.
 
-- [ ] **Step 4: Build and inspect the distributable app**
+- [x] **Step 4: Build and inspect the distributable app**
 
 Run:
 
@@ -643,11 +643,11 @@ open dist/MyMacStats/MyMacStats.app
 
 Confirm the app process starts, the dashboard displays populated metrics, and no privacy permission prompt appears.
 
-- [ ] **Step 5: Verify runtime cadence evidence**
+- [x] **Step 5: Verify runtime cadence evidence**
 
 Use the deterministic recording-sampler XCTest as the authoritative cadence proof. During the app smoke run, inspect process activity long enough to ensure the dashboard remains responsive; do not claim exact live `/bin/ps` call counts without instrumentation.
 
-- [ ] **Step 6: Commit documentation and checklist evidence**
+- [x] **Step 6: Commit documentation and checklist evidence**
 
 ```bash
 git add README.md docs/feature-verification-checklist-2026-08-04.md docs/superpowers/plans/2026-08-13-metric-refresh-reliability.md

@@ -1,7 +1,7 @@
 # MyMacStats 기능 검증 체크리스트
 
 - 작성일: 2026-08-04
-- 최근 갱신: 2026-08-08
+- 최근 갱신: 2026-08-13
 - 최초 기준 커밋: `8e93341`
 - 검증 대상: 현재 `MyMacStats` Swift Package, SwiftUI 앱, 테스트, 번들/zip 생성 스크립트
 - 검증 방식: README 주장 대조, 소스 직접 확인, XCTest 실행, release build, 앱 번들 생성, 개인 배포 zip 설치 검증, 실제 앱 실행/화면 캡처 스모크
@@ -23,6 +23,12 @@
 - Network 측정 실패는 첫 실패 warning, 연속 실패 unavailable로 표시해 순간 실패로 인한 회색 깜빡임을 줄였다.
 - Settings에서 바꾼 refresh interval은 UserDefaults에 저장되고 다음 ViewModel 생성 시 복원된다.
 
+2026-08-13 metric refresh reliability 후속 점검에서 추가로 반영한 사항:
+
+- CPU/RAM/Network는 선택한 base interval, Processes는 최소 2초, Disk/Battery는 최소 10초 cadence로 샘플링한다. disk space candidate scan은 기존처럼 별도 60초 background cadence를 유지한다.
+- 정상 샘플 뒤 첫 due failure는 마지막 정상 값과 timestamp를 유지한 stale warning으로 표시하고, 두 번째 연속 due failure에서 unavailable로 전환한다. cadence skip은 failure가 아니며 health debounce와 CPU history는 새 성공 샘플에서만 진행한다.
+- 종료 확인은 process cadence를 우회해 새 프로세스 목록을 강제 수집한다. 이 수집이 실패하면 cached process 목록을 쓰지 않고 `SIGTERM`/`SIGKILL`을 보내지 않는다.
+
 ## 판정 기준
 
 - `[x] 확인됨`: 구현이 있고, 소스/테스트/실행 중 하나 이상으로 확인했다.
@@ -32,8 +38,8 @@
 ## 이번에 실제로 실행한 검증
 
 - [x] `swift test`
-  - 결과: 83 tests, 0 failures.
-  - 확인 범위: health 판정, CPU/RAM/Network/Disk 핵심 sampler, process 검색/정렬/grouping/termination, dashboard view model, 원인 요약, RAM critical 알림 controller, 메뉴바 lifecycle source check, 패키징 script source check.
+  - 결과: 92 tests, 0 failures.
+  - 확인 범위: health 판정, CPU/RAM/Network/Disk 핵심 sampler, metric별 cadence, one-failure stale/two-failure unavailable recovery, process 검색/정렬/grouping/termination, fresh process sampling 실패 시 fail-closed, dashboard view model, 원인 요약, RAM critical 알림 controller, 메뉴바 lifecycle source check, 패키징 script source check.
 - [x] `swift build -c release`
   - 결과: release build 성공.
 - [x] `./scripts/build-app-bundle.sh`
@@ -45,7 +51,7 @@
   - 결과: `MyMacStatsApp` 프로세스 기동 확인, `MyMacStats` 창 이름 확인.
 - [x] 실제 화면 캡처 확인
   - 결과: CPU/RAM/Disk/Network/Battery/Processes 값이 채워진 3-column 화면이 렌더링됨.
-  - 관찰: 최초 점검 때 앱 실행 중 macOS가 `MyMacStats.app`에 Apple Music/미디어 보관함 접근 권한 팝업을 표시했다. 후속 TCC 로그에서 `du`가 `~/Library/Caches` 전체를 스캔하는 과정이 `kTCCServiceMediaLibrary` 요청으로 이어진 것을 확인했고, 기본 자동 스캔 대상에서 broad Caches를 제거했다.
+  - 관찰: 2026-08-13 smoke에서 권한 prompt 또는 sheet는 나타나지 않았다. 5분 TCC log에는 `kTCCServiceMediaLibrary` 요청이 없었다. 창 검사 환경(System Events/AltTab)과 연관된 Accessibility audit은 있었으나 앱 UI prompt로 나타나지 않았다.
 - [ ] 모든 UI row 클릭, 메뉴바 팝오버 클릭, 종료 확인창 클릭을 자동 UI 테스트로 전부 검증
   - 이번에는 프로세스/창/화면 렌더링 스모크까지만 확인했다. 세부 클릭 자동화는 아직 없다.
 
@@ -70,15 +76,15 @@
 
 - [x] `SystemMetricsService.refresh()`가 CPU/RAM/Disk/Network/Battery/Processes 샘플을 모아 하나의 snapshot을 만든다.
 - [x] sampler 실패 시 앱 전체가 죽지 않고 해당 summary가 warning 또는 unavailable로 표시되는 흐름이 있다.
-  - 근거: `DefaultSystemSampler`가 `try?`로 실패를 nil 처리한다. Network는 첫 실패 warning, 연속 실패 unavailable이고 나머지 주요 summary는 실패 시 unavailable이다.
+  - 근거: `DefaultSystemSampler`가 `try?`로 실패를 nil 처리한다. 이전 정상 값이 있으면 첫 due failure는 stale warning, 두 번째 연속 due failure는 unavailable이며, 이전 정상 값이 없는 첫 failure는 unavailable이다.
 - [x] CPU history는 최근 300초 샘플을 보관한다.
 - [x] 디스크 공간 후보 스캔은 별도 task로 돌며 일반 refresh를 막지 않는다.
-- [!] 원래 기획의 metric별 갱신 주기는 완전히 분리되어 있지 않다.
-  - 현재 `DashboardViewModel.refreshInterval`은 전체 refresh loop 간격이다.
-  - 디스크 공간 후보만 별도 60초 refresh interval을 가진다.
-  - CPU/RAM 1초, Disk/Battery 10초처럼 metric별 sampling cadence는 아직 구현되지 않았다.
-- [!] "마지막 정상 값을 잠깐 유지하다 오래 실패하면 unavailable" 정책은 현재 명확히 구현되어 있지 않다.
-  - sampler가 nil이면 해당 refresh에서 바로 unavailable summary가 만들어진다.
+- [x] metric별 sampling cadence가 구현되어 있다.
+  - CPU/RAM/Network는 선택한 base interval, Processes는 `max(base interval, 2초)`, Disk/Battery는 `max(base interval, 10초)`로 실행된다. disk space candidate scan은 별도 60초 background interval이다.
+  - recording sampler XCTest가 literal call count로 cadence를 검증한다. 실제 `/bin/ps` 호출 횟수는 runtime instrumentation 없이 주장하지 않는다.
+- [x] 마지막 정상 값 1회 유지 정책이 구현되어 있다.
+  - 정상 값 뒤 첫 due failure는 stale warning과 원래 timestamp를 유지하고, 두 번째 연속 due failure는 unavailable이다. 새 성공 샘플은 회복하며 cadence skip은 failure가 아니다.
+  - CPU history와 health debounce는 fresh successful sample에서만 진행한다.
 
 ## 3. CPU
 
@@ -174,8 +180,9 @@
 - [x] 목록 row 전체 클릭 영역이 `contentShape`와 button action으로 잡힌다.
 - [!] UI에는 상위 60개 group만 표시된다.
   - 많은 프로세스가 있을 때 "60개까지만 표시" 안내 문구는 없다.
-- [!] process sampling이 전체 refresh마다 `/bin/ps`를 실행한다.
-  - 기능적으로 동작하지만 모니터링 앱 자체 overhead는 계속 관찰할 필요가 있다.
+- [x] process sampling은 전체 refresh마다 실행하지 않는다.
+  - Processes cadence는 `max(base interval, 2초)`이며 recording sampler XCTest가 base interval 1초에서의 call count를 검증한다.
+  - 실제 `/bin/ps` 호출 횟수는 runtime instrumentation이 없어 smoke만으로 정확히 확인하지 않았다.
 - [x] process bundle identifier resolver는 `.app/Contents/Info.plist`만 직접 읽는다.
   - 임의 executable/framework/private bundle 경로에 `Bundle(path:)`를 호출하지 않는다.
   - 비앱 bundle executable은 bundle identifier 해석 대상에서 제외하는 테스트가 있다.
@@ -200,6 +207,8 @@
 - [x] 종료 직전 최신 프로세스 목록으로 PID identity를 재확인한다.
   - PID가 다른 이름/경로/bundle identity로 바뀌었으면 signal을 보내지 않는다.
   - 대상이 이미 종료됐으면 signal을 보내지 않고 "already exited" 상태를 표시한다.
+- [x] 종료 validation은 fresh process sample이 없으면 fail closed한다.
+  - termination refresh는 Process cadence를 강제로 우회한다. 새 샘플이 실패하면 cached process 목록을 사용하지 않고 `SIGTERM`/`SIGKILL`을 보내지 않는 테스트가 있다.
 - [x] Quit App은 `NSRunningApplication.terminate()`를 먼저 사용한다.
   - 일반 앱 종료 UX가 기존 signal-only 방식보다 자연스럽다.
   - 앱 종료 API가 처리하지 못하면 기존 signal fallback을 사용한다.
