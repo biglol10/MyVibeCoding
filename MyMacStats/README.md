@@ -79,7 +79,7 @@ swift run MyMacStatsApp
 - RAM pressure는 `kern.memorystatus_vm_pressure_level` 값을 사용합니다. `vm.memory_pressure`는 표시값 의미가 달라 health 판정에 사용하지 않습니다.
 - CPU/RAM sampler는 `mach_host_self()`로 얻은 send right를 해제합니다.
 - Network 카운터는 `NET_RT_IFLIST2`의 64-bit byte counter를 사용하고, 두 번째 샘플부터는 누적 총량이 아니라 현재 증가량이 있는 인터페이스를 우선 선택합니다.
-- 이전에 정상 값이 있던 metric은 due sampling이 한 번 실패해도 마지막 정상 값을 warning 상태로 유지하고, 두 번째 연속 due 실패에서 unavailable로 전환합니다. 이전 정상 값이 없는 첫 실패는 바로 unavailable입니다.
+- 이전에 정상 값이 있던 metric은 due sampling이 한 번 실패해도 마지막 정상 값과 상태를 유지합니다. retained last-success health가 `critical`이면 `critical`을 유지하고, 그 외에는 `warning`으로 표시합니다. 두 번째 연속 due 실패에서 unavailable로 전환하며, 이전 정상 값이 없는 첫 실패는 바로 unavailable입니다.
 - Disk 읽기/쓰기 속도는 IOKit block storage counter delta로 계산하고, 볼륨명 fallback은 하드코딩된 `Macintosh HD`가 아니라 mount point 이름을 사용합니다.
 - 디스크 공간 후보 스캔의 `du` 호출은 timeout 후 fallback scan으로 전환하며, UI refresh를 막지 않습니다.
 - 기본 자동 디스크 후보 스캔은 넓은 `~/Library/Caches` 전체를 훑지 않습니다. macOS가 media library 등 개인정보 보호 권한 프롬프트를 띄울 수 있어 Xcode DerivedData처럼 범위가 좁은 개발자 캐시만 기본 후보로 둡니다.
@@ -126,7 +126,7 @@ CPU 상태는 70%/90% 임계값이 10초 이상 유지될 때 warning/critical�
 | Disk, Battery | `max(base interval, 10초)` |
 | Disk space candidates | 별도 백그라운드 60초 |
 
-정상 샘플 뒤 첫 due failure에서는 마지막 정상 값과 원래 시각을 유지하고 `warning`으로 표시합니다. 두 번째 연속 due failure에서는 `unavailable`로 전환합니다. 새 성공 샘플은 이 상태를 즉시 회복합니다. CPU history와 health debounce는 새 성공 샘플에서만 진행됩니다.
+정상 샘플 뒤 첫 due failure에서는 마지막 정상 값과 원래 시각을 유지합니다. retained last-success health가 `critical`이면 `critical`을 유지하고, 그 외에는 `warning`으로 표시합니다. 두 번째 연속 due failure에서는 `unavailable`로 전환합니다. 새 성공 샘플은 이 상태를 즉시 회복합니다. CPU history와 health debounce는 새 성공 샘플에서만 진행됩니다.
 
 ## 프로세스/앱 종료
 
@@ -286,4 +286,4 @@ MyMacStats/
 - Dock 아이콘 숨김 설정은 아직 없습니다.
 - 알림센터 위젯과 iCloud 동기화는 없습니다.
 - 프로세스별 네트워크 사용량은 아직 표시하지 않습니다.
-- 시스템 API가 값을 계속 제공하지 않거나 권한상 읽을 수 없는 항목은 unavailable로 표시됩니다. 이전 정상 값이 있으면 첫 due failure에서만 warning으로 마지막 값을 보이고, 두 번째 연속 due failure에서 unavailable로 전환합니다.
+- 시스템 API가 값을 계속 제공하지 않거나 권한상 읽을 수 없는 항목은 unavailable로 표시됩니다. 이전 정상 값이 있으면 첫 due failure에서 마지막 값을 유지하며, retained last-success health가 `critical`이면 `critical`, 그 외에는 `warning`으로 표시합니다. 두 번째 연속 due failure에서 unavailable로 전환합니다.

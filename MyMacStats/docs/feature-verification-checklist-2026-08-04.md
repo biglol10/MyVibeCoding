@@ -20,13 +20,13 @@
 
 - CPU/RAM resource sort의 동률 항목은 이름/PID 기준으로 안정 정렬되도록 수정했다.
 - process group sort도 resource 동률 시 이름/ID 기준으로 안정 정렬되도록 수정했다.
-- Network 측정 실패는 첫 실패 warning, 연속 실패 unavailable로 표시해 순간 실패로 인한 회색 깜빡임을 줄였다.
+- Network를 포함한 metric은 이전 정상 값 뒤 첫 due failure에서 마지막 값을 유지한다. retained last-success health가 `critical`이면 `critical`을 유지하고, 그 외에는 warning으로 표시하며, 두 번째 연속 due failure에서 unavailable로 전환한다.
 - Settings에서 바꾼 refresh interval은 UserDefaults에 저장되고 다음 ViewModel 생성 시 복원된다.
 
 2026-08-13 metric refresh reliability 후속 점검에서 추가로 반영한 사항:
 
 - CPU/RAM/Network는 선택한 base interval, Processes는 최소 2초, Disk/Battery는 최소 10초 cadence로 샘플링한다. disk space candidate scan은 기존처럼 별도 60초 background cadence를 유지한다.
-- 정상 샘플 뒤 첫 due failure는 마지막 정상 값과 timestamp를 유지한 stale warning으로 표시하고, 두 번째 연속 due failure에서 unavailable로 전환한다. cadence skip은 failure가 아니며 health debounce와 CPU history는 새 성공 샘플에서만 진행한다.
+- 정상 샘플 뒤 첫 due failure는 마지막 정상 값과 timestamp를 유지한다. retained last-success health가 `critical`이면 `critical`을 유지하고, 그 외에는 stale warning으로 표시하며, 두 번째 연속 due failure에서 unavailable로 전환한다. cadence skip은 failure가 아니며 health debounce와 CPU history는 새 성공 샘플에서만 진행한다.
 - 종료 확인은 process cadence를 우회해 새 프로세스 목록을 강제 수집한다. 이 수집이 실패하면 cached process 목록을 쓰지 않고 `SIGTERM`/`SIGKILL`을 보내지 않는다.
 
 ## 판정 기준
@@ -75,15 +75,15 @@
 ## 2. 전체 데이터 갱신 파이프라인
 
 - [x] `SystemMetricsService.refresh()`가 CPU/RAM/Disk/Network/Battery/Processes 샘플을 모아 하나의 snapshot을 만든다.
-- [x] sampler 실패 시 앱 전체가 죽지 않고 해당 summary가 warning 또는 unavailable로 표시되는 흐름이 있다.
-  - 근거: `DefaultSystemSampler`가 `try?`로 실패를 nil 처리한다. 이전 정상 값이 있으면 첫 due failure는 stale warning, 두 번째 연속 due failure는 unavailable이며, 이전 정상 값이 없는 첫 failure는 unavailable이다.
+- [x] sampler 실패 시 앱 전체가 죽지 않고 해당 summary가 warning, critical, 또는 unavailable로 표시되는 흐름이 있다.
+  - 근거: `DefaultSystemSampler`가 `try?`로 실패를 nil 처리한다. 이전 정상 값이 있으면 첫 due failure는 마지막 값과 health를 유지한다. retained last-success health가 `critical`이면 `critical`, 그 외에는 stale warning이며, 두 번째 연속 due failure는 unavailable이다. 이전 정상 값이 없는 첫 failure는 unavailable이다.
 - [x] CPU history는 최근 300초 샘플을 보관한다.
 - [x] 디스크 공간 후보 스캔은 별도 task로 돌며 일반 refresh를 막지 않는다.
 - [x] metric별 sampling cadence가 구현되어 있다.
   - CPU/RAM/Network는 선택한 base interval, Processes는 `max(base interval, 2초)`, Disk/Battery는 `max(base interval, 10초)`로 실행된다. disk space candidate scan은 별도 60초 background interval이다.
   - recording sampler XCTest가 literal call count로 cadence를 검증한다. 실제 `/bin/ps` 호출 횟수는 runtime instrumentation 없이 주장하지 않는다.
 - [x] 마지막 정상 값 1회 유지 정책이 구현되어 있다.
-  - 정상 값 뒤 첫 due failure는 stale warning과 원래 timestamp를 유지하고, 두 번째 연속 due failure는 unavailable이다. 새 성공 샘플은 회복하며 cadence skip은 failure가 아니다.
+  - 정상 값 뒤 첫 due failure는 원래 timestamp와 last-success health를 유지한다. retained health가 `critical`이면 `critical`, 그 외에는 stale warning이며, 두 번째 연속 due failure는 unavailable이다. 새 성공 샘플은 회복하며 cadence skip은 failure가 아니다.
   - CPU history와 health debounce는 fresh successful sample에서만 진행한다.
 
 ## 3. CPU
@@ -147,7 +147,8 @@
 - [x] 이전 샘플 대비 실제 증가량이 있는 interface를 우선 선택한다.
 - [x] interface 변경 시 speed가 reset되는 테스트가 있다.
 - [x] network health는 높은 트래픽을 위험으로 보지 않고, interface 없음/연결 실패 중심으로 판단한다.
-- [x] Network 측정이 한 번 실패하면 warning, 연속 실패하면 unavailable로 전환된다.
+- [x] Network를 포함한 metric은 첫 due failure에서 마지막 성공 상태를 유지하고, 두 번째 연속 due failure에서 unavailable로 전환된다.
+  - retained last-success health가 `critical`이면 `critical`을 유지하고, 그 외에는 warning으로 표시된다.
 - [!] 첫 network speed 샘플은 이전 counter가 없어 0으로 표시될 수 있다.
 - [ ] 프로세스별 네트워크 사용량은 없다.
   - README 현재 제한과 일치한다.
@@ -276,7 +277,7 @@
 
 ## 15. 테스트 커버리지
 
-- [x] 총 83개 XCTest가 통과한다.
+- [x] 총 92개 XCTest가 통과한다.
 - [x] CPU sampler: tick delta, kernel sampling, first sample behavior.
 - [x] Memory sampler: host stats, pressure mapping, swap.
 - [x] Network sampler: 64-bit counters, active interface, speed reset.
@@ -284,8 +285,9 @@
 - [x] Disk candidate scanner: target restriction, timeout fallback.
 - [x] HealthEvaluator: CPU/RAM/Disk/Network/Battery/debounce.
 - [x] Process sorting/grouping: search, ordering basics, resource 동률 안정 정렬.
-- [x] Process termination: signal, protection, group behavior, stale PID identity recheck, app quit fallback.
-- [x] DashboardViewModel: selection, sort/search, history, termination state.
+- [x] SystemMetricsService: metric별 cadence, last-known-good stale/unavailable transition, fresh-only CPU history/debounce.
+- [x] Process termination: signal, protection, group behavior, stale PID identity recheck, forced fresh process validation, app quit fallback.
+- [x] DashboardViewModel: selection, sort/search, history, refresh interval, termination fail-closed state.
 - [x] Cause summary: CPU/RAM/Disk summary behavior.
 - [x] RAM alert controller: critical persistence and reset.
 - [!] BatterySampler fixture parsing 테스트는 없다.
@@ -308,13 +310,12 @@
 ## 우선 수정 순위
 
 1. RAM 알림 전달 실패/권한 거부를 UI나 로그 상태로 노출.
-2. metric별 refresh cadence를 원래 기획대로 분리하거나 README/기획에서 현재 정책으로 명확히 정리.
-3. BatterySampler fixture parsing 테스트 추가.
-4. UI interaction/snapshot smoke test 추가.
-5. 메뉴바 표시 항목 커스터마이징을 실제 기능으로 추가할지 결정.
+2. BatterySampler fixture parsing 테스트 추가.
+3. UI interaction/snapshot smoke test 추가.
+4. 메뉴바 표시 항목 커스터마이징을 실제 기능으로 추가할지 결정.
 
 ## 현재 종합 판단
 
 - 핵심 MVP 기능인 CPU/RAM/Disk/Network/Battery/Processes 표시, 자동 갱신, 검색/정렬, 3-column UI, 메뉴바 기본 통합, 개인 배포 zip은 구현되어 있고 이번 점검에서 대체로 확인됐다.
 - 최초 점검에서 최우선으로 잡은 프로세스 종료 안전성, media library 권한 팝업 원인, Quit App UX, process sort 안정성은 후속 수정으로 보강됐다.
-- 다음 기능 개발 전에 남은 주요 리스크는 RAM 알림 delivery 상태 노출, metric별 refresh cadence, BatterySampler fixture 검증, UI interaction 자동화다.
+- 다음 기능 개발 전에 남은 주요 리스크는 RAM 알림 delivery 상태 노출, BatterySampler fixture 검증, UI interaction 자동화다.
