@@ -47,6 +47,16 @@ struct SearchResultsTable: View {
             .contextMenu {
                 resultMenu
             }
+            .onKeyPress(phases: .down) { keyPress in
+                guard ResultKeyboardCommand.resolve(
+                    characters: keyPress.characters,
+                    hasModifiers: !keyPress.modifiers.isEmpty
+                ) == .quickLook else {
+                    return .ignored
+                }
+                model.toggleQuickLook()
+                return .handled
+            }
 
             if search.canLoadMore {
                 Divider()

@@ -43,6 +43,7 @@ final class ReleasePackagingTests: XCTestCase {
         XCTAssertTrue(installer.contains("codesign --verify --deep --strict"))
         XCTAssertTrue(installer.contains("rollback"))
         XCTAssertTrue(installer.contains("if [[ -e \"$INSTALL_STAGE\" ]]"))
+        XCTAssertTrue(installer.contains("with timeout of 2 seconds"))
     }
 
     func testDistributionCheckComparesPackagedAndInstalledExecutableHashes() throws {

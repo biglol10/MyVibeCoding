@@ -47,13 +47,13 @@ swift build --package-path MyMacSearch -Xswiftc -warnings-as-errors
 MyMacSearch/scripts/run-performance-benchmark.sh
 ```
 
-일반 테스트에는 쿼리 파서, 인덱스 생성·갱신·삭제, 권한 실패, 취소, FSEvents 계획, UI 상태, 외부 액션과 10만 metadata 회귀가 포함됩니다. 100만 건 opt-in benchmark는 다음처럼 실행합니다.
+일반 테스트에는 쿼리 파서, 인덱스 생성·갱신·삭제, 권한 실패, 취소, FSEvents 계획과 실제 watcher 시작·중지 lifecycle, 결과 테이블 키보드 명령, UI 상태, 외부 액션과 10만 metadata 회귀가 포함됩니다. 100만 건 opt-in benchmark는 다음처럼 실행합니다.
 
 ```bash
 MYMACSEARCH_RUN_MILLION_BENCHMARK=1 swift test --package-path MyMacSearch -c release --filter MillionEntryIndexBenchmarkTests
 ```
 
-2026-08-14 개발 Mac에서 100만 metadata 생성·인덱싱은 약 95.83초, warm 검색은 p50 5.96ms / p95 6.81ms였고 결과 100건 제한을 사용했습니다. 이 수치는 synthetic benchmark이며 실제 디스크 스캔 시간은 파일 시스템과 권한에 따라 달라집니다.
+2026-08-14 개발 Mac의 최근 100만 metadata 생성·인덱싱은 약 173.77초, warm 검색은 p50 8.83ms / p95 10.37ms였고 결과 100건 제한을 사용했습니다. 이 수치는 synthetic benchmark이며 실제 디스크 스캔 시간은 파일 시스템과 권한에 따라 달라집니다.
 
 ## 앱 번들 및 개인 설치 ZIP
 
@@ -63,4 +63,4 @@ MyMacSearch/scripts/package-personal.sh
 MyMacSearch/scripts/check-distribution.sh
 ```
 
-생성 파일은 `MyMacSearch/dist/MyMacSearch-personal-mac.zip`입니다. ZIP은 ad-hoc 서명된 개인용 빌드이며 Developer ID notarization을 거친 공개 배포본이 아닙니다. 설치기는 기존 `/Applications/MyMacSearch.app`을 임시 백업하고 새 앱의 strict codesign 검증이 끝난 뒤에만 백업을 제거합니다. 사용자 설정과 인덱스 데이터는 삭제하지 않습니다.
+생성 파일은 `MyMacSearch/dist/MyMacSearch-personal-mac.zip`입니다. ZIP은 ad-hoc 서명된 개인용 빌드이며 Developer ID notarization을 거친 공개 배포본이 아닙니다. 설치기는 실행 중인 앱의 종료 요청을 짧게 제한한 뒤 기존 `/Applications/MyMacSearch.app`을 임시 백업하고, 새 앱의 strict codesign 검증이 끝난 뒤에만 백업을 제거합니다. 사용자 설정과 인덱스 데이터는 삭제하지 않습니다.

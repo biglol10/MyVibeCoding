@@ -15,6 +15,42 @@ public enum FSEventsWatcherError: Error, LocalizedError, Equatable, Sendable {
     }
 }
 
+private final class FSEventsCallbackBox: @unchecked Sendable {
+    let onEvents: @Sendable ([FileEvent]) -> Void
+    private let lock = NSLock()
+    private var active = true
+
+    init(onEvents: @escaping @Sendable ([FileEvent]) -> Void) {
+        self.onEvents = onEvents
+    }
+
+    var isActive: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return active
+    }
+
+    func deactivate() {
+        lock.lock()
+        active = false
+        lock.unlock()
+    }
+}
+
+private func retainFSEventsContext(
+    _ pointer: UnsafeRawPointer?
+) -> UnsafeRawPointer? {
+    guard let pointer else { return nil }
+    return UnsafeRawPointer(
+        Unmanaged<FSEventsCallbackBox>.fromOpaque(pointer).retain().toOpaque()
+    )
+}
+
+private func releaseFSEventsContext(_ pointer: UnsafeRawPointer?) {
+    guard let pointer else { return }
+    Unmanaged<FSEventsCallbackBox>.fromOpaque(pointer).release()
+}
+
 @MainActor
 public protocol FileEventWatching: AnyObject {
     func start(
@@ -28,7 +64,7 @@ public protocol FileEventWatching: AnyObject {
 @MainActor
 public final class FSEventsWatcher: FileEventWatching {
     private var stream: FSEventStreamRef?
-    private var callbackBox: CallbackBox?
+    private var callbackBox: FSEventsCallbackBox?
     private let latency: CFTimeInterval
     private let queue: DispatchQueue
 
@@ -57,22 +93,14 @@ public final class FSEventsWatcher: FileEventWatching {
         ).sorted()
         guard !normalizedPaths.isEmpty else { return }
 
-        let callbackBox = CallbackBox(onEvents: onEvents)
+        let callbackBox = FSEventsCallbackBox(onEvents: onEvents)
         self.callbackBox = callbackBox
         let contextInfo = UnsafeMutableRawPointer(Unmanaged.passUnretained(callbackBox).toOpaque())
         var context = FSEventStreamContext(
             version: 0,
             info: contextInfo,
-            retain: { pointer in
-                guard let pointer else { return nil }
-                return UnsafeRawPointer(
-                    Unmanaged<CallbackBox>.fromOpaque(pointer).retain().toOpaque()
-                )
-            },
-            release: { pointer in
-                guard let pointer else { return }
-                Unmanaged<CallbackBox>.fromOpaque(pointer).release()
-            },
+            retain: retainFSEventsContext,
+            release: releaseFSEventsContext,
             copyDescription: nil
         )
 
@@ -163,7 +191,7 @@ public final class FSEventsWatcher: FileEventWatching {
     private nonisolated static let callback: FSEventStreamCallback = {
         _, contextInfo, eventCount, eventPaths, eventFlags, eventIDs in
         guard let contextInfo else { return }
-        let box = Unmanaged<CallbackBox>.fromOpaque(contextInfo).takeUnretainedValue()
+        let box = Unmanaged<FSEventsCallbackBox>.fromOpaque(contextInfo).takeUnretainedValue()
         guard box.isActive else { return }
         let paths = unsafeBitCast(eventPaths, to: CFArray.self) as? [String] ?? []
         var events: [FileEvent] = []
@@ -182,25 +210,4 @@ public final class FSEventsWatcher: FileEventWatching {
         }
     }
 
-    private final class CallbackBox: @unchecked Sendable {
-        let onEvents: @Sendable ([FileEvent]) -> Void
-        private let lock = NSLock()
-        private var active = true
-
-        init(onEvents: @escaping @Sendable ([FileEvent]) -> Void) {
-            self.onEvents = onEvents
-        }
-
-        var isActive: Bool {
-            lock.lock()
-            defer { lock.unlock() }
-            return active
-        }
-
-        func deactivate() {
-            lock.lock()
-            active = false
-            lock.unlock()
-        }
-    }
 }

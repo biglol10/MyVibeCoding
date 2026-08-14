@@ -45,7 +45,10 @@ fi
 
 codesign --verify --deep --strict --verbose=2 "$APP_SOURCE"
 
-osascript -e 'tell application "MyMacSearch" to quit' >/dev/null 2>&1 || true
+osascript \
+  -e 'with timeout of 2 seconds' \
+  -e 'tell application id "com.biglol.MyMacSearch" to quit' \
+  -e 'end timeout' >/dev/null 2>&1 || true
 pkill -x MyMacSearchApp >/dev/null 2>&1 || true
 
 if [[ ! -d "$INSTALL_DIR" ]]; then
