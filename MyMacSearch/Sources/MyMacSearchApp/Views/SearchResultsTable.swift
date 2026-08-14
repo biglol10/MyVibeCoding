@@ -15,6 +15,11 @@ struct SearchResultsTable: View {
                             .foregroundStyle(.secondary)
                         Text(entry.name)
                             .lineLimit(1)
+                        if searchScopeIsOffline(entry.scopeID) {
+                            Text("Offline")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
                 .width(min: 160, ideal: 210, max: 250)
@@ -96,6 +101,10 @@ struct SearchResultsTable: View {
         }
     }
 
+    private func searchScopeIsOffline(_ scopeID: String) -> Bool {
+        model.coordinator?.scopeStates[scopeID]?.state == .offline
+    }
+
     private static let byteFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
@@ -109,12 +118,17 @@ struct IndexStatusBar: View {
     let resultCount: Int
     let onResume: () -> Void
     let onOpenPermissions: () -> Void
+    let onOpenIndexCenter: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: statusSymbol)
                 .foregroundStyle(statusColor)
-            Text(statusText)
+            Button(action: onOpenIndexCenter) {
+                Text(statusText)
+            }
+            .buttonStyle(.plain)
+            .help("Open Index Center")
 
             if coordinator.status == .initialScan {
                 ProgressView(value: coordinator.progress.estimatedFraction)

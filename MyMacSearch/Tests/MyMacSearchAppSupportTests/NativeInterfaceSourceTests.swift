@@ -26,6 +26,16 @@ final class NativeInterfaceSourceTests: XCTestCase {
         XCTAssertFalse(appSource.contains("Delete File"))
     }
 
+    func testIndexCenterExposesHealthWithoutReplacingSearchTool() throws {
+        let appSource = try allAppSource()
+        XCTAssertTrue(appSource.contains("IndexCenterView"))
+        XCTAssertTrue(appSource.contains("Verify Index"))
+        XCTAssertTrue(appSource.contains("Rescan"))
+        XCTAssertTrue(appSource.contains("Indexed Entries"))
+        XCTAssertTrue(appSource.contains("Last Completed Scan"))
+        XCTAssertTrue(try source("Views/SearchRootView.swift").contains("SearchResultsTable"))
+    }
+
     private func source(_ relativePath: String) throws -> String {
         try String(
             contentsOf: packageRoot()

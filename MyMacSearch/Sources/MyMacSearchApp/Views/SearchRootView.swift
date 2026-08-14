@@ -5,6 +5,7 @@ import SwiftUI
 struct SearchRootView: View {
     @Bindable var model: AppModel
     @FocusState private var searchFieldFocused: Bool
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Group {
@@ -80,7 +81,8 @@ struct SearchRootView: View {
                     coordinator: coordinator,
                     resultCount: search.rows.count,
                     onResume: model.resumeIndexing,
-                    onOpenPermissions: model.openFullDiskAccessSettings
+                    onOpenPermissions: model.openFullDiskAccessSettings,
+                    onOpenIndexCenter: { openWindow(id: "index-center") }
                 )
             }
         }
@@ -106,10 +108,18 @@ private struct SearchSidebar: View {
                     Button {
                         appendFilter("path:\"\(URL(fileURLWithPath: scope.rootPath).lastPathComponent)\"")
                     } label: {
-                        Label(
-                            URL(fileURLWithPath: scope.rootPath).lastPathComponent,
-                            systemImage: "folder"
-                        )
+                        HStack {
+                            Label(
+                                URL(fileURLWithPath: scope.rootPath).lastPathComponent,
+                                systemImage: "folder"
+                            )
+                            Spacer()
+                            if let state = model.coordinator?.scopeStates[scope.id]?.state {
+                                Image(systemName: scopeStateSymbol(state))
+                                    .foregroundStyle(state == .permissionNeeded ? Color.orange : Color.secondary)
+                                    .help(state.rawValue)
+                            }
+                        }
                     }
                     .buttonStyle(.plain)
                     .help(scope.rootPath)
@@ -139,5 +149,17 @@ private struct SearchSidebar: View {
 
     private func appendFilter(_ filter: String) {
         search.query = search.query.isEmpty ? filter : "\(search.query) \(filter)"
+    }
+
+    private func scopeStateSymbol(_ state: ScopeIndexState) -> String {
+        switch state {
+        case .scanning: "arrow.triangle.2.circlepath"
+        case .watching: "eye"
+        case .paused: "pause.circle"
+        case .offline: "externaldrive.badge.xmark"
+        case .permissionNeeded: "lock.trianglebadge.exclamationmark"
+        case .error: "exclamationmark.triangle"
+        case .disabled: "minus.circle"
+        }
     }
 }

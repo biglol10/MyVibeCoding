@@ -49,5 +49,11 @@ struct MyMacSearchApp: App {
             SettingsView(model: model)
                 .frame(width: 620, height: 520)
         }
+
+        Window("Index Center", id: "index-center") {
+            IndexCenterView(model: model)
+                .frame(minWidth: 780, minHeight: 520)
+        }
+        .defaultSize(width: 900, height: 620)
     }
 }

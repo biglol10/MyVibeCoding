@@ -13,6 +13,7 @@ extension Notification.Name {
 final class AppModel {
     var settings: SearchSettings
     private(set) var searchViewModel: SearchViewModel?
+    private(set) var indexHealthViewModel: IndexHealthViewModel?
     private(set) var coordinator: IndexCoordinator?
     private(set) var startupError: String?
     private(set) var actionError: String?
@@ -165,6 +166,11 @@ final class AppModel {
             let databaseURL = applicationSupportURL.appendingPathComponent("Index.sqlite3")
             let writer = try SQLiteIndexWriter(databaseURL: databaseURL)
             let reader = try SQLiteIndexReader(databaseURL: databaseURL)
+            let healthReader = try SQLiteIndexHealthReader(databaseURL: databaseURL)
+            let healthViewModel = IndexHealthViewModel(
+                reader: healthReader,
+                verifier: SQLiteIndexVerifier(databaseURL: databaseURL)
+            )
             let metadataClient = FoundationFileMetadataClient()
             let policy = IndexingPolicy(
                 homePath: homeURL.path,
@@ -182,6 +188,7 @@ final class AppModel {
             self.coordinator = coordinator
             let searchViewModel = SearchViewModel(searcher: reader)
             self.searchViewModel = searchViewModel
+            self.indexHealthViewModel = healthViewModel
             actionService = ResultActionService { [weak coordinator] path in
                 coordinator?.removeMissingPath(path)
             }
@@ -193,9 +200,28 @@ final class AppModel {
         } catch {
             startupError = error.localizedDescription
             searchViewModel = nil
+            indexHealthViewModel = nil
             coordinator = nil
             actionService = nil
         }
+    }
+
+    func refreshIndexHealth(force: Bool = true) {
+        indexHealthViewModel?.refresh(liveStates: coordinator?.scopeStates ?? [:], force: force)
+    }
+
+    func verifyIndex() {
+        indexHealthViewModel?.verify()
+    }
+
+    func rescan(scopeID: String) {
+        coordinator?.rescan(scopeID: scopeID)
+        refreshIndexHealth()
+    }
+
+    func rescanAllScopes() {
+        coordinator?.rescanAll()
+        refreshIndexHealth()
     }
 
     private func startVolumeMonitoring(coordinator: IndexCoordinator) {
