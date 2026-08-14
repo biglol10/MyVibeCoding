@@ -137,12 +137,26 @@ private actor RecordingIndexWriter: IndexWriting {
         operations.append("delete:\(path)")
     }
 
-    func completeScopeScan(scopeID: String, generation: Int64) throws {
+    func completeScopeScan(scopeID: String, generation: Int64, completedAt: Date) throws {
         operations.append("complete:\(scopeID):\(generation)")
     }
 
-    func updateEventCheckpoint(scopeID: String, eventID: UInt64) throws {
+    func updateEventCheckpoint(scopeID: String, eventID: UInt64, occurredAt: Date) throws {
         operations.append("checkpoint:\(scopeID):\(eventID)")
+    }
+
+    func recordIssue(
+        scopeID: String,
+        path: String,
+        category: IndexIssueCategory,
+        message: String,
+        occurredAt: Date
+    ) throws {
+        operations.append("issue:\(scopeID):\(category.rawValue):\(path)")
+    }
+
+    func resolveIssues(scopeID: String, resolvedAt: Date) throws {
+        operations.append("resolve:\(scopeID)")
     }
 
     func contains(_ operation: String) -> Bool {

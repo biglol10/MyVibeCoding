@@ -110,7 +110,7 @@ public actor SQLiteIndexWriter {
         _ = try statement.step()
     }
 
-    public func completeScopeScan(scopeID: String, generation: Int64) throws {
+    public func completeScopeScan(scopeID: String, generation: Int64, completedAt: Date) throws {
         let connection = try writableConnection()
         try connection.transaction {
             let prune = try connection.prepare(
@@ -120,19 +120,69 @@ public actor SQLiteIndexWriter {
             _ = try prune.step()
 
             let update = try connection.prepare(
-                "UPDATE scopes SET completed_generation = ?, active_generation = NULL WHERE id = ?"
+                "UPDATE scopes SET completed_generation = ?, active_generation = NULL, last_completed_scan_at = ?, last_error = NULL WHERE id = ?"
             )
-            try update.bind([.int64(generation), .text(scopeID)])
+            try update.bind([.int64(generation), .double(completedAt.timeIntervalSince1970), .text(scopeID)])
             _ = try update.step()
         }
     }
 
-    public func updateEventCheckpoint(scopeID: String, eventID: UInt64) throws {
+    public func updateEventCheckpoint(scopeID: String, eventID: UInt64, occurredAt: Date) throws {
         let connection = try writableConnection()
         let statement = try connection.prepare(
-            "UPDATE scopes SET last_event_id = ? WHERE id = ?"
+            "UPDATE scopes SET last_event_id = ?, last_event_at = ? WHERE id = ?"
         )
-        try statement.bind([.int64(Int64(bitPattern: eventID)), .text(scopeID)])
+        try statement.bind([
+            .int64(Int64(bitPattern: eventID)),
+            .double(occurredAt.timeIntervalSince1970),
+            .text(scopeID)
+        ])
+        _ = try statement.step()
+    }
+
+    public func recordIssue(
+        scopeID: String,
+        path: String,
+        category: IndexIssueCategory,
+        message: String,
+        occurredAt: Date
+    ) throws {
+        let connection = try writableConnection()
+        try connection.transaction {
+            let issue = try connection.prepare(
+                """
+                INSERT INTO index_issues(
+                  scope_id, path, category, message, first_seen_at, last_seen_at, occurrence_count, resolved_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 1, NULL)
+                ON CONFLICT(scope_id, path, category) DO UPDATE SET
+                  message = excluded.message,
+                  last_seen_at = excluded.last_seen_at,
+                  occurrence_count = index_issues.occurrence_count + 1,
+                  resolved_at = NULL
+                """
+            )
+            try issue.bind([
+                .text(scopeID),
+                .text(path),
+                .text(category.rawValue),
+                .text(message),
+                .double(occurredAt.timeIntervalSince1970),
+                .double(occurredAt.timeIntervalSince1970)
+            ])
+            _ = try issue.step()
+
+            let scope = try connection.prepare("UPDATE scopes SET last_error = ? WHERE id = ?")
+            try scope.bind([.text(message), .text(scopeID)])
+            _ = try scope.step()
+        }
+    }
+
+    public func resolveIssues(scopeID: String, resolvedAt: Date) throws {
+        let connection = try writableConnection()
+        let statement = try connection.prepare(
+            "UPDATE index_issues SET resolved_at = ? WHERE scope_id = ? AND resolved_at IS NULL"
+        )
+        try statement.bind([.double(resolvedAt.timeIntervalSince1970), .text(scopeID)])
         _ = try statement.step()
     }
 
