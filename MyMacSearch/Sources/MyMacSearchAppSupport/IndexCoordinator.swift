@@ -305,13 +305,17 @@ public final class IndexCoordinator {
             if let writeError = await errorBox.error { throw writeError }
             let completedAt = Date()
             try await writer.completeScopeScan(scopeID: scope.id, generation: generation, completedAt: completedAt)
+            guard canMutate(scopeID: scope.id, runID: runID) else { return false }
             try await writer.updateScopeScanStatistics(
                 scopeID: scope.id,
                 skippedCount: summary.skippedCount,
                 permissionDeniedCount: summary.permissionDeniedCount
             )
+            guard canMutate(scopeID: scope.id, runID: runID) else { return false }
             try await writer.resolveIssues(scopeID: scope.id, resolvedAt: completedAt)
+            guard canMutate(scopeID: scope.id, runID: runID) else { return false }
             for issue in summary.issues {
+                guard canMutate(scopeID: scope.id, runID: runID) else { return false }
                 issues.append(issue)
                 try await writer.recordIssue(
                     scopeID: scope.id,
@@ -320,6 +324,7 @@ public final class IndexCoordinator {
                     message: issue.message,
                     occurredAt: completedAt
                 )
+                guard canMutate(scopeID: scope.id, runID: runID) else { return false }
             }
             completedGenerationByScope[scope.id] = generation
             if let watcherBaselineEventID {
@@ -328,7 +333,9 @@ public final class IndexCoordinator {
                     eventID: watcherBaselineEventID,
                     occurredAt: completedAt
                 )
+                guard canMutate(scopeID: scope.id, runID: runID) else { return false }
             }
+            guard canMutate(scopeID: scope.id, runID: runID) else { return false }
             scopeStates[scope.id] = ScopeRuntimeState(state: .watching, progress: progress)
         } catch is CancellationError {
             guard runGeneration == runID else { return false }

@@ -39,6 +39,7 @@ struct OnboardingView: View {
 
             HStack {
                 Button("Add Folders…") { model.addScopes() }
+                    .disabled(model.isResolvingScopes)
                 Spacer()
                 Toggle("Include hidden files", isOn: $model.settings.includeHidden)
             }
@@ -71,7 +72,10 @@ struct OnboardingView: View {
                     model.confirmOnboarding()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(!model.settings.scopes.contains(where: \.isEnabled))
+                .disabled(
+                    model.isResolvingScopes
+                        || !model.settings.scopes.contains(where: \.isEnabled)
+                )
             }
         }
         .padding(24)

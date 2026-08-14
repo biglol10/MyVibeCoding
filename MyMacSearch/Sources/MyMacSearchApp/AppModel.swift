@@ -18,6 +18,7 @@ final class AppModel {
     private(set) var startupError: String?
     private(set) var actionError: String?
     private(set) var settingsError: String?
+    private(set) var isResolvingScopes = false
 
     let quickLook = QuickLookPreviewController()
 
@@ -72,6 +73,10 @@ final class AppModel {
     }
 
     func applySettings() {
+        guard !isResolvingScopes else {
+            settingsError = "Wait for the selected volume to finish loading."
+            return
+        }
         persistSettings()
         rebuildServices(startIndexing: settings.onboardingConfirmed)
         registerGlobalShortcut()
@@ -89,7 +94,10 @@ final class AppModel {
 
         let existing = Set(settings.scopes.map(\.rootPath))
         let urls = panel.urls.map(\.standardizedFileURL).filter { !existing.contains($0.path) }
+        guard !urls.isEmpty else { return }
+        isResolvingScopes = true
         Task {
+            defer { isResolvingScopes = false }
             let descriptors = await Task.detached(priority: .userInitiated) {
                 urls.map(Self.volumeDescriptor(for:))
             }.value
@@ -349,7 +357,8 @@ final class AppModel {
         let values = try? url.resourceValues(forKeys: [
             .volumeIsLocalKey,
             .volumeIsInternalKey,
-            .volumeUUIDStringKey
+            .volumeUUIDStringKey,
+            .volumeURLForRemountingKey
         ])
         let type: IndexedVolumeType
         if values?.volumeIsLocal == false {
@@ -359,6 +368,13 @@ final class AppModel {
         } else {
             type = .internalLocal
         }
-        return (url.path, type, type == .internalLocal ? nil : values?.volumeUUIDString)
+        let fallbackIdentity = values?.volumeURLForRemounting.flatMap { remountURL in
+            remountURL.isFileURL ? nil : "remount:\(remountURL.absoluteString)"
+        }
+        return (
+            url.path,
+            type,
+            type == .internalLocal ? nil : (values?.volumeUUIDString ?? fallbackIdentity)
+        )
     }
 }

@@ -19,8 +19,8 @@ public actor SQLiteIndexVerifier: IndexVerifying {
         let schemaVersion = try scalarInt(connection, sql: "PRAGMA user_version")
         checks.append(IndexVerificationCheck(
             name: "Schema",
-            passed: schemaVersion == 2,
-            detail: schemaVersion == 2 ? "Schema version 2" : "Expected schema 2, found \(schemaVersion)"
+            passed: schemaVersion == 3,
+            detail: schemaVersion == 3 ? "Schema version 3" : "Expected schema 3, found \(schemaVersion)"
         ))
 
         let quickCheck = try scalarText(connection, sql: "PRAGMA quick_check")

@@ -10,7 +10,7 @@ final class SQLiteIndexMigrationTests: XCTestCase {
 
         _ = try SQLiteIndexWriter(databaseURL: fixture.databaseURL)
 
-        XCTAssertEqual(try fixture.integer("PRAGMA user_version"), 2)
+        XCTAssertEqual(try fixture.integer("PRAGMA user_version"), 3)
         XCTAssertEqual(try fixture.texts("SELECT path FROM entries"), ["/Users/test/report.swift"])
         XCTAssertEqual(
             try fixture.texts(
@@ -21,6 +21,32 @@ final class SQLiteIndexMigrationTests: XCTestCase {
         XCTAssertEqual(try fixture.integer("SELECT last_event_id FROM scopes WHERE id = 'home'"), 42)
         XCTAssertTrue(try fixture.hasColumn(table: "scopes", name: "last_completed_scan_at"))
         XCTAssertTrue(try fixture.hasTable("index_issues"))
+        XCTAssertEqual(try fixture.integer("SELECT entry_count FROM scope_entry_counts WHERE scope_id = 'home'"), 1)
+    }
+
+    func testInterruptedVersionTwoCountBackfillIsReconstructedTransactionally() throws {
+        let fixture = try VersionOneIndexFixture(userVersion: 2)
+        defer { fixture.remove() }
+        try fixture.executeForTest(
+            """
+            ALTER TABLE scopes ADD COLUMN last_completed_scan_at REAL;
+            ALTER TABLE scopes ADD COLUMN last_event_at REAL;
+            ALTER TABLE scopes ADD COLUMN last_error TEXT;
+            CREATE TABLE index_issues (
+              id INTEGER PRIMARY KEY, scope_id TEXT NOT NULL, path TEXT NOT NULL,
+              category TEXT NOT NULL, message TEXT NOT NULL, first_seen_at REAL NOT NULL,
+              last_seen_at REAL NOT NULL, occurrence_count INTEGER NOT NULL DEFAULT 1,
+              resolved_at REAL, UNIQUE(scope_id, path, category)
+            );
+            CREATE TABLE scope_entry_counts (
+              scope_id TEXT PRIMARY KEY, entry_count INTEGER NOT NULL DEFAULT 0
+            );
+            """
+        )
+
+        _ = try SQLiteIndexWriter(databaseURL: fixture.databaseURL)
+
+        XCTAssertEqual(try fixture.integer("PRAGMA user_version"), 3)
         XCTAssertEqual(try fixture.integer("SELECT entry_count FROM scope_entry_counts WHERE scope_id = 'home'"), 1)
     }
 
@@ -105,6 +131,15 @@ private struct VersionOneIndexFixture {
 
     func hasColumn(table: String, name: String) throws -> Bool {
         try texts("SELECT name FROM pragma_table_info('\(table)')").contains(name)
+    }
+
+    func executeForTest(_ sql: String) throws {
+        var database: OpaquePointer?
+        guard sqlite3_open(databaseURL.path, &database) == SQLITE_OK, let database else {
+            throw SQLiteIndexError.openFailed("fixture migration")
+        }
+        defer { sqlite3_close(database) }
+        try execute(sql, database: database)
     }
 
     private func scalar<T>(_ sql: String, read: (OpaquePointer) -> T) throws -> T {

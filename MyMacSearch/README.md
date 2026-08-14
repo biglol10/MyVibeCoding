@@ -15,11 +15,17 @@ path:Downloads
 name:report
 modified:today
 modified:7d
+size:>100MB
+size:1GB..10GB
 ```
 
-결과에는 이름, 경로, 종류, 크기, 수정일이 표시됩니다. 행을 선택한 뒤 Enter로 열고, Space로 Quick Look을 표시하며, Command-C로 경로를 복사할 수 있습니다. 컨텍스트 메뉴에서는 Open, Reveal in Finder, Copy Path, Open in Terminal, Open in MyMacFinder를 사용할 수 있습니다. 전역 단축키는 Option-Space입니다.
+결과에는 이름, 경로, 종류, 크기, 수정일이 표시됩니다. Name, Path, Size, Modified 헤더로 정렬 방향을 바꿀 수 있고, 정렬 메뉴에서는 Relevance와 Kind를 포함한 모든 모드를 선택할 수 있습니다. 구조화 필터는 검색창 아래에서 개별 제거할 수 있습니다. 자주 쓰는 쿼리는 Saved Searches로 저장·이름 변경·업데이트·재정렬할 수 있으며, 성공한 검색은 Recent Searches에 중복 없이 기록됩니다.
+
+행을 선택한 뒤 Enter로 열고, Space로 하나 이상의 항목을 Quick Look에 표시하며, Command-C로 선택한 경로들을 복사할 수 있습니다. 컨텍스트 메뉴에서는 Open, Reveal in Finder, Copy Path, Open in Terminal, Open in MyMacFinder를 사용할 수 있습니다. Finder 다중 Reveal은 한 요청당 100개로 제한됩니다. 전역 단축키는 Option-Space입니다.
 
 하단 상태바는 `Initial scan`, `Watching`, `Paused`, `Permission needed`, `Error` 상태와 현재 경로, 처리 수, skip 수를 보여줍니다. 결과는 제한된 window와 페이지 방식으로 불러와 대량 결과를 한꺼번에 UI에 올리지 않습니다.
+
+상태바의 상태를 누르면 Index Center가 열립니다. 위치별 상태, 항목 수, 마지막 완료 스캔, 제외·권한 거부 수, 최근 이슈를 확인하고 한 위치 또는 전체 위치를 다시 스캔할 수 있습니다. 이슈는 위치·종류로 필터링하고 경로를 복사할 수 있으며, Verify Index는 SQLite, FTS5, 범위별 집계, 설정 루트 일관성을 점검합니다.
 
 ## 인덱싱 정책과 권한
 
@@ -30,6 +36,8 @@ modified:7d
 - package bundle 내부
 
 symlink는 항목 자체만 기록하고 대상 디렉터리를 따라가지 않습니다. package bundle도 하나의 항목으로 기록하고 내부로 내려가지 않습니다. hidden file은 별도 설정을 켠 경우에만 포함합니다. 접근할 수 없는 폴더는 앱을 중단시키지 않고 permission denied 또는 skipped로 집계합니다.
+
+외장·네트워크 볼륨은 UUID를 확인한 뒤에만 스캔하고 감시합니다. UUID를 제공하지 않는 네트워크 볼륨은 macOS의 remount URL을 대체 식별자로 사용합니다. 볼륨이 분리되거나 같은 경로에 다른 볼륨이 연결되면 감시와 갱신을 중단하고 기존 검색 결과를 Offline으로 보존합니다. Offline 결과는 경로 복사는 가능하지만 열기·Finder·Quick Look은 명확한 unavailable 오류를 표시하며 캐시 행을 삭제하지 않습니다.
 
 Desktop, Documents, Downloads 또는 다른 보호 위치가 차단되면 Settings의 버튼으로 `System Settings > Privacy & Security > Full Disk Access`를 열 수 있습니다. 필요한 이유는 선택한 검색 범위의 파일명과 메타데이터를 읽기 위해서이며, 권한이 없는 위치는 건너뜁니다.
 
@@ -50,10 +58,10 @@ MyMacSearch/scripts/run-performance-benchmark.sh
 일반 테스트에는 쿼리 파서, 인덱스 생성·갱신·삭제, 권한 실패, 취소, FSEvents 계획과 실제 watcher 시작·중지 lifecycle, 결과 테이블 키보드 명령, UI 상태, 외부 액션과 10만 metadata 회귀가 포함됩니다. 100만 건 opt-in benchmark는 다음처럼 실행합니다.
 
 ```bash
-MYMACSEARCH_RUN_MILLION_BENCHMARK=1 swift test --package-path MyMacSearch -c release --filter MillionEntryIndexBenchmarkTests
+MYMACSEARCH_RUN_MILLION_BENCHMARK=1 swift test --package-path MyMacSearch -c release --filter IndexPerformanceTests
 ```
 
-2026-08-14 개발 Mac의 최근 100만 metadata 생성·인덱싱은 약 173.77초, warm 검색은 p50 8.83ms / p95 10.37ms였고 결과 100건 제한을 사용했습니다. 이 수치는 synthetic benchmark이며 실제 디스크 스캔 시간은 파일 시스템과 권한에 따라 달라집니다.
+2026-08-14 개발 Mac의 release 검증에서 100만 metadata 생성·인덱싱은 264.59초였습니다. 200건 결과 창을 사용한 10개 정렬의 warm selective 검색 p95는 6.56–7.74ms였고, Index Center 상태 snapshot은 5.87ms였습니다. 이 수치는 synthetic benchmark이며 실제 디스크 스캔 시간은 파일 시스템과 권한에 따라 달라집니다.
 
 ## 앱 번들 및 개인 설치 ZIP
 

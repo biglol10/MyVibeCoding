@@ -17,6 +17,7 @@ public final class IndexHealthViewModel {
     private var refreshGeneration: UInt64 = 0
     private var verificationGeneration: UInt64 = 0
     private var refreshTask: Task<Void, Never>?
+    private var trailingRefreshTask: Task<Void, Never>?
     private var verificationTask: Task<Void, Never>?
     private var lastLiveStates: [String: ScopeRuntimeState] = [:]
 
@@ -28,17 +29,27 @@ public final class IndexHealthViewModel {
     deinit {
         MainActor.assumeIsolated {
             refreshTask?.cancel()
+            trailingRefreshTask?.cancel()
             verificationTask?.cancel()
         }
     }
 
     public func refresh(liveStates: [String: ScopeRuntimeState], force: Bool = false) {
         lastLiveStates = liveStates
-        if !force, let snapshot, Date().timeIntervalSince(snapshot.capturedAt) < 1 {
-            self.snapshot = merge(liveStates: liveStates, into: snapshot)
+        if !force, let snapshot {
+            let age = Date().timeIntervalSince(snapshot.capturedAt)
+            if age < 1 {
+                self.snapshot = merge(liveStates: liveStates, into: snapshot)
+                scheduleTrailingRefresh(after: max(0.01, 1 - age))
+                return
+            }
+        }
+        if !force, refreshTask != nil {
+            scheduleTrailingRefresh(after: 1)
             return
         }
-        if !force, refreshTask != nil { return }
+        trailingRefreshTask?.cancel()
+        trailingRefreshTask = nil
         refreshGeneration &+= 1
         let generation = refreshGeneration
         refreshTask?.cancel()
@@ -64,6 +75,20 @@ public final class IndexHealthViewModel {
                 self.isRefreshing = false
                 self.refreshTask = nil
             }
+        }
+    }
+
+    private func scheduleTrailingRefresh(after seconds: TimeInterval) {
+        trailingRefreshTask?.cancel()
+        trailingRefreshTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(seconds))
+            } catch {
+                return
+            }
+            guard let self, !Task.isCancelled else { return }
+            self.trailingRefreshTask = nil
+            self.refresh(liveStates: self.lastLiveStates, force: true)
         }
     }
 

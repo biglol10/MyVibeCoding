@@ -26,13 +26,35 @@ final class VolumeAvailabilityMonitorTests: XCTestCase {
 
         XCTAssertEqual(state, .identityMismatch(actualUUID: "actual"))
     }
+
+    func testNetworkRemountIdentityWorksWhenVolumeHasNoUUID() async {
+        let checker = VolumeAvailabilityChecker(
+            client: FakeVolumeClient(
+                reachable: true,
+                uuid: nil,
+                fallbackIdentity: "remount:smb://server/share"
+            )
+        )
+
+        let state = await checker.availability(
+            rootPath: "/Volumes/Share",
+            expectedVolumeUUID: "remount:smb://server/share"
+        )
+
+        XCTAssertEqual(state, .available)
+    }
 }
 
 private struct FakeVolumeClient: VolumeResourceReading {
     let reachable: Bool
     let uuid: String?
+    var fallbackIdentity: String? = nil
 
     func resource(for rootPath: String) -> VolumeResource {
-        VolumeResource(isReachable: reachable, volumeUUID: uuid)
+        VolumeResource(
+            isReachable: reachable,
+            volumeUUID: uuid,
+            fallbackIdentity: fallbackIdentity
+        )
     }
 }

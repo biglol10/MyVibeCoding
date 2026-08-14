@@ -276,6 +276,58 @@ final class IndexCoordinatorTests: XCTestCase {
         await scanner.release(call: 1)
         try await eventually { coordinator.status == .watching }
     }
+
+    @MainActor
+    func testUnmountDuringBlockedFinalizationCannotPublishWatching() async throws {
+        let writer = BlockingCompletionWriter()
+        let coordinator = IndexCoordinator(
+            scanner: CountingScanner(),
+            writer: writer,
+            metadataClient: CoordinatorMetadataClient(),
+            policy: IndexingPolicy(homePath: "/Users/test", includeHidden: false),
+            watcher: RecordingWatcher()
+        )
+        let scope = IndexScope(id: "external", rootPath: "/Volumes/Work", volumeType: .external)
+        coordinator.start(scopes: [scope])
+        try await eventually { await writer.isWaiting }
+
+        coordinator.updateAvailability(scopeID: scope.id, availability: .offline)
+        await writer.release()
+        try await Task.sleep(for: .milliseconds(30))
+
+        XCTAssertEqual(coordinator.scopeStates[scope.id]?.state, .offline)
+        XCTAssertTrue(coordinator.isScopeUnavailable(scope.id))
+    }
+}
+
+private actor BlockingCompletionWriter: IndexWriting {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private(set) var isWaiting = false
+
+    func beginScopeScan(_ scope: IndexScope, generation: Int64) throws {}
+    func upsertBatch(_ entries: [IndexedEntry], scopeID: String, generation: Int64) throws {}
+    func delete(path: String) throws {}
+
+    func completeScopeScan(scopeID: String, generation: Int64, completedAt: Date) async throws {
+        isWaiting = true
+        await withCheckedContinuation { continuation = $0 }
+        isWaiting = false
+    }
+
+    func updateEventCheckpoint(scopeID: String, eventID: UInt64, occurredAt: Date) throws {}
+    func recordIssue(
+        scopeID: String,
+        path: String,
+        category: IndexIssueCategory,
+        message: String,
+        occurredAt: Date
+    ) throws {}
+    func resolveIssues(scopeID: String, resolvedAt: Date) throws {}
+
+    func release() {
+        continuation?.resume()
+        continuation = nil
+    }
 }
 
 private actor RecordingIndexWriter: IndexWriting {

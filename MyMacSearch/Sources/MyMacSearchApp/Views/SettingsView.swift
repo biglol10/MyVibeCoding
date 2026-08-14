@@ -28,6 +28,7 @@ struct SettingsView: View {
                 .frame(height: 170)
 
                 Button("Add Folders…") { model.addScopes() }
+                    .disabled(model.isResolvingScopes)
             }
 
             Section("Policy") {
@@ -60,6 +61,7 @@ struct SettingsView: View {
                 Spacer()
                 Button("Apply and Reindex") { model.applySettings() }
                     .keyboardShortcut(.defaultAction)
+                    .disabled(model.isResolvingScopes)
             }
         }
         .formStyle(.grouped)

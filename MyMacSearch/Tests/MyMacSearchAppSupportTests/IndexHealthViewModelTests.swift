@@ -48,6 +48,19 @@ final class IndexHealthViewModelTests: XCTestCase {
         XCTAssertEqual(snapshotCount, 1)
         XCTAssertEqual(model.snapshot?.scopes.first?.progress.scannedCount, 20)
     }
+
+    @MainActor
+    func testCachedCompletionSchedulesTrailingDatabaseRefresh() async throws {
+        let reader = CountingHealthReader()
+        let model = IndexHealthViewModel(reader: reader, verifier: HealthyVerifier())
+        model.refresh(liveStates: ["home": ScopeRuntimeState(state: .scanning)])
+        try await eventually { model.snapshot != nil }
+
+        model.refresh(liveStates: ["home": ScopeRuntimeState(state: .watching)])
+
+        try await eventually(timeout: .seconds(2)) { await reader.snapshotCount() == 2 }
+        XCTAssertEqual(model.snapshot?.scopes.first?.state, .watching)
+    }
 }
 
 private actor CountingHealthReader: IndexHealthReading {

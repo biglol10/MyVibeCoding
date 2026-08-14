@@ -10,10 +10,12 @@ public enum VolumeAvailability: Equatable, Sendable {
 public struct VolumeResource: Equatable, Sendable {
     public let isReachable: Bool
     public let volumeUUID: String?
+    public let fallbackIdentity: String?
 
-    public init(isReachable: Bool, volumeUUID: String?) {
+    public init(isReachable: Bool, volumeUUID: String?, fallbackIdentity: String? = nil) {
         self.isReachable = isReachable
         self.volumeUUID = volumeUUID
+        self.fallbackIdentity = fallbackIdentity
     }
 }
 
@@ -29,8 +31,20 @@ public struct FoundationVolumeResourceReader: VolumeResourceReading {
         guard FileManager.default.fileExists(atPath: url.path) else {
             return VolumeResource(isReachable: false, volumeUUID: nil)
         }
-        let values = try? url.resourceValues(forKeys: [.volumeUUIDStringKey])
-        return VolumeResource(isReachable: true, volumeUUID: values?.volumeUUIDString)
+        let values = try? url.resourceValues(forKeys: [
+            .volumeUUIDStringKey,
+            .volumeURLForRemountingKey
+        ])
+        return VolumeResource(
+            isReachable: true,
+            volumeUUID: values?.volumeUUIDString,
+            fallbackIdentity: Self.fallbackIdentity(for: values?.volumeURLForRemounting)
+        )
+    }
+
+    private static func fallbackIdentity(for remountURL: URL?) -> String? {
+        guard let remountURL, !remountURL.isFileURL else { return nil }
+        return "remount:\(remountURL.absoluteString)"
     }
 }
 
@@ -44,11 +58,12 @@ public actor VolumeAvailabilityChecker<Client: VolumeResourceReading> {
     public func availability(rootPath: String, expectedVolumeUUID: String?) -> VolumeAvailability {
         let resource = client.resource(for: rootPath)
         guard resource.isReachable else { return .offline }
+        let actualIdentity = resource.volumeUUID ?? resource.fallbackIdentity
         guard let expectedVolumeUUID else {
-            return .identityMismatch(actualUUID: resource.volumeUUID)
+            return .identityMismatch(actualUUID: actualIdentity)
         }
-        guard resource.volumeUUID == expectedVolumeUUID else {
-            return .identityMismatch(actualUUID: resource.volumeUUID)
+        guard actualIdentity == expectedVolumeUUID else {
+            return .identityMismatch(actualUUID: actualIdentity)
         }
         return .available
     }
