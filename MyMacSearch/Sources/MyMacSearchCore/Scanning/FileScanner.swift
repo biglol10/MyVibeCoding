@@ -231,3 +231,14 @@ public struct FileScanner: Sendable {
         }
     }
 }
+
+public protocol ScopeScanning: Sendable {
+    func scan(
+        scope: IndexScope,
+        generation: Int64,
+        onBatch: @escaping FileScanner.BatchHandler,
+        onProgress: @escaping FileScanner.ProgressHandler
+    ) async throws -> ScanSummary
+}
+
+extension FileScanner: ScopeScanning {}

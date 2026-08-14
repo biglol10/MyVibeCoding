@@ -127,6 +127,15 @@ public actor SQLiteIndexWriter {
         }
     }
 
+    public func updateEventCheckpoint(scopeID: String, eventID: UInt64) throws {
+        let connection = try writableConnection()
+        let statement = try connection.prepare(
+            "UPDATE scopes SET last_event_id = ? WHERE id = ?"
+        )
+        try statement.bind([.int64(Int64(bitPattern: eventID)), .text(scopeID)])
+        _ = try statement.step()
+    }
+
     private func writableConnection() throws -> SQLiteConnection {
         try SQLiteConnection(
             path: databaseURL.path,
