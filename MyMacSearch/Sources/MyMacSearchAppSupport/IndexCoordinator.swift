@@ -1,7 +1,9 @@
 import Foundation
 import MyMacSearchCore
+import Observation
 
 @MainActor
+@Observable
 public final class IndexCoordinator {
     public private(set) var status: IndexStatus = .paused
     public private(set) var progress = IndexProgress()
@@ -41,9 +43,9 @@ public final class IndexCoordinator {
     }
 
     deinit {
-        scanTask?.cancel()
-        eventTask?.cancel()
         MainActor.assumeIsolated {
+            scanTask?.cancel()
+            eventTask?.cancel()
             watcher.stop()
         }
     }
