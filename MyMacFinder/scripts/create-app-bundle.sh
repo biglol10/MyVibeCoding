@@ -83,6 +83,8 @@ cat > "$contents_dir/Info.plist" <<'PLIST'
   <string>1</string>
   <key>LSMinimumSystemVersion</key>
   <string>15.0</string>
+  <key>MyMacFinderSupportsExternalFolderOpen</key>
+  <true/>
   <key>NSHighResolutionCapable</key>
   <true/>
 </dict>
