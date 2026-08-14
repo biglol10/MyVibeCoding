@@ -144,23 +144,11 @@ public struct IndexProgress: Equatable, Sendable {
     }
 }
 
-public struct SearchCursor: Codable, Equatable, Sendable {
-    public let rank: Double
-    public let modifiedAt: Date
-    public let entryID: Int64
-
-    public init(rank: Double, modifiedAt: Date, entryID: Int64) {
-        self.rank = rank
-        self.modifiedAt = modifiedAt
-        self.entryID = entryID
-    }
-}
-
 public struct SearchPage: Equatable, Sendable {
     public let entries: [IndexedEntry]
-    public let nextCursor: SearchCursor?
+    public let nextCursor: SearchPageCursor?
 
-    public init(entries: [IndexedEntry], nextCursor: SearchCursor?) {
+    public init(entries: [IndexedEntry], nextCursor: SearchPageCursor?) {
         self.entries = entries
         self.nextCursor = nextCursor
     }

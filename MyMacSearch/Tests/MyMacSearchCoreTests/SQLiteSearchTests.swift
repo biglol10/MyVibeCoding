@@ -63,4 +63,65 @@ final class SQLiteSearchTests: XCTestCase {
 
         XCTAssertEqual(page.entries.map(\.name), ["GoServer.swift"])
     }
+
+    func testNameSortUsesEntryIDAsFinalTieBreakerAcrossPages() async throws {
+        let fixture = try TemporaryIndexFixture()
+        defer { fixture.remove() }
+        let scope = IndexScope(id: "home", rootPath: "/scope")
+        try await fixture.writer.beginScopeScan(scope, generation: 1)
+        try await fixture.writer.upsertBatch(
+            [
+                .testEntry(path: "/z/Report.swift"),
+                .testEntry(path: "/a/report.swift"),
+                .testEntry(path: "/b/REPORT.swift")
+            ],
+            scopeID: scope.id,
+            generation: 1
+        )
+
+        let request = SearchRequest(query: SearchQuery(), sort: .nameAscending)
+        let first = try await fixture.reader.search(request: request, limit: 2, after: nil)
+        let second = try await fixture.reader.search(request: request, limit: 2, after: first.nextCursor)
+
+        XCTAssertEqual((first.entries + second.entries).map(\.path), [
+            "/z/Report.swift", "/a/report.swift", "/b/REPORT.swift"
+        ])
+        XCTAssertEqual(Set((first.entries + second.entries).map(\.id)).count, 3)
+    }
+
+    func testAllMetadataSortsReturnDeterministicLiteralOrder() async throws {
+        let fixture = try TemporaryIndexFixture()
+        defer { fixture.remove() }
+        let scope = IndexScope(id: "home", rootPath: "/scope")
+        try await fixture.writer.beginScopeScan(scope, generation: 1)
+        try await fixture.writer.upsertBatch(
+            [
+                .testEntry(path: "/z/a.swift", kind: .code, sizeBytes: 100, modifiedAt: Date(timeIntervalSince1970: 100)),
+                .testEntry(path: "/a/b.pdf", kind: .pdf, sizeBytes: 300, modifiedAt: Date(timeIntervalSince1970: 300)),
+                .testEntry(path: "/m/c", kind: .folder, sizeBytes: 200, modifiedAt: Date(timeIntervalSince1970: 200))
+            ],
+            scopeID: scope.id,
+            generation: 1
+        )
+        let cases: [(SearchSort, [String])] = [
+            (.nameAscending, ["a.swift", "b.pdf", "c"]),
+            (.nameDescending, ["c", "b.pdf", "a.swift"]),
+            (.pathAscending, ["b.pdf", "c", "a.swift"]),
+            (.pathDescending, ["a.swift", "c", "b.pdf"]),
+            (.modifiedNewest, ["b.pdf", "c", "a.swift"]),
+            (.modifiedOldest, ["a.swift", "c", "b.pdf"]),
+            (.sizeLargest, ["b.pdf", "c", "a.swift"]),
+            (.sizeSmallest, ["a.swift", "c", "b.pdf"]),
+            (.kindThenName, ["a.swift", "c", "b.pdf"])
+        ]
+
+        for (sort, expectedNames) in cases {
+            let page = try await fixture.reader.search(
+                request: SearchRequest(query: SearchQuery(), sort: sort),
+                limit: 20,
+                after: nil
+            )
+            XCTAssertEqual(page.entries.map(\.name), expectedNames, "sort: \(sort)")
+        }
+    }
 }

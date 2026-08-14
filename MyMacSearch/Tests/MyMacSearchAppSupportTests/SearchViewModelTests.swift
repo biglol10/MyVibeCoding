@@ -48,7 +48,7 @@ final class SearchViewModelTests: XCTestCase {
 
         XCTAssertFalse(model.canLoadMore)
         let cursors = await searcher.receivedCursors()
-        XCTAssertEqual(cursors, [nil, SearchCursor.fixture])
+        XCTAssertEqual(cursors, [nil, SearchPageCursor.fixture])
     }
 }
 
@@ -61,11 +61,12 @@ private actor DelayedSearcher: IndexSearching {
     }
 
     func search(
-        query: SearchQuery,
+        request: SearchRequest,
         limit: Int,
-        after cursor: SearchCursor?
+        after cursor: SearchPageCursor?
     ) async throws -> SearchPage {
         callCount += 1
+        let query = request.query
         let term = query.freeTerms.first ?? query.nameTerms.first ?? "empty"
         if let delay = delays[term] {
             try? await Task.sleep(for: delay)
@@ -77,12 +78,12 @@ private actor DelayedSearcher: IndexSearching {
 }
 
 private actor PaginatedSearcher: IndexSearching {
-    private var cursors: [SearchCursor?] = []
+    private var cursors: [SearchPageCursor?] = []
 
     func search(
-        query: SearchQuery,
+        request: SearchRequest,
         limit: Int,
-        after cursor: SearchCursor?
+        after cursor: SearchPageCursor?
     ) async throws -> SearchPage {
         cursors.append(cursor)
         if cursor == nil {
@@ -97,11 +98,11 @@ private actor PaginatedSearcher: IndexSearching {
         )
     }
 
-    func receivedCursors() -> [SearchCursor?] { cursors }
+    func receivedCursors() -> [SearchPageCursor?] { cursors }
 }
 
-private extension SearchCursor {
-    static let fixture = SearchCursor(
+private extension SearchPageCursor {
+    static let fixture = SearchPageCursor.relevance(
         rank: 1,
         modifiedAt: Date(timeIntervalSince1970: 1_700_000_000),
         entryID: 2

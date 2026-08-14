@@ -8,6 +8,16 @@ public final class SearchViewModel {
     public var query = "" {
         didSet {
             guard query != oldValue else { return }
+            if oldValue.isEmpty, !query.isEmpty, sort == .modifiedNewest {
+                sort = .relevance
+                return
+            }
+            scheduleSearch()
+        }
+    }
+    public var sort: SearchSort = .modifiedNewest {
+        didSet {
+            guard sort != oldValue else { return }
             scheduleSearch()
         }
     }
@@ -23,7 +33,7 @@ public final class SearchViewModel {
     private let debounce: Duration
     private let pageSize: Int
     private var parsedQuery = SearchQuery()
-    private var nextCursor: SearchCursor?
+    private var nextCursor: SearchPageCursor?
     private var searchGeneration: UInt64 = 0
     private var searchTask: Task<Void, Never>?
     private var loadMoreTask: Task<Void, Never>?
@@ -53,12 +63,13 @@ public final class SearchViewModel {
         guard let cursor = nextCursor, !isLoadingMore, parserError == nil else { return }
         let generation = searchGeneration
         let query = parsedQuery
+        let request = SearchRequest(query: query, sort: sort)
         isLoadingMore = true
         loadMoreTask?.cancel()
         loadMoreTask = Task { [weak self, searcher, pageSize] in
             do {
                 let page = try await searcher.search(
-                    query: query,
+                    request: request,
                     limit: pageSize,
                     after: cursor
                 )
@@ -108,13 +119,15 @@ public final class SearchViewModel {
 
         parserError = nil
         parsedQuery = parsed
+        let requestedSort = sort
         isSearching = true
         searchTask = Task { [weak self, searcher, debounce, pageSize] in
             do {
                 if debounce > .zero {
                     try await Task.sleep(for: debounce)
                 }
-                let page = try await searcher.search(query: parsed, limit: pageSize, after: nil)
+                let request = SearchRequest(query: parsed, sort: requestedSort)
+                let page = try await searcher.search(request: request, limit: pageSize, after: nil)
                 guard let self, self.searchGeneration == generation, !Task.isCancelled else { return }
                 let previousSelection = self.selectedEntryID
                 self.rows = page.entries

@@ -1,8 +1,8 @@
 public protocol IndexSearching: Sendable {
     func search(
-        query: SearchQuery,
+        request: SearchRequest,
         limit: Int,
-        after cursor: SearchCursor?
+        after cursor: SearchPageCursor?
     ) async throws -> SearchPage
 }
 

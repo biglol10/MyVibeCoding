@@ -15,16 +15,16 @@ public actor SQLiteIndexReader {
     }
 
     public func search(
-        query: SearchQuery,
+        request: SearchRequest,
         limit: Int = 200,
-        after cursor: SearchCursor? = nil
+        after cursor: SearchPageCursor? = nil
     ) throws -> SearchPage {
         let boundedLimit = min(max(limit, 1), 500)
         let connection = try SQLiteConnection(
             path: databaseURL.path,
             flags: SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
         )
-        let built = Self.buildSearch(query: query, cursor: cursor, limit: boundedLimit)
+        let built = Self.buildSearch(request: request, cursor: cursor, limit: boundedLimit)
         let statement = try connection.prepare(built.sql)
         try statement.bind(built.bindings)
 
@@ -61,13 +61,25 @@ public actor SQLiteIndexReader {
             ranks.append(statement.double(at: 18))
         }
 
-        let nextCursor: SearchCursor?
+        let nextCursor: SearchPageCursor?
         if entries.count == boundedLimit, let last = entries.last, let rank = ranks.last {
-            nextCursor = SearchCursor(rank: rank, modifiedAt: last.modifiedAt, entryID: last.id)
+            nextCursor = Self.cursor(for: last, rank: rank, sort: request.sort)
         } else {
             nextCursor = nil
         }
         return SearchPage(entries: entries, nextCursor: nextCursor)
+    }
+
+    public func search(
+        query: SearchQuery,
+        limit: Int = 200,
+        after cursor: SearchPageCursor? = nil
+    ) throws -> SearchPage {
+        try search(
+            request: SearchRequest(query: query, sort: query.isEmpty ? .modifiedNewest : .relevance),
+            limit: limit,
+            after: cursor
+        )
     }
 
     public nonisolated static func loadScopes(at databaseURL: URL) throws -> [IndexScope] {
@@ -102,10 +114,11 @@ public actor SQLiteIndexReader {
     }
 
     private static func buildSearch(
-        query: SearchQuery,
-        cursor: SearchCursor?,
+        request: SearchRequest,
+        cursor: SearchPageCursor?,
         limit: Int
     ) -> (sql: String, bindings: [SQLiteBindValue]) {
+        let query = request.query
         let primaryTerm = query.nameTerms.first ?? query.freeTerms.first
         let rankExpression: String
         var innerBindings: [SQLiteBindValue] = []
@@ -180,27 +193,9 @@ public actor SQLiteIndexReader {
         }
 
         let filterSQL = predicates.isEmpty ? "" : "WHERE " + predicates.joined(separator: " AND ")
-        var outerPredicates: [String] = []
-        var outerBindings: [SQLiteBindValue] = []
-        if let cursor {
-            outerPredicates.append(
-                """
-                (relevance_rank > ?
-                  OR (relevance_rank = ? AND modified_at < ?)
-                  OR (relevance_rank = ? AND modified_at = ? AND id > ?))
-                """
-            )
-            outerBindings.append(contentsOf: [
-                .double(cursor.rank),
-                .double(cursor.rank),
-                .double(cursor.modifiedAt.timeIntervalSince1970),
-                .double(cursor.rank),
-                .double(cursor.modifiedAt.timeIntervalSince1970),
-                .int64(cursor.entryID)
-            ])
-        }
+        let order = searchOrder(sort: request.sort, cursor: cursor)
 
-        let outerFilter = outerPredicates.isEmpty ? "" : "WHERE " + outerPredicates.joined(separator: " AND ")
+        let outerFilter = order.predicate.map { "WHERE \($0)" } ?? ""
         let sql = """
         SELECT * FROM (
           SELECT
@@ -213,10 +208,70 @@ public actor SQLiteIndexReader {
           \(filterSQL)
         ) ranked
         \(outerFilter)
-        ORDER BY relevance_rank ASC, modified_at DESC, id ASC
+        ORDER BY \(order.orderBy)
         LIMIT ?
         """
-        return (sql, innerBindings + outerBindings + [.int64(Int64(limit))])
+        return (sql, innerBindings + order.bindings + [.int64(Int64(limit))])
+    }
+
+    private static func searchOrder(
+        sort: SearchSort,
+        cursor: SearchPageCursor?
+    ) -> (orderBy: String, predicate: String?, bindings: [SQLiteBindValue]) {
+        switch (sort, cursor) {
+        case (.relevance, .relevance(let rank, let modifiedAt, let entryID)):
+            return (
+                "relevance_rank ASC, modified_at DESC, id ASC",
+                "(relevance_rank > ? OR (relevance_rank = ? AND modified_at < ?) OR (relevance_rank = ? AND modified_at = ? AND id > ?))",
+                [.double(rank), .double(rank), .double(modifiedAt.timeIntervalSince1970), .double(rank), .double(modifiedAt.timeIntervalSince1970), .int64(entryID)]
+            )
+        case (.nameAscending, .text(let value, let entryID)):
+            return ("search_name ASC, id ASC", "(search_name > ? OR (search_name = ? AND id > ?))", [.text(value), .text(value), .int64(entryID)])
+        case (.nameDescending, .text(let value, let entryID)):
+            return ("search_name DESC, id ASC", "(search_name < ? OR (search_name = ? AND id > ?))", [.text(value), .text(value), .int64(entryID)])
+        case (.pathAscending, .text(let value, let entryID)):
+            return ("search_path ASC, id ASC", "(search_path > ? OR (search_path = ? AND id > ?))", [.text(value), .text(value), .int64(entryID)])
+        case (.pathDescending, .text(let value, let entryID)):
+            return ("search_path DESC, id ASC", "(search_path < ? OR (search_path = ? AND id > ?))", [.text(value), .text(value), .int64(entryID)])
+        case (.modifiedNewest, .date(let value, let entryID)):
+            return ("modified_at DESC, id ASC", "(modified_at < ? OR (modified_at = ? AND id > ?))", [.double(value.timeIntervalSince1970), .double(value.timeIntervalSince1970), .int64(entryID)])
+        case (.modifiedOldest, .date(let value, let entryID)):
+            return ("modified_at ASC, id ASC", "(modified_at > ? OR (modified_at = ? AND id > ?))", [.double(value.timeIntervalSince1970), .double(value.timeIntervalSince1970), .int64(entryID)])
+        case (.sizeLargest, .size(let value, let entryID)):
+            return ("size_bytes DESC, id ASC", "(size_bytes < ? OR (size_bytes = ? AND id > ?))", [.int64(value), .int64(value), .int64(entryID)])
+        case (.sizeSmallest, .size(let value, let entryID)):
+            return ("size_bytes ASC, id ASC", "(size_bytes > ? OR (size_bytes = ? AND id > ?))", [.int64(value), .int64(value), .int64(entryID)])
+        case (.kindThenName, .kind(let kind, let name, let entryID)):
+            return (
+                "kind ASC, search_name ASC, id ASC",
+                "(kind > ? OR (kind = ? AND search_name > ?) OR (kind = ? AND search_name = ? AND id > ?))",
+                [.text(kind), .text(kind), .text(name), .text(kind), .text(name), .int64(entryID)]
+            )
+        case (.relevance, nil):
+            return ("relevance_rank ASC, modified_at DESC, id ASC", nil, [])
+        case (.nameAscending, nil): return ("search_name ASC, id ASC", nil, [])
+        case (.nameDescending, nil): return ("search_name DESC, id ASC", nil, [])
+        case (.pathAscending, nil): return ("search_path ASC, id ASC", nil, [])
+        case (.pathDescending, nil): return ("search_path DESC, id ASC", nil, [])
+        case (.modifiedNewest, nil): return ("modified_at DESC, id ASC", nil, [])
+        case (.modifiedOldest, nil): return ("modified_at ASC, id ASC", nil, [])
+        case (.sizeLargest, nil): return ("size_bytes DESC, id ASC", nil, [])
+        case (.sizeSmallest, nil): return ("size_bytes ASC, id ASC", nil, [])
+        case (.kindThenName, nil): return ("kind ASC, search_name ASC, id ASC", nil, [])
+        default:
+            return ("relevance_rank ASC, modified_at DESC, id ASC", "0", [])
+        }
+    }
+
+    private static func cursor(for entry: IndexedEntry, rank: Double, sort: SearchSort) -> SearchPageCursor {
+        switch sort {
+        case .relevance: .relevance(rank: rank, modifiedAt: entry.modifiedAt, entryID: entry.id)
+        case .nameAscending, .nameDescending: .text(value: entry.searchName, entryID: entry.id)
+        case .pathAscending, .pathDescending: .text(value: entry.searchPath, entryID: entry.id)
+        case .modifiedNewest, .modifiedOldest: .date(value: entry.modifiedAt, entryID: entry.id)
+        case .sizeLargest, .sizeSmallest: .size(value: entry.sizeBytes, entryID: entry.id)
+        case .kindThenName: .kind(kind: entry.kind.rawValue, name: entry.searchName, entryID: entry.id)
+        }
     }
 
     private static func placeholders(_ count: Int) -> String {
