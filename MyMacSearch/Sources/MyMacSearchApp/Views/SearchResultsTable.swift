@@ -54,6 +54,10 @@ struct SearchResultsTable: View {
                 }
                 .width(min: 125, ideal: 140, max: 155)
             }
+            .background(
+                FixedRowHeightTableProbe(columnCount: 5, rowHeight: 22)
+                    .frame(width: 0, height: 0)
+            )
             .contextMenu {
                 resultMenu
             }
@@ -174,6 +178,50 @@ struct SearchResultsTable: View {
         formatter.allowedUnits = [.useKB, .useMB, .useGB, .useTB]
         return formatter
     }()
+}
+
+private struct FixedRowHeightTableProbe: NSViewRepresentable {
+    let columnCount: Int
+    let rowHeight: CGFloat
+
+    func makeNSView(context: Context) -> ProbeView {
+        let view = ProbeView()
+        view.columnCount = columnCount
+        view.rowHeight = rowHeight
+        return view
+    }
+
+    func updateNSView(_ nsView: ProbeView, context: Context) {
+        nsView.columnCount = columnCount
+        nsView.rowHeight = rowHeight
+        nsView.scheduleConfiguration()
+    }
+
+    final class ProbeView: NSView {
+        var columnCount = 0
+        var rowHeight: CGFloat = 0
+        private var configurationTask: Task<Void, Never>?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            scheduleConfiguration()
+        }
+
+        func scheduleConfiguration() {
+            configurationTask?.cancel()
+            configurationTask = Task { @MainActor [weak self] in
+                await Task.yield()
+                guard let self,
+                      !Task.isCancelled,
+                      let contentView = self.window?.contentView else { return }
+                FixedRowHeightTableConfigurator.configure(
+                    descendantsOf: contentView,
+                    matchingColumnCount: self.columnCount,
+                    rowHeight: self.rowHeight
+                )
+            }
+        }
+    }
 }
 
 struct IndexStatusBar: View {
