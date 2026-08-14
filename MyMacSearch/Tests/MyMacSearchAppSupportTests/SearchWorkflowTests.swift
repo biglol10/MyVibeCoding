@@ -46,6 +46,18 @@ final class SearchWorkflowTests: XCTestCase {
     }
 
     @MainActor
+    func testSavedModifiedNewestSortIsNotReplacedByRelevance() throws {
+        let fixture = try WorkflowLibraryFixture()
+        defer { fixture.remove() }
+        let saved = try fixture.store.save(name: "Latest", query: "report", sort: .modifiedNewest, at: Date())
+        let model = SearchViewModel(searcher: WorkflowSearcher(), libraryStore: fixture.store, debounce: .zero)
+
+        model.activateSavedSearch(saved.id)
+
+        XCTAssertEqual(model.sort, .modifiedNewest)
+    }
+
+    @MainActor
     func testPrimarySelectionTracksNewestAddedAndFallsBackInVisibleOrder() async throws {
         let model = SearchViewModel(searcher: MultiSelectionSearcher(), debounce: .zero)
         model.query = "multi"

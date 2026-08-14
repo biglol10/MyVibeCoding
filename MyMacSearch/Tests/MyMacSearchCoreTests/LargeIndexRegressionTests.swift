@@ -30,6 +30,38 @@ final class LargeIndexRegressionTests: XCTestCase {
         XCTAssertTrue(page.entries.allSatisfy { $0.fileExtension == "swift" })
         XCTAssertTrue(page.entries.allSatisfy { $0.path.contains("/Downloads/") })
         XCTAssertNil(page.nextCursor)
+
+        for sort in SearchSort.allCases {
+            let request = SearchRequest(query: SearchQuery(), sort: sort)
+            let first = try await fixture.reader.search(request: request, limit: 200, after: nil)
+            let second = try await fixture.reader.search(request: request, limit: 200, after: first.nextCursor)
+            let combined = first.entries + second.entries
+            XCTAssertEqual(combined.count, 400, "sort: \(sort)")
+            XCTAssertEqual(Set(combined.map(\.id)).count, 400, "duplicate page row for sort: \(sort)")
+            XCTAssertEqual(
+                combined.map(\.path),
+                Self.expectedFirstPaths(count: 400, total: entryCount, sort: sort),
+                "incorrect keyset order for sort: \(sort)"
+            )
+        }
+
+        let sizeQuery = try SearchQueryParser.parse("size:1KB..2KB")
+        let sizePage = try await fixture.reader.search(
+            request: SearchRequest(query: sizeQuery, sort: .sizeSmallest),
+            limit: 200,
+            after: nil
+        )
+        XCTAssertEqual(sizePage.entries.map(\.sizeBytes), Array(stride(from: Int64(1_030), through: 2_040, by: 10)))
+
+        let healthReader = try SQLiteIndexHealthReader(databaseURL: fixture.databaseURL)
+        let healthStart = ContinuousClock.now
+        let health = try await healthReader.snapshot(liveStates: [
+            scope.id: ScopeRuntimeState(state: .watching)
+        ])
+        let healthMilliseconds = Self.milliseconds(healthStart.duration(to: .now))
+        XCTAssertEqual(health.totalEntryCount, entryCount)
+        XCTAssertEqual(health.scopes.first?.entryCount, entryCount)
+        XCTAssertLessThan(healthMilliseconds, 250)
     }
 
     static func makeEntry(_ index: Int) -> IndexedEntry {
@@ -56,5 +88,44 @@ final class LargeIndexRegressionTests: XCTestCase {
             isHidden: false,
             scanGeneration: 1
         )
+    }
+
+    private static func expectedFirstPaths(
+        count: Int,
+        total: Int,
+        sort: SearchSort
+    ) -> [String] {
+        let entries = (0..<total).map(makeEntry)
+        var indices = Array(0..<total)
+        switch sort {
+        case .relevance, .modifiedNewest, .sizeLargest:
+            indices.reverse()
+        case .modifiedOldest, .sizeSmallest:
+            break
+        case .nameAscending:
+            indices.sort { entries[$0].searchName < entries[$1].searchName }
+        case .nameDescending:
+            indices.sort { entries[$0].searchName > entries[$1].searchName }
+        case .pathAscending:
+            indices.sort { entries[$0].searchPath < entries[$1].searchPath }
+        case .pathDescending:
+            indices.sort { entries[$0].searchPath > entries[$1].searchPath }
+        case .kindThenName:
+            indices.sort {
+                let left = entries[$0]
+                let right = entries[$1]
+                if left.kind.rawValue != right.kind.rawValue {
+                    return left.kind.rawValue < right.kind.rawValue
+                }
+                return left.searchName < right.searchName
+            }
+        }
+        return indices.prefix(count).map { entries[$0].path }
+    }
+
+    private static func milliseconds(_ duration: Duration) -> Double {
+        let components = duration.components
+        return Double(components.seconds) * 1_000
+            + Double(components.attoseconds) / 1_000_000_000_000_000
     }
 }

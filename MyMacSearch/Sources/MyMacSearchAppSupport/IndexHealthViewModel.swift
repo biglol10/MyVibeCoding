@@ -33,13 +33,12 @@ public final class IndexHealthViewModel {
     }
 
     public func refresh(liveStates: [String: ScopeRuntimeState], force: Bool = false) {
-        if !force,
-           liveStates == lastLiveStates,
-           let snapshot,
-           Date().timeIntervalSince(snapshot.capturedAt) < 1 {
+        lastLiveStates = liveStates
+        if !force, let snapshot, Date().timeIntervalSince(snapshot.capturedAt) < 1 {
+            self.snapshot = merge(liveStates: liveStates, into: snapshot)
             return
         }
-        lastLiveStates = liveStates
+        if !force, refreshTask != nil { return }
         refreshGeneration &+= 1
         let generation = refreshGeneration
         refreshTask?.cancel()
@@ -50,7 +49,7 @@ public final class IndexHealthViewModel {
                 async let loadedIssues = reader.issues(scopeID: nil, unresolvedOnly: true, limit: 200)
                 let values = try await (loadedSnapshot, loadedIssues)
                 guard let self, self.refreshGeneration == generation, !Task.isCancelled else { return }
-                self.snapshot = values.0
+                self.snapshot = self.merge(liveStates: self.lastLiveStates, into: values.0)
                 self.issues = values.1
                 self.errorMessage = nil
                 self.isRefreshing = false
@@ -66,6 +65,38 @@ public final class IndexHealthViewModel {
                 self.refreshTask = nil
             }
         }
+    }
+
+    private func merge(
+        liveStates: [String: ScopeRuntimeState],
+        into snapshot: IndexHealthSnapshot
+    ) -> IndexHealthSnapshot {
+        let scopes = snapshot.scopes.map { scope in
+            guard let live = liveStates[scope.scopeID] else { return scope }
+            return IndexScopeHealth(
+                scopeID: scope.scopeID,
+                rootPath: scope.rootPath,
+                volumeType: scope.volumeType,
+                isEnabled: scope.isEnabled,
+                state: live.state,
+                entryCount: scope.entryCount,
+                lastCompletedScanAt: scope.lastCompletedScanAt,
+                lastEventAt: scope.lastEventAt,
+                lastEventID: scope.lastEventID,
+                progress: live.progress,
+                lastSkippedCount: scope.lastSkippedCount,
+                lastPermissionDeniedCount: scope.lastPermissionDeniedCount,
+                unresolvedIssueCount: scope.unresolvedIssueCount,
+                lastError: live.message ?? scope.lastError
+            )
+        }
+        return IndexHealthSnapshot(
+            scopes: scopes,
+            totalEntryCount: snapshot.totalEntryCount,
+            databaseBytes: snapshot.databaseBytes,
+            auxiliaryBytes: snapshot.auxiliaryBytes,
+            capturedAt: snapshot.capturedAt
+        )
     }
 
     public func verify() {

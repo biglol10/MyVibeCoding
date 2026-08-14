@@ -5,12 +5,16 @@ import SwiftUI
 struct SearchResultsTable: View {
     let model: AppModel
     @Bindable var search: SearchViewModel
-    private let supportedSorts = SearchSort.allCases
+    @State private var tableSortOrder: [KeyPathComparator<IndexedEntry>] = []
 
     var body: some View {
         VStack(spacing: 0) {
-            Table(search.rows, selection: $search.selectedEntryIDs) {
-                TableColumn("Name") { entry in
+            Table(
+                search.rows,
+                selection: $search.selectedEntryIDs,
+                sortOrder: $tableSortOrder
+            ) {
+                TableColumn("Name", value: \.name) { entry in
                     HStack(spacing: 6) {
                         Image(systemName: symbol(for: entry))
                             .foregroundStyle(.secondary)
@@ -25,7 +29,7 @@ struct SearchResultsTable: View {
                 }
                 .width(min: 160, ideal: 210, max: 250)
 
-                TableColumn("Path") { entry in
+                TableColumn("Path", value: \.parentPath) { entry in
                     Text(entry.parentPath)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -38,13 +42,13 @@ struct SearchResultsTable: View {
                 }
                 .width(min: 70, ideal: 85, max: 100)
 
-                TableColumn("Size") { entry in
+                TableColumn("Size", value: \.sizeBytes) { entry in
                     Text(entry.isDirectory ? "—" : Self.byteFormatter.string(fromByteCount: entry.sizeBytes))
                         .monospacedDigit()
                 }
                 .width(min: 65, ideal: 75, max: 90)
 
-                TableColumn("Modified") { entry in
+                TableColumn("Modified", value: \.modifiedAt) { entry in
                     Text(entry.modifiedAt, format: .dateTime.year().month().day().hour().minute())
                         .monospacedDigit()
                 }
@@ -52,6 +56,11 @@ struct SearchResultsTable: View {
             }
             .contextMenu {
                 resultMenu
+            }
+            .onAppear { synchronizeTableSortIndicator() }
+            .onChange(of: search.sort) { _, _ in synchronizeTableSortIndicator() }
+            .onChange(of: tableSortOrder) { _, newOrder in
+                applyTableSort(newOrder.first)
             }
             .onKeyPress(phases: .down) { keyPress in
                 guard ResultKeyboardCommand.resolve(
@@ -108,6 +117,55 @@ struct SearchResultsTable: View {
 
     private func searchScopeIsOffline(_ scopeID: String) -> Bool {
         model.coordinator?.scopeStates[scopeID]?.state == .offline
+    }
+
+    private func applyTableSort(_ comparator: KeyPathComparator<IndexedEntry>?) {
+        guard let comparator else { return }
+        let ascending = comparator.order == .forward
+        let newSort: SearchSort?
+        switch comparator.keyPath {
+        case \IndexedEntry.name:
+            newSort = ascending ? .nameAscending : .nameDescending
+        case \IndexedEntry.parentPath:
+            newSort = ascending ? .pathAscending : .pathDescending
+        case \IndexedEntry.sizeBytes:
+            newSort = ascending ? .sizeSmallest : .sizeLargest
+        case \IndexedEntry.modifiedAt:
+            newSort = ascending ? .modifiedOldest : .modifiedNewest
+        default:
+            newSort = nil
+        }
+        if let newSort, search.sort != newSort {
+            search.chooseSort(newSort)
+        }
+    }
+
+    private func synchronizeTableSortIndicator() {
+        let comparator: KeyPathComparator<IndexedEntry>?
+        switch search.sort {
+        case .nameAscending:
+            comparator = KeyPathComparator(\.name, order: .forward)
+        case .nameDescending:
+            comparator = KeyPathComparator(\.name, order: .reverse)
+        case .pathAscending:
+            comparator = KeyPathComparator(\.parentPath, order: .forward)
+        case .pathDescending:
+            comparator = KeyPathComparator(\.parentPath, order: .reverse)
+        case .sizeSmallest:
+            comparator = KeyPathComparator(\.sizeBytes, order: .forward)
+        case .sizeLargest:
+            comparator = KeyPathComparator(\.sizeBytes, order: .reverse)
+        case .modifiedOldest:
+            comparator = KeyPathComparator(\.modifiedAt, order: .forward)
+        case .modifiedNewest:
+            comparator = KeyPathComparator(\.modifiedAt, order: .reverse)
+        case .relevance, .kindThenName:
+            comparator = nil
+        }
+        let updated = comparator.map { [$0] } ?? []
+        if tableSortOrder != updated {
+            tableSortOrder = updated
+        }
     }
 
     private static let byteFormatter: ByteCountFormatter = {

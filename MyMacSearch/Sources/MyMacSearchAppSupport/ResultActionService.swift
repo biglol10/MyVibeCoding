@@ -81,6 +81,12 @@ public final class ResultActionService {
 
     public func perform(_ action: ResultAction, entry: IndexedEntry) async throws {
         let url = URL(fileURLWithPath: entry.path).standardizedFileURL
+        if action == .copyPath {
+            guard environment.copyText(url.path) else {
+                throw ResultActionError.copyFailed
+            }
+            return
+        }
         let status = environment.pathStatus(at: url)
         guard status != .missing else {
             onMissingPath(url.path)
@@ -97,9 +103,7 @@ public final class ResultActionService {
                 throw ResultActionError.revealFailed(url.path)
             }
         case .copyPath:
-            guard environment.copyText(url.path) else {
-                throw ResultActionError.copyFailed
-            }
+            break
         case .openInTerminal:
             guard let applicationURL = environment.applicationURL(
                 bundleIdentifier: Self.terminalBundleIdentifier
@@ -132,15 +136,11 @@ public final class ResultActionService {
     }
 
     public func copyPaths(_ entries: [IndexedEntry]) async throws {
-        let resolved = resolve(entries)
-        guard !resolved.urls.isEmpty else {
-            throw ResultActionError.partialFailure(missing: resolved.missing, unavailable: 0)
+        let paths = entries.map {
+            URL(fileURLWithPath: $0.path).standardizedFileURL.path
         }
-        guard environment.copyText(resolved.urls.map(\.path).joined(separator: "\n")) else {
+        guard !paths.isEmpty, environment.copyText(paths.joined(separator: "\n")) else {
             throw ResultActionError.copyFailed
-        }
-        if resolved.missing > 0 {
-            throw ResultActionError.partialFailure(missing: resolved.missing, unavailable: 0)
         }
     }
 

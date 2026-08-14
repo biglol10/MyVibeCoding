@@ -8,7 +8,7 @@ public final class SearchViewModel {
     public var query = "" {
         didSet {
             guard query != oldValue else { return }
-            if oldValue.isEmpty, !query.isEmpty, sort == .modifiedNewest {
+            if oldValue.isEmpty, !query.isEmpty, sort == .modifiedNewest, !hasExplicitSortChoice {
                 sort = .relevance
                 return
             }
@@ -53,11 +53,13 @@ public final class SearchViewModel {
     private var searchGeneration: UInt64 = 0
     private var searchTask: Task<Void, Never>?
     private var loadMoreTask: Task<Void, Never>?
+    private var hasExplicitSortChoice: Bool
 
     public init(
         searcher: any IndexSearching,
         libraryStore: (any SearchLibraryStoring)? = nil,
         initialSort: SearchSort = .modifiedNewest,
+        initialSortIsExplicit: Bool = false,
         onExplicitSortChange: @escaping @MainActor (SearchSort) -> Void = { _ in },
         debounce: Duration = .milliseconds(60),
         pageSize: Int = 200
@@ -65,6 +67,7 @@ public final class SearchViewModel {
         self.searcher = searcher
         self.libraryStore = libraryStore
         self.sort = initialSort
+        self.hasExplicitSortChoice = initialSortIsExplicit
         self.onExplicitSortChange = onExplicitSortChange
         self.debounce = debounce
         self.pageSize = min(max(pageSize, 1), 500)
@@ -118,6 +121,7 @@ public final class SearchViewModel {
     }
 
     public func chooseSort(_ sort: SearchSort) {
+        hasExplicitSortChoice = true
         self.sort = sort
         onExplicitSortChange(sort)
     }
@@ -158,11 +162,13 @@ public final class SearchViewModel {
 
     public func activateSavedSearch(_ id: UUID) {
         guard let saved = savedSearches.first(where: { $0.id == id }) else { return }
+        hasExplicitSortChoice = true
         sort = saved.sort
         query = saved.query
     }
 
     public func activateRecentSearch(_ recent: RecentSearch) {
+        hasExplicitSortChoice = true
         sort = recent.sort
         query = recent.query
     }

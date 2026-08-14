@@ -4,6 +4,8 @@ import SwiftUI
 
 struct IndexCenterView: View {
     @Bindable var model: AppModel
+    @State private var issueScopeFilter = ""
+    @State private var issueCategoryFilter = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -60,9 +62,16 @@ struct IndexCenterView: View {
                         .width(150)
 
                         TableColumn("Issues") { scope in
-                            Text(scope.unresolvedIssueCount.formatted())
+                            VStack(alignment: .trailing, spacing: 1) {
+                                Text(scope.unresolvedIssueCount.formatted())
+                                if scope.lastSkippedCount > 0 || scope.lastPermissionDeniedCount > 0 {
+                                    Text("\(scope.lastSkippedCount) skipped · \(scope.lastPermissionDeniedCount) denied")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                         }
-                        .width(55)
+                        .width(min: 90, ideal: 135)
 
                         TableColumn("") { scope in
                             Button("Rescan") { model.rescan(scopeID: scope.scopeID) }
@@ -91,7 +100,27 @@ struct IndexCenterView: View {
 
                     if !health.issues.isEmpty {
                         Divider()
-                        List(health.issues.prefix(100)) { issue in
+                        HStack {
+                            Picker("Location", selection: $issueScopeFilter) {
+                                Text("All Locations").tag("")
+                                ForEach(snapshot.scopes) { scope in
+                                    Text(URL(fileURLWithPath: scope.rootPath).lastPathComponent)
+                                        .tag(scope.scopeID)
+                                }
+                            }
+                            Picker("Category", selection: $issueCategoryFilter) {
+                                Text("All Categories").tag("")
+                                ForEach(IndexIssueCategory.allCases, id: \.rawValue) { category in
+                                    Text(category.rawValue).tag(category.rawValue)
+                                }
+                            }
+                            Spacer()
+                        }
+                        .controlSize(.small)
+                        .padding(.horizontal, 10)
+                        .padding(.top, 8)
+
+                        List(filteredIssues(health.issues).prefix(100)) { issue in
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(issue.message)
                                 Text(issue.path)
@@ -99,6 +128,9 @@ struct IndexCenterView: View {
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
+                            }
+                            .contextMenu {
+                                Button("Copy Path") { model.copyIndexIssuePath(issue.path) }
                             }
                         }
                         .frame(minHeight: 120, maxHeight: 190)
@@ -112,5 +144,15 @@ struct IndexCenterView: View {
             }
         }
         .task { model.refreshIndexHealth(force: false) }
+        .onChange(of: model.coordinator?.scopeStates ?? [:]) { _, _ in
+            model.refreshIndexHealth(force: false)
+        }
+    }
+
+    private func filteredIssues(_ issues: [IndexIssueRecord]) -> [IndexIssueRecord] {
+        issues.filter { issue in
+            (issueScopeFilter.isEmpty || issue.scopeID == issueScopeFilter)
+                && (issueCategoryFilter.isEmpty || issue.category.rawValue == issueCategoryFilter)
+        }
     }
 }

@@ -50,6 +50,30 @@ final class SearchViewModelTests: XCTestCase {
         let cursors = await searcher.receivedCursors()
         XCTAssertEqual(cursors, [nil, SearchPageCursor.fixture])
     }
+
+    @MainActor
+    func testExplicitModifiedNewestSortSurvivesFirstQuery() {
+        let model = SearchViewModel(searcher: DelayedSearcher(), debounce: .zero)
+
+        model.chooseSort(.modifiedNewest)
+        model.query = "report"
+
+        XCTAssertEqual(model.sort, .modifiedNewest)
+    }
+
+    @MainActor
+    func testPersistedModifiedNewestSortSurvivesFirstQuery() {
+        let model = SearchViewModel(
+            searcher: DelayedSearcher(),
+            initialSort: .modifiedNewest,
+            initialSortIsExplicit: true,
+            debounce: .zero
+        )
+
+        model.query = "report"
+
+        XCTAssertEqual(model.sort, .modifiedNewest)
+    }
 }
 
 private actor DelayedSearcher: IndexSearching {

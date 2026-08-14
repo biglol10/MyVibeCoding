@@ -76,6 +76,22 @@ final class ResultActionServiceTests: XCTestCase {
     }
 
     @MainActor
+    func testCopyPathDoesNotRequireMountedFilesystemOrReconcileCachedRow() async throws {
+        let environment = ResultActionEnvironmentSpy(status: .missing)
+        var reconciled: [String] = []
+        let service = ResultActionService(environment: environment) { reconciled.append($0) }
+
+        try await service.perform(.copyPath, entry: .actionFixture(path: "/Volumes/Offline/report.pdf"))
+        try await service.copyPaths([
+            .actionFixture(path: "/Volumes/Offline/report.pdf"),
+            .actionFixture(path: "/Volumes/Offline/notes.txt")
+        ])
+
+        XCTAssertEqual(environment.copiedText, "/Volumes/Offline/report.pdf\n/Volumes/Offline/notes.txt")
+        XCTAssertTrue(reconciled.isEmpty)
+    }
+
+    @MainActor
     func testRevealCapsFinderRequestAtOneHundredAndReconcilesMissingPaths() async throws {
         let environment = ResultActionEnvironmentSpy(status: .file)
         environment.missingPaths = ["/scope/50.txt"]

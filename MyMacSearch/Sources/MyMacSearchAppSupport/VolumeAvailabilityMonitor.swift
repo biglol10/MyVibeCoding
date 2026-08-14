@@ -34,7 +34,7 @@ public struct FoundationVolumeResourceReader: VolumeResourceReading {
     }
 }
 
-public struct VolumeAvailabilityChecker<Client: VolumeResourceReading>: Sendable {
+public actor VolumeAvailabilityChecker<Client: VolumeResourceReading> {
     private let client: Client
 
     public init(client: Client) {
@@ -44,7 +44,9 @@ public struct VolumeAvailabilityChecker<Client: VolumeResourceReading>: Sendable
     public func availability(rootPath: String, expectedVolumeUUID: String?) -> VolumeAvailability {
         let resource = client.resource(for: rootPath)
         guard resource.isReachable else { return .offline }
-        guard let expectedVolumeUUID else { return .available }
+        guard let expectedVolumeUUID else {
+            return .identityMismatch(actualUUID: resource.volumeUUID)
+        }
         guard resource.volumeUUID == expectedVolumeUUID else {
             return .identityMismatch(actualUUID: resource.volumeUUID)
         }
@@ -79,7 +81,7 @@ public final class VolumeAvailabilityMonitor {
     deinit {
         refreshTask?.cancel()
         for observer in observers {
-            NotificationCenter.default.removeObserver(observer.token)
+            NSWorkspace.shared.notificationCenter.removeObserver(observer.token)
         }
     }
 
@@ -115,7 +117,7 @@ public final class VolumeAvailabilityMonitor {
             try? await Task.sleep(for: .milliseconds(150))
             guard !Task.isCancelled, let self else { return }
             for scope in scopes {
-                let availability = checker.availability(
+                let availability = await checker.availability(
                     rootPath: scope.rootPath,
                     expectedVolumeUUID: scope.expectedVolumeUUID
                 )

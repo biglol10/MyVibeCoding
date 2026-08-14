@@ -15,6 +15,11 @@ final class SQLiteIndexHealthReaderTests: XCTestCase {
             scopeID: home.id,
             generation: 1
         )
+        try await fixture.writer.updateScopeScanStatistics(
+            scopeID: home.id,
+            skippedCount: 7,
+            permissionDeniedCount: 2
+        )
         try await fixture.writer.upsertBatch(
             [.testEntry(path: "/Volumes/Work/c.pdf", scopeID: work.id)],
             scopeID: work.id,
@@ -36,6 +41,8 @@ final class SQLiteIndexHealthReaderTests: XCTestCase {
 
         XCTAssertEqual(snapshot.totalEntryCount, 3)
         XCTAssertEqual(snapshot.scopes.first { $0.scopeID == "home" }?.entryCount, 2)
+        XCTAssertEqual(snapshot.scopes.first { $0.scopeID == "home" }?.lastSkippedCount, 7)
+        XCTAssertEqual(snapshot.scopes.first { $0.scopeID == "home" }?.lastPermissionDeniedCount, 2)
         XCTAssertEqual(snapshot.scopes.first { $0.scopeID == "work" }?.unresolvedIssueCount, 1)
         XCTAssertEqual(snapshot.scopes.first { $0.scopeID == "work" }?.state, .offline)
         XCTAssertGreaterThan(snapshot.databaseBytes, 0)

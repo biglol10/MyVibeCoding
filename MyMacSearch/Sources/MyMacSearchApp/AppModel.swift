@@ -88,25 +88,24 @@ final class AppModel {
         guard panel.runModal() == .OK else { return }
 
         let existing = Set(settings.scopes.map(\.rootPath))
-        for url in panel.urls.map(\.standardizedFileURL) where !existing.contains(url.path) {
-            let volumeType = Self.volumeType(for: url)
-            let expectedVolumeUUID: String?
-            if volumeType == .internalLocal {
-                expectedVolumeUUID = nil
-            } else {
-                expectedVolumeUUID = try? url.resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString
-            }
-            settings.scopes.append(
-                SearchScopeSetting(
-                    rootPath: url.path,
-                    volumeType: volumeType,
-                    expectedVolumeUUID: expectedVolumeUUID
+        let urls = panel.urls.map(\.standardizedFileURL).filter { !existing.contains($0.path) }
+        Task {
+            let descriptors = await Task.detached(priority: .userInitiated) {
+                urls.map(Self.volumeDescriptor(for:))
+            }.value
+            for descriptor in descriptors {
+                settings.scopes.append(
+                    SearchScopeSetting(
+                        rootPath: descriptor.path,
+                        volumeType: descriptor.type,
+                        expectedVolumeUUID: descriptor.uuid
+                    )
                 )
-            )
-            if volumeType == .external { settings.externalVolumesEnabled = true }
-            if volumeType == .network { settings.networkVolumesEnabled = true }
+                if descriptor.type == .external { settings.externalVolumesEnabled = true }
+                if descriptor.type == .network { settings.networkVolumesEnabled = true }
+            }
+            settings.scopes.sort { $0.rootPath.localizedStandardCompare($1.rootPath) == .orderedAscending }
         }
-        settings.scopes.sort { $0.rootPath.localizedStandardCompare($1.rootPath) == .orderedAscending }
     }
 
     func removeScope(id: String) {
@@ -114,7 +113,12 @@ final class AppModel {
     }
 
     func resumeIndexing() {
-        coordinator?.start(scopes: allowedIndexScopes())
+        let scopes = allowedIndexScopes()
+        coordinator?.start(
+            scopes: scopes,
+            initiallyUnavailableScopeIDs: Set(scopes.filter { $0.volumeType != .internalLocal }.map(\.id))
+        )
+        if let coordinator { startVolumeMonitoring(coordinator: coordinator) }
     }
 
     func perform(_ action: ResultAction) {
@@ -127,8 +131,19 @@ final class AppModel {
                 case .copyPath where entries.count > 1:
                     try await actionService.copyPaths(entries)
                 case .revealInFinder where entries.count > 1:
-                    try await actionService.revealInFinder(entries)
+                    let available = entries.filter { coordinator?.isScopeUnavailable($0.scopeID) != true }
+                    let unavailableCount = entries.count - available.count
+                    guard !available.isEmpty else {
+                        throw ResultActionError.partialFailure(missing: 0, unavailable: unavailableCount)
+                    }
+                    try await actionService.revealInFinder(available)
+                    if unavailableCount > 0 {
+                        throw ResultActionError.partialFailure(missing: 0, unavailable: unavailableCount)
+                    }
                 default:
+                    if action != .copyPath, coordinator?.isScopeUnavailable(entry.scopeID) == true {
+                        throw ResultActionError.partialFailure(missing: 0, unavailable: 1)
+                    }
                     try await actionService.perform(action, entry: entry)
                 }
             } catch {
@@ -141,15 +156,20 @@ final class AppModel {
         let entries = selectedEntries
         guard !entries.isEmpty else { return }
         var validEntries: [IndexedEntry] = []
+        var unavailableCount = 0
         for entry in entries {
-            if FileManager.default.fileExists(atPath: entry.path) {
+            if coordinator?.isScopeUnavailable(entry.scopeID) == true {
+                unavailableCount += 1
+            } else if FileManager.default.fileExists(atPath: entry.path) {
                 validEntries.append(entry)
             } else {
                 coordinator?.removeMissingPath(entry.path)
             }
         }
         guard !validEntries.isEmpty else {
-            actionError = "The selected paths are no longer available."
+            actionError = unavailableCount > 0
+                ? "The indexed volume is not currently available. Cached results were preserved."
+                : "The selected paths are no longer available."
             return
         }
         let selectedIndex = validEntries.firstIndex { $0.id == searchViewModel?.primaryEntryID } ?? 0
@@ -177,6 +197,13 @@ final class AppModel {
 
     func dismissActionError() {
         actionError = nil
+    }
+
+    func copyIndexIssuePath(_ path: String) {
+        NSPasteboard.general.clearContents()
+        if !NSPasteboard.general.setString(path, forType: .string) {
+            actionError = "The issue path could not be copied."
+        }
     }
 
     private func rebuildServices(startIndexing: Bool) {
@@ -211,6 +238,7 @@ final class AppModel {
                 searcher: reader,
                 libraryStore: SearchLibraryStore(directoryURL: applicationSupportURL),
                 initialSort: settings.preferredSort ?? .modifiedNewest,
+                initialSortIsExplicit: settings.preferredSort != nil,
                 onExplicitSortChange: { [weak self] sort in
                     guard let self else { return }
                     self.settings.preferredSort = sort
@@ -224,7 +252,11 @@ final class AppModel {
             }
             searchViewModel.refresh()
             if startIndexing {
-                coordinator.start(scopes: allowedIndexScopes())
+                let scopes = allowedIndexScopes()
+                coordinator.start(
+                    scopes: scopes,
+                    initiallyUnavailableScopeIDs: Set(scopes.filter { $0.volumeType != .internalLocal }.map(\.id))
+                )
                 startVolumeMonitoring(coordinator: coordinator)
             }
         } catch {
@@ -311,13 +343,22 @@ final class AppModel {
         }
     }
 
-    private static func volumeType(for url: URL) -> IndexedVolumeType {
+    nonisolated private static func volumeDescriptor(
+        for url: URL
+    ) -> (path: String, type: IndexedVolumeType, uuid: String?) {
         let values = try? url.resourceValues(forKeys: [
             .volumeIsLocalKey,
-            .volumeIsInternalKey
+            .volumeIsInternalKey,
+            .volumeUUIDStringKey
         ])
-        if values?.volumeIsLocal == false { return .network }
-        if values?.volumeIsInternal == false { return .external }
-        return .internalLocal
+        let type: IndexedVolumeType
+        if values?.volumeIsLocal == false {
+            type = .network
+        } else if values?.volumeIsInternal == false {
+            type = .external
+        } else {
+            type = .internalLocal
+        }
+        return (url.path, type, type == .internalLocal ? nil : values?.volumeUUIDString)
     }
 }

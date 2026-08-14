@@ -22,7 +22,7 @@ public struct ScopeRuntimeState: Equatable, Sendable {
     }
 }
 
-public enum IndexIssueCategory: String, Codable, Sendable {
+public enum IndexIssueCategory: String, CaseIterable, Codable, Sendable {
     case permissionDenied
     case unavailableRoot
     case metadataRead
@@ -77,6 +77,8 @@ public struct IndexScopeHealth: Identifiable, Equatable, Sendable {
     public let lastEventAt: Date?
     public let lastEventID: UInt64?
     public let progress: IndexProgress
+    public let lastSkippedCount: Int
+    public let lastPermissionDeniedCount: Int
     public let unresolvedIssueCount: Int
     public let lastError: String?
 
@@ -91,6 +93,8 @@ public struct IndexScopeHealth: Identifiable, Equatable, Sendable {
         lastEventAt: Date?,
         lastEventID: UInt64?,
         progress: IndexProgress = IndexProgress(),
+        lastSkippedCount: Int = 0,
+        lastPermissionDeniedCount: Int = 0,
         unresolvedIssueCount: Int,
         lastError: String?
     ) {
@@ -104,6 +108,8 @@ public struct IndexScopeHealth: Identifiable, Equatable, Sendable {
         self.lastEventAt = lastEventAt
         self.lastEventID = lastEventID
         self.progress = progress
+        self.lastSkippedCount = lastSkippedCount
+        self.lastPermissionDeniedCount = lastPermissionDeniedCount
         self.unresolvedIssueCount = unresolvedIssueCount
         self.lastError = lastError
     }

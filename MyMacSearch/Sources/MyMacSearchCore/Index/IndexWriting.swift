@@ -9,6 +9,11 @@ public protocol IndexWriting: Sendable {
     ) async throws
     func delete(path: String) async throws
     func completeScopeScan(scopeID: String, generation: Int64, completedAt: Date) async throws
+    func updateScopeScanStatistics(
+        scopeID: String,
+        skippedCount: Int,
+        permissionDeniedCount: Int
+    ) async throws
     func updateEventCheckpoint(scopeID: String, eventID: UInt64, occurredAt: Date) async throws
     func recordIssue(
         scopeID: String,
@@ -23,6 +28,12 @@ public protocol IndexWriting: Sendable {
 extension SQLiteIndexWriter: IndexWriting {}
 
 public extension IndexWriting {
+    func updateScopeScanStatistics(
+        scopeID: String,
+        skippedCount: Int,
+        permissionDeniedCount: Int
+    ) async throws {}
+
     func completeScopeScan(scopeID: String, generation: Int64) async throws {
         try await completeScopeScan(scopeID: scopeID, generation: generation, completedAt: Date())
     }

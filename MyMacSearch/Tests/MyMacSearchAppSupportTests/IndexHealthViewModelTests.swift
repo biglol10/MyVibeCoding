@@ -9,8 +9,8 @@ final class IndexHealthViewModelTests: XCTestCase {
         let reader = DelayedHealthReader()
         let model = IndexHealthViewModel(reader: reader, verifier: HealthyVerifier())
 
-        model.refresh(liveStates: ["old": ScopeRuntimeState(state: .watching)])
-        model.refresh(liveStates: ["new": ScopeRuntimeState(state: .watching)])
+        model.refresh(liveStates: ["old": ScopeRuntimeState(state: .watching)], force: true)
+        model.refresh(liveStates: ["new": ScopeRuntimeState(state: .watching)], force: true)
 
         try await eventually { model.snapshot?.totalEntryCount == 2 }
         try await Task.sleep(for: .milliseconds(180))
@@ -27,6 +27,61 @@ final class IndexHealthViewModelTests: XCTestCase {
         try await eventually { model.verification?.isHealthy == true }
         XCTAssertFalse(model.isVerifying)
     }
+
+    @MainActor
+    func testRapidProgressRefreshesReuseDatabaseSnapshotAndMergeLiveState() async throws {
+        let reader = CountingHealthReader()
+        let model = IndexHealthViewModel(reader: reader, verifier: HealthyVerifier())
+        model.refresh(liveStates: ["home": ScopeRuntimeState(state: .scanning)])
+        try await eventually { model.snapshot != nil }
+
+        for count in 1...20 {
+            model.refresh(liveStates: [
+                "home": ScopeRuntimeState(
+                    state: .scanning,
+                    progress: IndexProgress(scannedCount: count)
+                )
+            ])
+        }
+
+        let snapshotCount = await reader.snapshotCount()
+        XCTAssertEqual(snapshotCount, 1)
+        XCTAssertEqual(model.snapshot?.scopes.first?.progress.scannedCount, 20)
+    }
+}
+
+private actor CountingHealthReader: IndexHealthReading {
+    private var calls = 0
+
+    func snapshot(liveStates: [String: ScopeRuntimeState]) async throws -> IndexHealthSnapshot {
+        calls += 1
+        return IndexHealthSnapshot(
+            scopes: [
+                IndexScopeHealth(
+                    scopeID: "home",
+                    rootPath: "/Users/test",
+                    volumeType: .internalLocal,
+                    isEnabled: true,
+                    state: .paused,
+                    entryCount: 1,
+                    lastCompletedScanAt: nil,
+                    lastEventAt: nil,
+                    lastEventID: nil,
+                    unresolvedIssueCount: 0,
+                    lastError: nil
+                )
+            ],
+            totalEntryCount: 1,
+            databaseBytes: 1,
+            auxiliaryBytes: 0
+        )
+    }
+
+    func issues(scopeID: String?, unresolvedOnly: Bool, limit: Int) async throws -> [IndexIssueRecord] {
+        []
+    }
+
+    func snapshotCount() -> Int { calls }
 }
 
 private actor DelayedHealthReader: IndexHealthReading {

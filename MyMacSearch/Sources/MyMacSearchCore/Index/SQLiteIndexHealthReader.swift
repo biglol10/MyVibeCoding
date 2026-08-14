@@ -20,13 +20,12 @@ public actor SQLiteIndexHealthReader: IndexHealthReading {
             """
             SELECT
               s.id, s.root_path, s.volume_type, s.is_enabled,
-              COALESCE(entries_by_scope.entry_count, 0),
+              COALESCE(entry_counts.entry_count, 0),
               s.last_completed_scan_at, s.last_event_at, s.last_event_id,
-              COALESCE(issues_by_scope.issue_count, 0), s.last_error
+              COALESCE(issues_by_scope.issue_count, 0), s.last_error,
+              s.last_skipped_count, s.last_permission_denied_count
             FROM scopes s
-            LEFT JOIN (
-              SELECT scope_id, COUNT(*) AS entry_count FROM entries GROUP BY scope_id
-            ) entries_by_scope ON entries_by_scope.scope_id = s.id
+            LEFT JOIN scope_entry_counts entry_counts ON entry_counts.scope_id = s.id
             LEFT JOIN (
               SELECT scope_id, COUNT(*) AS issue_count
               FROM index_issues WHERE resolved_at IS NULL GROUP BY scope_id
@@ -57,6 +56,8 @@ public actor SQLiteIndexHealthReader: IndexHealthReading {
                     lastEventAt: statement.optionalDouble(at: 6).map(Date.init(timeIntervalSince1970:)),
                     lastEventID: statement.optionalInt64(at: 7).map { UInt64(bitPattern: $0) },
                     progress: live?.progress ?? IndexProgress(),
+                    lastSkippedCount: Int(statement.int64(at: 10)),
+                    lastPermissionDeniedCount: Int(statement.int64(at: 11)),
                     unresolvedIssueCount: Int(statement.int64(at: 8)),
                     lastError: live?.message ?? statement.optionalText(at: 9)
                 )

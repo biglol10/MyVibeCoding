@@ -21,6 +21,7 @@ final class SQLiteIndexMigrationTests: XCTestCase {
         XCTAssertEqual(try fixture.integer("SELECT last_event_id FROM scopes WHERE id = 'home'"), 42)
         XCTAssertTrue(try fixture.hasColumn(table: "scopes", name: "last_completed_scan_at"))
         XCTAssertTrue(try fixture.hasTable("index_issues"))
+        XCTAssertEqual(try fixture.integer("SELECT entry_count FROM scope_entry_counts WHERE scope_id = 'home'"), 1)
     }
 
     func testNewerSchemaIsRejectedWithoutDowngrade() throws {

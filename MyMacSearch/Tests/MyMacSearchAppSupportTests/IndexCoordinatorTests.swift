@@ -196,6 +196,86 @@ final class IndexCoordinatorTests: XCTestCase {
         try await eventually { await scanner.count(for: scope.id) == 1 }
         XCTAssertEqual(coordinator.scopeStates[scope.id]?.state, .watching)
     }
+
+    @MainActor
+    func testUnmountDuringScanKeepsLastCompleteGeneration() async throws {
+        let scanner = BlockingScanner()
+        let writer = RecordingIndexWriter()
+        let coordinator = IndexCoordinator(
+            scanner: scanner,
+            writer: writer,
+            metadataClient: CoordinatorMetadataClient(),
+            policy: IndexingPolicy(homePath: "/Users/test", includeHidden: false),
+            watcher: RecordingWatcher()
+        )
+        let scope = IndexScope(id: "external", rootPath: "/Volumes/Work", volumeType: .external)
+        coordinator.start(scopes: [scope])
+        try await eventually { await scanner.isWaiting }
+
+        coordinator.updateAvailability(scopeID: scope.id, availability: .offline)
+        await scanner.release()
+        try await eventually { coordinator.scopeStates[scope.id]?.state == .offline }
+
+        let operations = await writer.operations
+        XCTAssertFalse(operations.contains(where: { $0.hasPrefix("complete:external:") }))
+    }
+
+    @MainActor
+    func testOfflineScopeIsRemovedFromWatcherAndIgnoresQueuedEvents() async throws {
+        let writer = RecordingIndexWriter()
+        let watcher = RecordingWatcher()
+        let coordinator = IndexCoordinator(
+            scanner: CountingScanner(),
+            writer: writer,
+            metadataClient: CoordinatorMetadataClient(),
+            policy: IndexingPolicy(homePath: "/Users/test", includeHidden: false),
+            watcher: watcher
+        )
+        let scope = IndexScope(
+            id: "external",
+            rootPath: "/Volumes/Work",
+            volumeType: .external,
+            completedGeneration: 1,
+            lastEventID: 10
+        )
+        coordinator.start(scopes: [scope])
+        try await eventually { coordinator.status == .watching }
+
+        coordinator.updateAvailability(scopeID: scope.id, availability: .identityMismatch(actualUUID: "other"))
+        watcher.emit([FileEvent(path: "/Volumes/Work/gone.txt", eventID: 11, flags: [.removed])])
+        try await Task.sleep(for: .milliseconds(30))
+
+        XCTAssertEqual(watcher.watchedPaths, [])
+        let deletedOfflinePath = await writer.contains("delete:/Volumes/Work/gone.txt")
+        XCTAssertFalse(deletedOfflinePath)
+        XCTAssertTrue(coordinator.isScopeUnavailable(scope.id))
+    }
+
+    @MainActor
+    func testCancellationInsensitiveOldScanCannotClobberResumedRun() async throws {
+        let scanner = MultiBlockingScanner()
+        let coordinator = IndexCoordinator(
+            scanner: scanner,
+            writer: RecordingIndexWriter(),
+            metadataClient: CoordinatorMetadataClient(),
+            policy: IndexingPolicy(homePath: "/Users/test", includeHidden: false),
+            watcher: RecordingWatcher()
+        )
+        let scope = IndexScope(id: "scope", rootPath: "/scope")
+
+        coordinator.start(scopes: [scope])
+        try await eventually { await scanner.waitingCount == 1 }
+        coordinator.pause()
+        coordinator.start(scopes: [scope])
+        try await eventually { await scanner.waitingCount == 2 }
+
+        await scanner.release(call: 0)
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(coordinator.scopeStates[scope.id]?.state, .scanning)
+
+        await scanner.release(call: 1)
+        try await eventually { coordinator.status == .watching }
+    }
 }
 
 private actor RecordingIndexWriter: IndexWriting {
@@ -269,6 +349,28 @@ private actor BlockingScanner: ScopeScanning {
     }
 }
 
+private actor MultiBlockingScanner: ScopeScanning {
+    private var continuations: [Int: CheckedContinuation<Void, Never>] = [:]
+    private var nextCall = 0
+    var waitingCount: Int { continuations.count }
+
+    func scan(
+        scope: IndexScope,
+        generation: Int64,
+        onBatch: @escaping FileScanner.BatchHandler,
+        onProgress: @escaping FileScanner.ProgressHandler
+    ) async throws -> ScanSummary {
+        let call = nextCall
+        nextCall += 1
+        await withCheckedContinuation { continuations[call] = $0 }
+        return ScanSummary(scannedCount: 0, skippedCount: 0, permissionDeniedCount: 0, issues: [], completed: true)
+    }
+
+    func release(call: Int) {
+        continuations.removeValue(forKey: call)?.resume()
+    }
+}
+
 private actor CountingScanner: ScopeScanning {
     private(set) var scanCount = 0
 
@@ -331,6 +433,7 @@ private actor SelectivePermissionScanner: ScopeScanning {
 private final class RecordingWatcher: FileEventWatching {
     private var handler: (@Sendable ([FileEvent]) -> Void)?
     private(set) var startingEventID: UInt64?
+    private(set) var watchedPaths: [String] = []
 
     func start(
         paths: [String],
@@ -338,11 +441,13 @@ private final class RecordingWatcher: FileEventWatching {
         onEvents: @escaping @Sendable ([FileEvent]) -> Void
     ) throws {
         startingEventID = eventID
+        watchedPaths = paths
         handler = onEvents
     }
 
     func stop() {
         handler = nil
+        watchedPaths = []
     }
 
     func emit(_ events: [FileEvent]) {

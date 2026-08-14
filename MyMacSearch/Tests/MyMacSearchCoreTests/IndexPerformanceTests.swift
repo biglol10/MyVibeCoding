@@ -29,20 +29,32 @@ final class IndexPerformanceTests: XCTestCase {
         let insertionDuration = insertionStart.duration(to: .now)
 
         let query = try SearchQueryParser.parse("name:needle ext:swift path:Downloads")
-        for _ in 0..<5 {
-            _ = try await fixture.reader.search(query: query, limit: 200, after: nil)
+        var sortMetrics: [String] = []
+        for sort in SearchSort.allCases {
+            let request = SearchRequest(query: query, sort: sort)
+            for _ in 0..<3 {
+                _ = try await fixture.reader.search(request: request, limit: 200, after: nil)
+            }
+            var samples: [Double] = []
+            for _ in 0..<10 {
+                let start = ContinuousClock.now
+                let page = try await fixture.reader.search(request: request, limit: 200, after: nil)
+                samples.append(milliseconds(start.duration(to: .now)))
+                XCTAssertEqual(page.entries.count, 100)
+            }
+            samples.sort()
+            let p50 = samples[samples.count / 2]
+            let p95 = samples[Int(Double(samples.count - 1) * 0.95)]
+            sortMetrics.append("\(sort.rawValue)_p50_ms=\(p50) \(sort.rawValue)_p95_ms=\(p95)")
+            XCTAssertLessThanOrEqual(p95, 50, "sort: \(sort)")
         }
 
-        var samples: [Double] = []
-        for _ in 0..<30 {
-            let start = ContinuousClock.now
-            let page = try await fixture.reader.search(query: query, limit: 200, after: nil)
-            samples.append(milliseconds(start.duration(to: .now)))
-            XCTAssertEqual(page.entries.count, 100)
-        }
-        samples.sort()
-        let p50 = samples[samples.count / 2]
-        let p95 = samples[Int(Double(samples.count - 1) * 0.95)]
+        let healthReader = try SQLiteIndexHealthReader(databaseURL: fixture.databaseURL)
+        let healthStart = ContinuousClock.now
+        let health = try await healthReader.snapshot(liveStates: [scope.id: ScopeRuntimeState(state: .watching)])
+        let healthMilliseconds = milliseconds(healthStart.duration(to: .now))
+        XCTAssertEqual(health.totalEntryCount, entryCount)
+        XCTAssertLessThanOrEqual(healthMilliseconds, 250)
         let databaseBytes = (try? FileManager.default.attributesOfItem(
             atPath: fixture.databaseURL.path
         )[.size] as? NSNumber)?.int64Value ?? 0
@@ -50,9 +62,9 @@ final class IndexPerformanceTests: XCTestCase {
         print(
             "MYMACSEARCH_BENCHMARK entries=\(entryCount) "
                 + "insert_seconds=\(seconds(insertionDuration)) "
-                + "warm_p50_ms=\(p50) warm_p95_ms=\(p95) db_bytes=\(databaseBytes)"
+                + sortMetrics.joined(separator: " ")
+                + " health_ms=\(healthMilliseconds) db_bytes=\(databaseBytes)"
         )
-        XCTAssertLessThanOrEqual(p95, 100)
     }
 
     private func milliseconds(_ duration: Duration) -> Double {

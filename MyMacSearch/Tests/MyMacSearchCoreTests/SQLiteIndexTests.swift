@@ -83,6 +83,9 @@ final class SQLiteIndexTests: XCTestCase {
 
         let page = try await fixture.reader.search(query: SearchQuery(), limit: 200, after: nil)
         XCTAssertEqual(Set(page.entries.map(\.path)), ["/Users/test/keep.txt", "/Volumes/Drive/external.txt"])
+        let health = try await SQLiteIndexHealthReader(databaseURL: fixture.databaseURL).snapshot(liveStates: [:])
+        XCTAssertEqual(health.scopes.first { $0.scopeID == home.id }?.entryCount, 1)
+        XCTAssertEqual(health.scopes.first { $0.scopeID == external.id }?.entryCount, 1)
     }
 
     func testDeleteDirectoryRemovesOnlyPathBoundaryDescendants() async throws {
@@ -104,5 +107,7 @@ final class SQLiteIndexTests: XCTestCase {
 
         let page = try await fixture.reader.search(query: SearchQuery(), limit: 200, after: nil)
         XCTAssertEqual(page.entries.map(\.path), ["/scope/Foobar/keep.txt"])
+        let health = try await SQLiteIndexHealthReader(databaseURL: fixture.databaseURL).snapshot(liveStates: [:])
+        XCTAssertEqual(health.totalEntryCount, 1)
     }
 }

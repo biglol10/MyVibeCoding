@@ -39,10 +39,30 @@ public actor SQLiteIndexVerifier: IndexVerifying {
 
         let entries = try scalarInt(connection, sql: "SELECT COUNT(*) FROM entries")
         let ftsEntries = try scalarInt(connection, sql: "SELECT COUNT(*) FROM entries_fts")
+        let trackedEntries = try scalarInt(
+            connection,
+            sql: "SELECT COALESCE(SUM(entry_count), 0) FROM scope_entry_counts"
+        )
         checks.append(IndexVerificationCheck(
             name: "Entry consistency",
-            passed: entries == ftsEntries,
-            detail: "Entries: \(entries), FTS rows: \(ftsEntries)"
+            passed: entries == ftsEntries && entries == trackedEntries,
+            detail: "Entries: \(entries), FTS rows: \(ftsEntries), tracked: \(trackedEntries)"
+        ))
+        let misplacedEntries = try scalarInt(
+            connection,
+            sql: """
+            SELECT COUNT(*)
+            FROM entries e JOIN scopes s ON s.id = e.scope_id
+            WHERE e.path <> s.root_path
+              AND substr(e.path, 1, length(s.root_path) + 1) <> s.root_path || '/'
+            """
+        )
+        checks.append(IndexVerificationCheck(
+            name: "Scope roots",
+            passed: misplacedEntries == 0,
+            detail: misplacedEntries == 0
+                ? "Every entry belongs to its configured root"
+                : "Found \(misplacedEntries) entries outside their configured root"
         ))
         return IndexVerificationResult(startedAt: startedAt, completedAt: Date(), checks: checks)
     }

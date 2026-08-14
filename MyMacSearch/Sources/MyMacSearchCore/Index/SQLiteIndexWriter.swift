@@ -110,6 +110,27 @@ public actor SQLiteIndexWriter {
         _ = try statement.step()
     }
 
+    public func updateScopeScanStatistics(
+        scopeID: String,
+        skippedCount: Int,
+        permissionDeniedCount: Int
+    ) async throws {
+        let connection = try writableConnection()
+        let statement = try connection.prepare(
+            """
+            UPDATE scopes
+            SET last_skipped_count = ?, last_permission_denied_count = ?
+            WHERE id = ?
+            """
+        )
+        try statement.bind([
+            .int64(Int64(max(skippedCount, 0))),
+            .int64(Int64(max(permissionDeniedCount, 0))),
+            .text(scopeID)
+        ])
+        _ = try statement.step()
+    }
+
     public func completeScopeScan(scopeID: String, generation: Int64, completedAt: Date) throws {
         let connection = try writableConnection()
         try connection.transaction {
@@ -204,6 +225,7 @@ public actor SQLiteIndexWriter {
             throw SQLiteIndexError.invalidData("Missing schema version")
         }
         let version = versionStatement.int64(at: 0)
+        let hadScopeEntryCounts = try tableExists("scope_entry_counts", connection: connection)
         guard version <= 2 else {
             throw SQLiteIndexError.invalidData("Index schema version \(version) is newer than this app supports")
         }
@@ -215,6 +237,8 @@ public actor SQLiteIndexWriter {
                     ALTER TABLE scopes ADD COLUMN last_completed_scan_at REAL;
                     ALTER TABLE scopes ADD COLUMN last_event_at REAL;
                     ALTER TABLE scopes ADD COLUMN last_error TEXT;
+                    ALTER TABLE scopes ADD COLUMN last_skipped_count INTEGER NOT NULL DEFAULT 0;
+                    ALTER TABLE scopes ADD COLUMN last_permission_denied_count INTEGER NOT NULL DEFAULT 0;
 
                     CREATE TABLE index_issues (
                       id INTEGER PRIMARY KEY,
@@ -235,6 +259,14 @@ public actor SQLiteIndexWriter {
                     CREATE INDEX idx_entries_modified_sort ON entries(modified_at, id);
                     CREATE INDEX idx_entries_size_sort ON entries(size_bytes, id);
                     CREATE INDEX idx_entries_kind_name_sort ON entries(kind, search_name, id);
+                    CREATE TABLE scope_entry_counts (
+                      scope_id TEXT PRIMARY KEY,
+                      entry_count INTEGER NOT NULL DEFAULT 0 CHECK(entry_count >= 0),
+                      FOREIGN KEY(scope_id) REFERENCES scopes(id) ON DELETE CASCADE
+                    );
+                    INSERT INTO scope_entry_counts(scope_id, entry_count)
+                      SELECT scope_id, COUNT(*) FROM entries GROUP BY scope_id;
+                    \(scopeEntryCountTriggers)
                     PRAGMA user_version = 2;
                     """
                 )
@@ -254,7 +286,9 @@ public actor SQLiteIndexWriter {
               last_event_id INTEGER,
               last_completed_scan_at REAL,
               last_event_at REAL,
-              last_error TEXT
+              last_error TEXT,
+              last_skipped_count INTEGER NOT NULL DEFAULT 0,
+              last_permission_denied_count INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS entries (
@@ -302,6 +336,13 @@ public actor SQLiteIndexWriter {
               VALUES (new.id, new.search_name, new.search_path);
             END;
 
+            CREATE TABLE IF NOT EXISTS scope_entry_counts (
+              scope_id TEXT PRIMARY KEY,
+              entry_count INTEGER NOT NULL DEFAULT 0 CHECK(entry_count >= 0),
+              FOREIGN KEY(scope_id) REFERENCES scopes(id) ON DELETE CASCADE
+            );
+            \(scopeEntryCountTriggers)
+
             CREATE INDEX IF NOT EXISTS idx_entries_scope_generation ON entries(scope_id, scan_generation);
             CREATE INDEX IF NOT EXISTS idx_entries_parent_path ON entries(parent_path);
             CREATE INDEX IF NOT EXISTS idx_entries_extension ON entries(extension);
@@ -331,5 +372,63 @@ public actor SQLiteIndexWriter {
             PRAGMA user_version = 2;
             """
         )
+        if !hadScopeEntryCounts {
+            try connection.execute(
+                """
+                INSERT OR REPLACE INTO scope_entry_counts(scope_id, entry_count)
+                  SELECT scope_id, COUNT(*) FROM entries GROUP BY scope_id;
+                """
+            )
+        }
+        if try !columnExists("last_skipped_count", in: "scopes", connection: connection) {
+            try connection.execute(
+                "ALTER TABLE scopes ADD COLUMN last_skipped_count INTEGER NOT NULL DEFAULT 0"
+            )
+        }
+        if try !columnExists("last_permission_denied_count", in: "scopes", connection: connection) {
+            try connection.execute(
+                "ALTER TABLE scopes ADD COLUMN last_permission_denied_count INTEGER NOT NULL DEFAULT 0"
+            )
+        }
+    }
+
+    private static let scopeEntryCountTriggers = """
+        CREATE TRIGGER IF NOT EXISTS entries_count_ai AFTER INSERT ON entries BEGIN
+          INSERT OR IGNORE INTO scope_entry_counts(scope_id, entry_count) VALUES(new.scope_id, 0);
+          UPDATE scope_entry_counts SET entry_count = entry_count + 1 WHERE scope_id = new.scope_id;
+        END;
+        CREATE TRIGGER IF NOT EXISTS entries_count_ad AFTER DELETE ON entries BEGIN
+          UPDATE scope_entry_counts
+          SET entry_count = MAX(entry_count - 1, 0)
+          WHERE scope_id = old.scope_id;
+        END;
+        CREATE TRIGGER IF NOT EXISTS entries_count_au AFTER UPDATE OF scope_id ON entries
+        WHEN old.scope_id <> new.scope_id BEGIN
+          UPDATE scope_entry_counts
+          SET entry_count = MAX(entry_count - 1, 0)
+          WHERE scope_id = old.scope_id;
+          INSERT OR IGNORE INTO scope_entry_counts(scope_id, entry_count) VALUES(new.scope_id, 0);
+          UPDATE scope_entry_counts SET entry_count = entry_count + 1 WHERE scope_id = new.scope_id;
+        END;
+        """
+
+    private static func tableExists(_ name: String, connection: SQLiteConnection) throws -> Bool {
+        let statement = try connection.prepare(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1"
+        )
+        try statement.bind([.text(name)])
+        return try statement.step() == SQLITE_ROW
+    }
+
+    private static func columnExists(
+        _ column: String,
+        in table: String,
+        connection: SQLiteConnection
+    ) throws -> Bool {
+        let statement = try connection.prepare("PRAGMA table_info(\(table))")
+        while try statement.step() == SQLITE_ROW {
+            if try statement.text(at: 1) == column { return true }
+        }
+        return false
     }
 }
