@@ -25,6 +25,7 @@ public enum ResultActionError: Error, LocalizedError, Equatable, Sendable {
     case myMacFinderNotFound
     case incompatibleMyMacFinder
     case launchFailed(application: String, message: String)
+    case partialFailure(missing: Int, unavailable: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -44,6 +45,8 @@ public enum ResultActionError: Error, LocalizedError, Equatable, Sendable {
             return "The installed MyMacFinder does not support opening a folder from MyMacSearch."
         case .launchFailed(let application, let message):
             return "\(application) could not be opened: \(message)"
+        case .partialFailure(let missing, let unavailable):
+            return "The action completed for available items. \(missing) missing and \(unavailable) unavailable items were skipped."
         }
     }
 }
@@ -52,8 +55,8 @@ public enum ResultActionError: Error, LocalizedError, Equatable, Sendable {
 public protocol ResultActionEnvironment: AnyObject {
     func pathStatus(at url: URL) -> ResultPathStatus
     func open(_ url: URL) -> Bool
-    func reveal(_ url: URL) -> Bool
-    func copyPath(_ path: String) -> Bool
+    func reveal(_ urls: [URL]) -> Bool
+    func copyText(_ text: String) -> Bool
     func applicationURL(bundleIdentifier: String) -> URL?
     func hasCapability(_ key: String, applicationURL: URL) -> Bool
     func launch(_ urls: [URL], withApplicationAt applicationURL: URL) async throws
@@ -90,11 +93,11 @@ public final class ResultActionService {
                 throw ResultActionError.openFailed(url.path)
             }
         case .revealInFinder:
-            guard environment.reveal(url) else {
+            guard environment.reveal([url]) else {
                 throw ResultActionError.revealFailed(url.path)
             }
         case .copyPath:
-            guard environment.copyPath(url.path) else {
+            guard environment.copyText(url.path) else {
                 throw ResultActionError.copyFailed
             }
         case .openInTerminal:
@@ -126,6 +129,48 @@ public final class ResultActionService {
                 applicationURL: applicationURL
             )
         }
+    }
+
+    public func copyPaths(_ entries: [IndexedEntry]) async throws {
+        let resolved = resolve(entries)
+        guard !resolved.urls.isEmpty else {
+            throw ResultActionError.partialFailure(missing: resolved.missing, unavailable: 0)
+        }
+        guard environment.copyText(resolved.urls.map(\.path).joined(separator: "\n")) else {
+            throw ResultActionError.copyFailed
+        }
+        if resolved.missing > 0 {
+            throw ResultActionError.partialFailure(missing: resolved.missing, unavailable: 0)
+        }
+    }
+
+    public func revealInFinder(_ entries: [IndexedEntry]) async throws {
+        let resolved = resolve(entries)
+        let visibleURLs = Array(resolved.urls.prefix(100))
+        guard !visibleURLs.isEmpty else {
+            throw ResultActionError.partialFailure(missing: resolved.missing, unavailable: 0)
+        }
+        guard environment.reveal(visibleURLs) else {
+            throw ResultActionError.revealFailed(visibleURLs[0].path)
+        }
+        if resolved.missing > 0 {
+            throw ResultActionError.partialFailure(missing: resolved.missing, unavailable: 0)
+        }
+    }
+
+    private func resolve(_ entries: [IndexedEntry]) -> (urls: [URL], missing: Int) {
+        var urls: [URL] = []
+        var missing = 0
+        for entry in entries {
+            let url = URL(fileURLWithPath: entry.path).standardizedFileURL
+            if environment.pathStatus(at: url) == .missing {
+                missing += 1
+                onMissingPath(url.path)
+            } else {
+                urls.append(url)
+            }
+        }
+        return (urls, missing)
     }
 
     private func directoryTarget(for url: URL, status: ResultPathStatus) -> URL {
@@ -176,15 +221,15 @@ public final class AppKitResultActionEnvironment: ResultActionEnvironment {
         workspace.open(url)
     }
 
-    public func reveal(_ url: URL) -> Bool {
-        guard fileManager.fileExists(atPath: url.path) else { return false }
-        workspace.activateFileViewerSelecting([url])
+    public func reveal(_ urls: [URL]) -> Bool {
+        guard !urls.isEmpty, urls.allSatisfy({ fileManager.fileExists(atPath: $0.path) }) else { return false }
+        workspace.activateFileViewerSelecting(urls)
         return true
     }
 
-    public func copyPath(_ path: String) -> Bool {
+    public func copyText(_ text: String) -> Bool {
         pasteboard.clearContents()
-        return pasteboard.setString(path, forType: .string)
+        return pasteboard.setString(text, forType: .string)
     }
 
     public func applicationURL(bundleIdentifier: String) -> URL? {

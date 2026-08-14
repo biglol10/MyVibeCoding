@@ -44,6 +44,33 @@ final class SearchWorkflowTests: XCTestCase {
         XCTAssertEqual(model.query, "kind:pdf size:>100MB")
         XCTAssertEqual(model.sort, .sizeLargest)
     }
+
+    @MainActor
+    func testPrimarySelectionTracksNewestAddedAndFallsBackInVisibleOrder() async throws {
+        let model = SearchViewModel(searcher: MultiSelectionSearcher(), debounce: .zero)
+        model.query = "multi"
+        try await eventually { model.rows.count == 3 }
+
+        model.updateSelection([1])
+        model.updateSelection([1, 3])
+        XCTAssertEqual(model.primaryEntryID, 3)
+
+        model.updateSelection([1])
+        XCTAssertEqual(model.primaryEntryID, 1)
+    }
+}
+
+private actor MultiSelectionSearcher: IndexSearching {
+    func search(request: SearchRequest, limit: Int, after cursor: SearchPageCursor?) async throws -> SearchPage {
+        SearchPage(
+            entries: [
+                .workflowFixture(id: 1, name: "one.txt"),
+                .workflowFixture(id: 2, name: "two.txt"),
+                .workflowFixture(id: 3, name: "three.txt")
+            ],
+            nextCursor: nil
+        )
+    }
 }
 
 private actor WorkflowSearcher: IndexSearching {
@@ -59,9 +86,9 @@ private actor WorkflowSearcher: IndexSearching {
 }
 
 private extension IndexedEntry {
-    static func workflowFixture(name: String) -> IndexedEntry {
+    static func workflowFixture(id: Int64 = 1, name: String) -> IndexedEntry {
         IndexedEntry(
-            id: 1,
+            id: id,
             scopeID: "scope",
             path: "/scope/\(name)",
             parentPath: "/scope",

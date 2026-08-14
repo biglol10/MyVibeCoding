@@ -5,10 +5,11 @@ import SwiftUI
 struct SearchResultsTable: View {
     let model: AppModel
     @Bindable var search: SearchViewModel
+    private let supportedSorts = SearchSort.allCases
 
     var body: some View {
         VStack(spacing: 0) {
-            Table(search.rows, selection: $search.selectedEntryID) {
+            Table(search.rows, selection: $search.selectedEntryIDs) {
                 TableColumn("Name") { entry in
                     HStack(spacing: 6) {
                         Image(systemName: symbol(for: entry))
@@ -80,8 +81,12 @@ struct SearchResultsTable: View {
         Button("Open") { model.perform(.open) }
         Button("Quick Look") { model.toggleQuickLook() }
         Divider()
-        Button("Reveal in Finder") { model.perform(.revealInFinder) }
-        Button("Copy Path") { model.perform(.copyPath) }
+        Button(model.selectedEntries.count > 1 ? "Reveal Items in Finder" : "Reveal in Finder") {
+            model.perform(.revealInFinder)
+        }
+        Button(model.selectedEntries.count > 1 ? "Copy Paths" : "Copy Path") {
+            model.perform(.copyPath)
+        }
         Button("Open in Terminal") { model.perform(.openInTerminal) }
         Button("Open in MyMacFinder") { model.perform(.openInMyMacFinder) }
     }

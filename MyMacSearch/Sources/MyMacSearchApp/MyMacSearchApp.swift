@@ -33,9 +33,9 @@ struct MyMacSearchApp: App {
                     .keyboardShortcut(.space, modifiers: [])
                     .disabled(model.selectedEntry == nil)
                 Divider()
-                Button("Reveal in Finder") { model.perform(.revealInFinder) }
+                Button(model.selectedEntries.count > 1 ? "Reveal Items in Finder" : "Reveal in Finder") { model.perform(.revealInFinder) }
                     .disabled(model.selectedEntry == nil)
-                Button("Copy Path") { model.perform(.copyPath) }
+                Button(model.selectedEntries.count > 1 ? "Copy Paths" : "Copy Path") { model.perform(.copyPath) }
                     .keyboardShortcut("c", modifiers: [.command])
                     .disabled(model.selectedEntry == nil)
                 Button("Open in Terminal") { model.perform(.openInTerminal) }

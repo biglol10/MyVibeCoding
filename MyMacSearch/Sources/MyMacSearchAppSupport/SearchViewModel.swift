@@ -22,7 +22,17 @@ public final class SearchViewModel {
         }
     }
     public private(set) var rows: [IndexedEntry] = []
-    public var selectedEntryID: Int64?
+    public var selectedEntryIDs: Set<Int64> = [] {
+        didSet {
+            guard selectedEntryIDs != oldValue else { return }
+            updatePrimarySelection(previous: oldValue)
+        }
+    }
+    public private(set) var primaryEntryID: Int64?
+    public var selectedEntryID: Int64? {
+        get { primaryEntryID }
+        set { updateSelection(newValue.map { [$0] } ?? []) }
+    }
     public private(set) var parserError: SearchQueryParseError?
     public private(set) var searchError: String?
     public private(set) var isSearching = false
@@ -110,6 +120,10 @@ public final class SearchViewModel {
     public func chooseSort(_ sort: SearchSort) {
         self.sort = sort
         onExplicitSortChange(sort)
+    }
+
+    public func updateSelection(_ ids: Set<Int64>) {
+        selectedEntryIDs = ids
     }
 
     public func saveCurrentSearch(name: String) {
@@ -203,16 +217,15 @@ public final class SearchViewModel {
                 let request = SearchRequest(query: parsed.query, sort: requestedSort)
                 let page = try await searcher.search(request: request, limit: pageSize, after: nil)
                 guard let self, self.searchGeneration == generation, !Task.isCancelled else { return }
-                let previousSelection = self.selectedEntryID
+                let previousSelection = self.selectedEntryIDs
                 self.rows = page.entries
                 self.nextCursor = page.nextCursor
                 self.canLoadMore = page.nextCursor != nil
-                if let previousSelection,
-                   page.entries.contains(where: { $0.id == previousSelection }) {
-                    self.selectedEntryID = previousSelection
-                } else {
-                    self.selectedEntryID = page.entries.first?.id
-                }
+                let visibleIDs = Set(page.entries.map(\.id))
+                let retained = previousSelection.intersection(visibleIDs)
+                self.selectedEntryIDs = retained.isEmpty
+                    ? Set(page.entries.first.map { [$0.id] } ?? [])
+                    : retained
                 self.searchError = nil
                 self.isSearching = false
                 self.searchTask = nil
@@ -257,6 +270,17 @@ public final class SearchViewModel {
             reloadLibrary()
         } catch {
             libraryError = error.localizedDescription
+        }
+    }
+
+    private func updatePrimarySelection(previous: Set<Int64>) {
+        let added = selectedEntryIDs.subtracting(previous)
+        if let newlyAdded = rows.first(where: { added.contains($0.id) }) {
+            primaryEntryID = newlyAdded.id
+        } else if let primaryEntryID, selectedEntryIDs.contains(primaryEntryID) {
+            return
+        } else {
+            primaryEntryID = rows.first(where: { selectedEntryIDs.contains($0.id) })?.id
         }
     }
 }

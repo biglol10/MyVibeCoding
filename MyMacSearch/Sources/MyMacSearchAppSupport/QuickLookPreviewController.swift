@@ -3,7 +3,8 @@ import Foundation
 
 @MainActor
 public final class QuickLookPreviewController: NSObject, @preconcurrency QLPreviewPanelDataSource {
-    public private(set) var previewURL: URL?
+    public private(set) var previewURLs: [URL] = []
+    public private(set) var selectedPreviewIndex = 0
     private var generation: UInt64 = 0
 
     public override init() {
@@ -12,8 +13,14 @@ public final class QuickLookPreviewController: NSObject, @preconcurrency QLPrevi
 
     @discardableResult
     public func updateSelection(_ url: URL?) -> UInt64 {
+        updateSelection(url.map { [$0] } ?? [], selectedIndex: 0)
+    }
+
+    @discardableResult
+    public func updateSelection(_ urls: [URL], selectedIndex: Int = 0) -> UInt64 {
         generation &+= 1
-        previewURL = url?.standardizedFileURL
+        previewURLs = urls.map(\.standardizedFileURL)
+        self.selectedPreviewIndex = previewURLs.indices.contains(selectedIndex) ? selectedIndex : 0
         if QLPreviewPanel.sharedPreviewPanelExists(),
            let panel = QLPreviewPanel.shared(), panel.isVisible {
             panel.reloadData()
@@ -23,20 +30,22 @@ public final class QuickLookPreviewController: NSObject, @preconcurrency QLPrevi
 
     public func clearSelection(ifGeneration expectedGeneration: UInt64) {
         guard generation == expectedGeneration else { return }
-        previewURL = nil
+        previewURLs = []
+        selectedPreviewIndex = 0
         if QLPreviewPanel.sharedPreviewPanelExists() {
             QLPreviewPanel.shared()?.reloadData()
         }
     }
 
     public func togglePanel() {
-        guard previewURL != nil, let panel = QLPreviewPanel.shared() else { return }
+        guard !previewURLs.isEmpty, let panel = QLPreviewPanel.shared() else { return }
         if panel.isVisible {
             panel.orderOut(nil)
             return
         }
         panel.dataSource = self
         panel.reloadData()
+        panel.currentPreviewItemIndex = selectedPreviewIndex
         panel.makeKeyAndOrderFront(nil)
     }
 
@@ -46,14 +55,14 @@ public final class QuickLookPreviewController: NSObject, @preconcurrency QLPrevi
     }
 
     public func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
-        previewURL == nil ? 0 : 1
+        previewURLs.count
     }
 
     public func previewPanel(
         _ panel: QLPreviewPanel!,
         previewItemAt index: Int
     ) -> (any QLPreviewItem)! {
-        guard index == 0, let previewURL else { return nil }
-        return previewURL as NSURL
+        guard previewURLs.indices.contains(index) else { return nil }
+        return previewURLs[index] as NSURL
     }
 }

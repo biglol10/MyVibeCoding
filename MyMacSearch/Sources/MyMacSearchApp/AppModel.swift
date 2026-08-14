@@ -50,10 +50,15 @@ final class AppModel {
     }
 
     var selectedEntry: IndexedEntry? {
-        guard let searchViewModel, let selectedID = searchViewModel.selectedEntryID else {
+        guard let searchViewModel, let selectedID = searchViewModel.primaryEntryID else {
             return nil
         }
         return searchViewModel.rows.first { $0.id == selectedID }
+    }
+
+    var selectedEntries: [IndexedEntry] {
+        guard let searchViewModel else { return [] }
+        return searchViewModel.rows.filter { searchViewModel.selectedEntryIDs.contains($0.id) }
     }
 
     func confirmOnboarding() {
@@ -114,10 +119,18 @@ final class AppModel {
 
     func perform(_ action: ResultAction) {
         guard let entry = selectedEntry, let actionService else { return }
+        let entries = selectedEntries
         actionError = nil
         Task {
             do {
-                try await actionService.perform(action, entry: entry)
+                switch action {
+                case .copyPath where entries.count > 1:
+                    try await actionService.copyPaths(entries)
+                case .revealInFinder where entries.count > 1:
+                    try await actionService.revealInFinder(entries)
+                default:
+                    try await actionService.perform(action, entry: entry)
+                }
             } catch {
                 actionError = error.localizedDescription
             }
@@ -125,14 +138,22 @@ final class AppModel {
     }
 
     func toggleQuickLook() {
-        guard let entry = selectedEntry else { return }
-        let url = URL(fileURLWithPath: entry.path)
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            coordinator?.removeMissingPath(entry.path)
-            actionError = ResultActionError.missingPath(entry.path).localizedDescription
+        let entries = selectedEntries
+        guard !entries.isEmpty else { return }
+        var validEntries: [IndexedEntry] = []
+        for entry in entries {
+            if FileManager.default.fileExists(atPath: entry.path) {
+                validEntries.append(entry)
+            } else {
+                coordinator?.removeMissingPath(entry.path)
+            }
+        }
+        guard !validEntries.isEmpty else {
+            actionError = "The selected paths are no longer available."
             return
         }
-        quickLook.updateSelection(url)
+        let selectedIndex = validEntries.firstIndex { $0.id == searchViewModel?.primaryEntryID } ?? 0
+        quickLook.updateSelection(validEntries.map { URL(fileURLWithPath: $0.path) }, selectedIndex: selectedIndex)
         quickLook.togglePanel()
     }
 

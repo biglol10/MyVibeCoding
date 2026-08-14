@@ -11,7 +11,7 @@ final class QuickLookPreviewControllerTests: XCTestCase {
 
         controller.clearSelection(ifGeneration: oldGeneration)
 
-        XCTAssertEqual(controller.previewURL?.path, "/tmp/new.txt")
+        XCTAssertEqual(controller.previewURLs.map(\.path), ["/tmp/new.txt"])
     }
 
     @MainActor
@@ -21,6 +21,20 @@ final class QuickLookPreviewControllerTests: XCTestCase {
 
         controller.clearSelection(ifGeneration: generation)
 
-        XCTAssertNil(controller.previewURL)
+        XCTAssertTrue(controller.previewURLs.isEmpty)
+    }
+
+    @MainActor
+    func testMultiplePreviewURLsPreserveVisibleOrderAndSelectionIndex() {
+        let controller = QuickLookPreviewController()
+
+        controller.updateSelection([
+            URL(fileURLWithPath: "/tmp/one.txt"),
+            URL(fileURLWithPath: "/tmp/two.txt")
+        ], selectedIndex: 1)
+
+        XCTAssertEqual(controller.previewURLs.map(\.path), ["/tmp/one.txt", "/tmp/two.txt"])
+        XCTAssertEqual(controller.selectedPreviewIndex, 1)
+        XCTAssertEqual(controller.numberOfPreviewItems(in: nil), 2)
     }
 }
