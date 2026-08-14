@@ -148,13 +148,52 @@ public actor SQLiteIndexWriter {
             path: databaseURL.path,
             flags: SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
         )
+        try connection.execute("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;")
+        let versionStatement = try connection.prepare("PRAGMA user_version")
+        guard try versionStatement.step() == SQLITE_ROW else {
+            throw SQLiteIndexError.invalidData("Missing schema version")
+        }
+        let version = versionStatement.int64(at: 0)
+        guard version <= 2 else {
+            throw SQLiteIndexError.invalidData("Index schema version \(version) is newer than this app supports")
+        }
+
+        if version == 1 {
+            try connection.transaction {
+                try connection.execute(
+                    """
+                    ALTER TABLE scopes ADD COLUMN last_completed_scan_at REAL;
+                    ALTER TABLE scopes ADD COLUMN last_event_at REAL;
+                    ALTER TABLE scopes ADD COLUMN last_error TEXT;
+
+                    CREATE TABLE index_issues (
+                      id INTEGER PRIMARY KEY,
+                      scope_id TEXT NOT NULL,
+                      path TEXT NOT NULL,
+                      category TEXT NOT NULL,
+                      message TEXT NOT NULL,
+                      first_seen_at REAL NOT NULL,
+                      last_seen_at REAL NOT NULL,
+                      occurrence_count INTEGER NOT NULL DEFAULT 1,
+                      resolved_at REAL,
+                      UNIQUE(scope_id, path, category)
+                    );
+                    CREATE INDEX idx_index_issues_unresolved
+                      ON index_issues(scope_id, resolved_at, last_seen_at DESC);
+                    CREATE INDEX idx_entries_name_sort ON entries(search_name, id);
+                    CREATE INDEX idx_entries_path_sort ON entries(search_path, id);
+                    CREATE INDEX idx_entries_modified_sort ON entries(modified_at, id);
+                    CREATE INDEX idx_entries_size_sort ON entries(size_bytes, id);
+                    CREATE INDEX idx_entries_kind_name_sort ON entries(kind, search_name, id);
+                    PRAGMA user_version = 2;
+                    """
+                )
+            }
+            return
+        }
+
         try connection.execute(
             """
-            PRAGMA journal_mode = WAL;
-            PRAGMA synchronous = NORMAL;
-            PRAGMA foreign_keys = ON;
-            PRAGMA user_version = 1;
-
             CREATE TABLE IF NOT EXISTS scopes (
               id TEXT PRIMARY KEY,
               root_path TEXT NOT NULL,
@@ -162,7 +201,10 @@ public actor SQLiteIndexWriter {
               is_enabled INTEGER NOT NULL,
               active_generation INTEGER,
               completed_generation INTEGER NOT NULL DEFAULT 0,
-              last_event_id INTEGER
+              last_event_id INTEGER,
+              last_completed_scan_at REAL,
+              last_event_at REAL,
+              last_error TEXT
             );
 
             CREATE TABLE IF NOT EXISTS entries (
@@ -216,6 +258,27 @@ public actor SQLiteIndexWriter {
             CREATE INDEX IF NOT EXISTS idx_entries_kind ON entries(kind);
             CREATE INDEX IF NOT EXISTS idx_entries_modified_at ON entries(modified_at DESC);
             CREATE INDEX IF NOT EXISTS idx_entries_search_name ON entries(search_name);
+            CREATE INDEX IF NOT EXISTS idx_entries_name_sort ON entries(search_name, id);
+            CREATE INDEX IF NOT EXISTS idx_entries_path_sort ON entries(search_path, id);
+            CREATE INDEX IF NOT EXISTS idx_entries_modified_sort ON entries(modified_at, id);
+            CREATE INDEX IF NOT EXISTS idx_entries_size_sort ON entries(size_bytes, id);
+            CREATE INDEX IF NOT EXISTS idx_entries_kind_name_sort ON entries(kind, search_name, id);
+
+            CREATE TABLE IF NOT EXISTS index_issues (
+              id INTEGER PRIMARY KEY,
+              scope_id TEXT NOT NULL,
+              path TEXT NOT NULL,
+              category TEXT NOT NULL,
+              message TEXT NOT NULL,
+              first_seen_at REAL NOT NULL,
+              last_seen_at REAL NOT NULL,
+              occurrence_count INTEGER NOT NULL DEFAULT 1,
+              resolved_at REAL,
+              UNIQUE(scope_id, path, category)
+            );
+            CREATE INDEX IF NOT EXISTS idx_index_issues_unresolved
+              ON index_issues(scope_id, resolved_at, last_seen_at DESC);
+            PRAGMA user_version = 2;
             """
         )
     }
