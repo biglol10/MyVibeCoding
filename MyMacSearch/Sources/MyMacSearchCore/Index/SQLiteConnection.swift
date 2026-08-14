@@ -174,4 +174,14 @@ final class SQLiteStatement {
         guard sqlite3_column_type(handle, index) != SQLITE_NULL else { return nil }
         return sqlite3_column_int64(handle, index)
     }
+
+    func optionalDouble(at index: Int32) -> Double? {
+        guard sqlite3_column_type(handle, index) != SQLITE_NULL else { return nil }
+        return sqlite3_column_double(handle, index)
+    }
+
+    func optionalText(at index: Int32) -> String? {
+        guard let pointer = sqlite3_column_text(handle, index) else { return nil }
+        return String(cString: pointer)
+    }
 }

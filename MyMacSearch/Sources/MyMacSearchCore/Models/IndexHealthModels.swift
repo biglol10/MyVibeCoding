@@ -130,3 +130,29 @@ public struct IndexHealthSnapshot: Equatable, Sendable {
         self.capturedAt = capturedAt
     }
 }
+
+public struct IndexVerificationCheck: Equatable, Sendable {
+    public let name: String
+    public let passed: Bool
+    public let detail: String
+
+    public init(name: String, passed: Bool, detail: String) {
+        self.name = name
+        self.passed = passed
+        self.detail = detail
+    }
+}
+
+public struct IndexVerificationResult: Equatable, Sendable {
+    public let startedAt: Date
+    public let completedAt: Date
+    public let checks: [IndexVerificationCheck]
+
+    public init(startedAt: Date, completedAt: Date, checks: [IndexVerificationCheck]) {
+        self.startedAt = startedAt
+        self.completedAt = completedAt
+        self.checks = checks
+    }
+
+    public var isHealthy: Bool { checks.allSatisfy(\.passed) }
+}
