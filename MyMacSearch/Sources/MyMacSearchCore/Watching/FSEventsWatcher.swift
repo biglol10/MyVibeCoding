@@ -107,6 +107,7 @@ public final class FSEventsWatcher: FileEventWatching {
     }
 
     public func stop() {
+        callbackBox?.deactivate()
         guard let stream else {
             callbackBox = nil
             return
@@ -163,6 +164,7 @@ public final class FSEventsWatcher: FileEventWatching {
         _, contextInfo, eventCount, eventPaths, eventFlags, eventIDs in
         guard let contextInfo else { return }
         let box = Unmanaged<CallbackBox>.fromOpaque(contextInfo).takeUnretainedValue()
+        guard box.isActive else { return }
         let paths = unsafeBitCast(eventPaths, to: CFArray.self) as? [String] ?? []
         var events: [FileEvent] = []
         events.reserveCapacity(eventCount)
@@ -182,9 +184,23 @@ public final class FSEventsWatcher: FileEventWatching {
 
     private final class CallbackBox: @unchecked Sendable {
         let onEvents: @Sendable ([FileEvent]) -> Void
+        private let lock = NSLock()
+        private var active = true
 
         init(onEvents: @escaping @Sendable ([FileEvent]) -> Void) {
             self.onEvents = onEvents
+        }
+
+        var isActive: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return active
+        }
+
+        func deactivate() {
+            lock.lock()
+            active = false
+            lock.unlock()
         }
     }
 }

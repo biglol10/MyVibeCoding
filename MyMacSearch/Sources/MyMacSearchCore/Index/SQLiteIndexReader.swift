@@ -70,6 +70,37 @@ public actor SQLiteIndexReader {
         return SearchPage(entries: entries, nextCursor: nextCursor)
     }
 
+    public nonisolated static func loadScopes(at databaseURL: URL) throws -> [IndexScope] {
+        let connection = try SQLiteConnection(
+            path: databaseURL.path,
+            flags: SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
+        )
+        let statement = try connection.prepare(
+            """
+            SELECT id, root_path, volume_type, is_enabled, completed_generation, last_event_id
+            FROM scopes
+            ORDER BY root_path ASC
+            """
+        )
+        var scopes: [IndexScope] = []
+        while try statement.step() == SQLITE_ROW {
+            guard let volumeType = IndexedVolumeType(rawValue: try statement.text(at: 2)) else {
+                throw SQLiteIndexError.invalidData("Unknown volume type in scope row")
+            }
+            scopes.append(
+                IndexScope(
+                    id: try statement.text(at: 0),
+                    rootPath: try statement.text(at: 1),
+                    volumeType: volumeType,
+                    isEnabled: statement.int64(at: 3) == 1,
+                    completedGeneration: statement.int64(at: 4),
+                    lastEventID: statement.optionalInt64(at: 5).map { UInt64(bitPattern: $0) }
+                )
+            )
+        }
+        return scopes
+    }
+
     private static func buildSearch(
         query: SearchQuery,
         cursor: SearchCursor?,

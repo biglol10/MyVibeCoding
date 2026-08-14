@@ -7,7 +7,8 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "MyMacSearchCore", targets: ["MyMacSearchCore"]),
-        .library(name: "MyMacSearchAppSupport", targets: ["MyMacSearchAppSupport"])
+        .library(name: "MyMacSearchAppSupport", targets: ["MyMacSearchAppSupport"]),
+        .executable(name: "MyMacSearchApp", targets: ["MyMacSearchApp"])
     ],
     targets: [
         .target(
@@ -17,6 +18,11 @@ let package = Package(
         .target(
             name: "MyMacSearchAppSupport",
             dependencies: ["MyMacSearchCore"]
+        ),
+        .executableTarget(
+            name: "MyMacSearchApp",
+            dependencies: ["MyMacSearchCore", "MyMacSearchAppSupport"],
+            exclude: ["Resources"]
         ),
         .testTarget(
             name: "MyMacSearchCoreTests",

@@ -2,6 +2,26 @@ import XCTest
 @testable import MyMacSearchCore
 
 final class SQLiteIndexTests: XCTestCase {
+    func testLoadsPersistedScopeGenerationAndEventCheckpoint() async throws {
+        let fixture = try TemporaryIndexFixture()
+        defer { fixture.remove() }
+        let scope = IndexScope(id: "home", rootPath: "/Users/test")
+        try await fixture.writer.beginScopeScan(scope, generation: 7)
+        try await fixture.writer.completeScopeScan(scopeID: scope.id, generation: 7)
+        try await fixture.writer.updateEventCheckpoint(scopeID: scope.id, eventID: 42)
+
+        let scopes = try SQLiteIndexReader.loadScopes(at: fixture.databaseURL)
+
+        XCTAssertEqual(
+            scopes,
+            [IndexScope(
+                id: "home",
+                rootPath: "/Users/test",
+                completedGeneration: 7,
+                lastEventID: 42
+            )]
+        )
+    }
     func testUpsertUpdatesFTSAndDeleteRemovesFTSRow() async throws {
         let fixture = try TemporaryIndexFixture()
         defer { fixture.remove() }

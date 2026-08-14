@@ -68,6 +68,58 @@ final class IndexCoordinatorTests: XCTestCase {
         let finalScanCount = await scanner.scanCount
         XCTAssertEqual(finalScanCount, 2)
     }
+
+    @MainActor
+    func testPersistedCheckpointStartsWatchingWithoutRepeatingFullScan() async throws {
+        let scanner = CountingScanner()
+        let watcher = RecordingWatcher()
+        let coordinator = IndexCoordinator(
+            scanner: scanner,
+            writer: RecordingIndexWriter(),
+            metadataClient: CoordinatorMetadataClient(),
+            policy: IndexingPolicy(homePath: "/Users/test", includeHidden: false),
+            watcher: watcher
+        )
+
+        coordinator.start(scopes: [
+            IndexScope(
+                id: "scope",
+                rootPath: "/scope",
+                completedGeneration: 9,
+                lastEventID: 77
+            )
+        ])
+
+        try await eventually { coordinator.status == .watching }
+        let scanCount = await scanner.scanCount
+        XCTAssertEqual(scanCount, 0)
+        XCTAssertEqual(watcher.startingEventID, 77)
+    }
+
+    @MainActor
+    func testEventBufferOverflowFallsBackToFullReconciliation() async throws {
+        let scanner = CountingScanner()
+        let watcher = RecordingWatcher()
+        let coordinator = IndexCoordinator(
+            scanner: scanner,
+            writer: RecordingIndexWriter(),
+            metadataClient: CoordinatorMetadataClient(),
+            policy: IndexingPolicy(homePath: "/Users/test", includeHidden: false),
+            watcher: watcher,
+            maxBufferedEvents: 1
+        )
+        coordinator.start(scopes: [IndexScope(id: "scope", rootPath: "/scope")])
+        try await eventually { coordinator.status == .watching }
+
+        watcher.emit([
+            FileEvent(path: "/scope/a", eventID: 80, flags: [.modified]),
+            FileEvent(path: "/scope/b", eventID: 81, flags: [.modified])
+        ])
+
+        try await eventually { await scanner.scanCount == 2 }
+        let finalScanCount = await scanner.scanCountValue()
+        XCTAssertEqual(finalScanCount, 2)
+    }
 }
 
 private actor RecordingIndexWriter: IndexWriting {
@@ -145,17 +197,21 @@ private actor CountingScanner: ScopeScanning {
             completed: true
         )
     }
+
+    func scanCountValue() -> Int { scanCount }
 }
 
 @MainActor
 private final class RecordingWatcher: FileEventWatching {
     private var handler: (@Sendable ([FileEvent]) -> Void)?
+    private(set) var startingEventID: UInt64?
 
     func start(
         paths: [String],
         since eventID: UInt64?,
         onEvents: @escaping @Sendable ([FileEvent]) -> Void
     ) throws {
+        startingEventID = eventID
         handler = onEvents
     }
 

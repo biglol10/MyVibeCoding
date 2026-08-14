@@ -1,3 +1,4 @@
+import CoreServices
 import Foundation
 import MyMacSearchCore
 import Observation
@@ -15,6 +16,8 @@ public final class IndexCoordinator {
     private let policy: IndexingPolicy
     private let watcher: any FileEventWatching
     private let generationProvider: @MainActor () -> Int64
+    private let currentEventIDProvider: @MainActor () -> UInt64
+    private let maxBufferedEvents: Int
 
     private var scopesByID: [String: IndexScope] = [:]
     private var scanTask: Task<Void, Never>?
@@ -23,6 +26,7 @@ public final class IndexCoordinator {
     private var isPaused = true
     private var lastGeneration = Int64.min
     private var completedGenerationByScope: [String: Int64] = [:]
+    private var watcherBaselineEventID: UInt64?
 
     public init(
         scanner: any ScopeScanning,
@@ -32,7 +36,11 @@ public final class IndexCoordinator {
         watcher: any FileEventWatching,
         generationProvider: @escaping @MainActor () -> Int64 = {
             Int64(Date().timeIntervalSince1970 * 1_000)
-        }
+        },
+        currentEventIDProvider: @escaping @MainActor () -> UInt64 = {
+            UInt64(FSEventsGetCurrentEventId())
+        },
+        maxBufferedEvents: Int = 50_000
     ) {
         self.scanner = scanner
         self.writer = writer
@@ -40,6 +48,8 @@ public final class IndexCoordinator {
         self.policy = policy
         self.watcher = watcher
         self.generationProvider = generationProvider
+        self.currentEventIDProvider = currentEventIDProvider
+        self.maxBufferedEvents = max(1, maxBufferedEvents)
     }
 
     deinit {
@@ -77,9 +87,19 @@ public final class IndexCoordinator {
                     }
                 }
             )
+            watcherBaselineEventID = currentEventIDProvider()
         } catch {
             status = .error(message: error.localizedDescription)
             isPaused = true
+            return
+        }
+
+        let canResumeFromCheckpoint = enabledScopes.allSatisfy {
+            $0.completedGeneration > 0 && $0.lastEventID != nil
+        }
+        if canResumeFromCheckpoint {
+            status = .watching
+            startEventDrainIfNeeded()
             return
         }
 
@@ -104,9 +124,34 @@ public final class IndexCoordinator {
         status = .paused
     }
 
+    public func removeMissingPath(_ path: String) {
+        Task { [weak self, writer] in
+            do {
+                try await writer.delete(path: path)
+            } catch {
+                guard let self else { return }
+                self.status = .error(message: error.localizedDescription)
+            }
+        }
+    }
+
     private func receive(_ events: [FileEvent]) {
         guard !isPaused else { return }
-        pendingEvents.append(contentsOf: events)
+        if pendingEvents.count + events.count > maxBufferedEvents {
+            let latestEventID = max(
+                pendingEvents.map(\.eventID).max() ?? 0,
+                events.map(\.eventID).max() ?? 0
+            )
+            pendingEvents = scopesByID.values.map {
+                FileEvent(
+                    path: $0.rootPath,
+                    eventID: latestEventID,
+                    flags: [.userDropped, .mustScanSubDirectories]
+                )
+            }
+        } else {
+            pendingEvents.append(contentsOf: events)
+        }
         if status == .watching {
             startEventDrainIfNeeded()
         }
@@ -147,6 +192,12 @@ public final class IndexCoordinator {
                 issues.append(contentsOf: summary.issues)
                 try await writer.completeScopeScan(scopeID: scope.id, generation: generation)
                 completedGenerationByScope[scope.id] = generation
+                if let watcherBaselineEventID {
+                    try await writer.updateEventCheckpoint(
+                        scopeID: scope.id,
+                        eventID: watcherBaselineEventID
+                    )
+                }
             }
             if !isPaused {
                 status = .watching
