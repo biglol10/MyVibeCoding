@@ -186,7 +186,16 @@ final class AppModel {
                 watcher: FSEventsWatcher()
             )
             self.coordinator = coordinator
-            let searchViewModel = SearchViewModel(searcher: reader)
+            let searchViewModel = SearchViewModel(
+                searcher: reader,
+                libraryStore: SearchLibraryStore(directoryURL: applicationSupportURL),
+                initialSort: settings.preferredSort ?? .modifiedNewest,
+                onExplicitSortChange: { [weak self] sort in
+                    guard let self else { return }
+                    self.settings.preferredSort = sort
+                    self.persistSettings()
+                }
+            )
             self.searchViewModel = searchViewModel
             self.indexHealthViewModel = healthViewModel
             actionService = ResultActionService { [weak coordinator] path in

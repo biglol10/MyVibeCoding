@@ -28,8 +28,14 @@ public final class SearchViewModel {
     public private(set) var isSearching = false
     public private(set) var isLoadingMore = false
     public private(set) var canLoadMore = false
+    public private(set) var tokens: [SearchQueryToken] = []
+    public private(set) var recentSearches: [RecentSearch] = []
+    public private(set) var savedSearches: [SavedSearch] = []
+    public private(set) var libraryError: String?
 
     private let searcher: any IndexSearching
+    private let libraryStore: (any SearchLibraryStoring)?
+    private let onExplicitSortChange: @MainActor (SearchSort) -> Void
     private let debounce: Duration
     private let pageSize: Int
     private var parsedQuery = SearchQuery()
@@ -40,12 +46,19 @@ public final class SearchViewModel {
 
     public init(
         searcher: any IndexSearching,
+        libraryStore: (any SearchLibraryStoring)? = nil,
+        initialSort: SearchSort = .modifiedNewest,
+        onExplicitSortChange: @escaping @MainActor (SearchSort) -> Void = { _ in },
         debounce: Duration = .milliseconds(60),
         pageSize: Int = 200
     ) {
         self.searcher = searcher
+        self.libraryStore = libraryStore
+        self.sort = initialSort
+        self.onExplicitSortChange = onExplicitSortChange
         self.debounce = debounce
         self.pageSize = min(max(pageSize, 1), 500)
+        reloadLibrary()
     }
 
     deinit {
@@ -94,6 +107,65 @@ public final class SearchViewModel {
         }
     }
 
+    public func chooseSort(_ sort: SearchSort) {
+        self.sort = sort
+        onExplicitSortChange(sort)
+    }
+
+    public func saveCurrentSearch(name: String) {
+        guard let libraryStore else { return }
+        do {
+            _ = try SearchQueryParser.parse(query)
+            guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw SearchLibraryError.invalidQuery
+            }
+            _ = try libraryStore.save(name: name, query: query, sort: sort, at: Date())
+            reloadLibrary()
+        } catch {
+            libraryError = error.localizedDescription
+        }
+    }
+
+    public func renameSavedSearch(id: UUID, name: String) {
+        mutateLibrary { try $0.rename(id: id, name: name) }
+    }
+
+    public func replaceSavedSearch(id: UUID) {
+        mutateLibrary { try $0.replace(id: id, query: query, sort: sort, at: Date()) }
+    }
+
+    public func removeSavedSearch(id: UUID) {
+        mutateLibrary { try $0.remove(id: id) }
+    }
+
+    public func moveSavedSearch(fromOffsets: IndexSet, toOffset: Int) {
+        mutateLibrary { try $0.move(fromOffsets: fromOffsets, toOffset: toOffset) }
+    }
+
+    public func activateSavedSearch(_ id: UUID) {
+        guard let saved = savedSearches.first(where: { $0.id == id }) else { return }
+        sort = saved.sort
+        query = saved.query
+    }
+
+    public func activateRecentSearch(_ recent: RecentSearch) {
+        sort = recent.sort
+        query = recent.query
+    }
+
+    public func clearRecentSearches() {
+        mutateLibrary { try $0.clearRecent() }
+    }
+
+    public func removeToken(id: Int) {
+        guard let token = tokens.first(where: { $0.id == id }) else { return }
+        var characters = Array(query)
+        guard token.characterRange.lowerBound >= 0,
+              token.characterRange.upperBound <= characters.count else { return }
+        characters.removeSubrange(token.characterRange)
+        query = SearchLibraryStore.normalize(String(characters))
+    }
+
     private func scheduleSearch() {
         searchGeneration &+= 1
         let generation = searchGeneration
@@ -102,11 +174,12 @@ public final class SearchViewModel {
         loadMoreTask = nil
         isLoadingMore = false
 
-        let parsed: SearchQuery
+        let parsed: ParsedSearchQuery
         do {
-            parsed = try SearchQueryParser.parse(query)
+            parsed = try SearchQueryParser.parseDetailed(query)
         } catch let error as SearchQueryParseError {
             parserError = error
+            tokens = []
             isSearching = false
             canLoadMore = false
             nextCursor = nil
@@ -118,7 +191,8 @@ public final class SearchViewModel {
         }
 
         parserError = nil
-        parsedQuery = parsed
+        tokens = parsed.tokens
+        parsedQuery = parsed.query
         let requestedSort = sort
         isSearching = true
         searchTask = Task { [weak self, searcher, debounce, pageSize] in
@@ -126,7 +200,7 @@ public final class SearchViewModel {
                 if debounce > .zero {
                     try await Task.sleep(for: debounce)
                 }
-                let request = SearchRequest(query: parsed, sort: requestedSort)
+                let request = SearchRequest(query: parsed.query, sort: requestedSort)
                 let page = try await searcher.search(request: request, limit: pageSize, after: nil)
                 guard let self, self.searchGeneration == generation, !Task.isCancelled else { return }
                 let previousSelection = self.selectedEntryID
@@ -142,6 +216,15 @@ public final class SearchViewModel {
                 self.searchError = nil
                 self.isSearching = false
                 self.searchTask = nil
+                if !self.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   let libraryStore = self.libraryStore {
+                    do {
+                        try libraryStore.recordRecent(query: self.query, sort: requestedSort, usedAt: Date())
+                        self.reloadLibrary()
+                    } catch {
+                        self.libraryError = error.localizedDescription
+                    }
+                }
             } catch is CancellationError {
                 guard let self, self.searchGeneration == generation else { return }
                 self.isSearching = false
@@ -152,6 +235,28 @@ public final class SearchViewModel {
                 self.isSearching = false
                 self.searchTask = nil
             }
+        }
+    }
+
+    private func reloadLibrary() {
+        guard let libraryStore else { return }
+        do {
+            let library = try libraryStore.load()
+            recentSearches = library.recent
+            savedSearches = library.saved
+            libraryError = nil
+        } catch {
+            libraryError = error.localizedDescription
+        }
+    }
+
+    private func mutateLibrary(_ mutation: (any SearchLibraryStoring) throws -> Void) {
+        guard let libraryStore else { return }
+        do {
+            try mutation(libraryStore)
+            reloadLibrary()
+        } catch {
+            libraryError = error.localizedDescription
         }
     }
 }

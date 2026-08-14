@@ -53,6 +53,7 @@ public struct SearchSettings: Codable, Equatable, Sendable {
     public var networkVolumesEnabled: Bool
     public var onboardingConfirmed: Bool
     public var globalShortcut: GlobalShortcutSetting
+    public var preferredSort: SearchSort?
 
     public init(
         schemaVersion: Int = currentSchemaVersion,
@@ -62,7 +63,8 @@ public struct SearchSettings: Codable, Equatable, Sendable {
         externalVolumesEnabled: Bool = false,
         networkVolumesEnabled: Bool = false,
         onboardingConfirmed: Bool = false,
-        globalShortcut: GlobalShortcutSetting = GlobalShortcutSetting()
+        globalShortcut: GlobalShortcutSetting = GlobalShortcutSetting(),
+        preferredSort: SearchSort? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.scopes = scopes
@@ -72,6 +74,7 @@ public struct SearchSettings: Codable, Equatable, Sendable {
         self.networkVolumesEnabled = networkVolumesEnabled
         self.onboardingConfirmed = onboardingConfirmed
         self.globalShortcut = globalShortcut
+        self.preferredSort = preferredSort
     }
 
     public static func recommended(
