@@ -9,6 +9,7 @@ public final class IndexCoordinator {
     public private(set) var status: IndexStatus = .paused
     public private(set) var progress = IndexProgress()
     public private(set) var issues: [ScanIssue] = []
+    public private(set) var scopeStates: [String: ScopeRuntimeState] = [:]
 
     private let scanner: any ScopeScanning
     private let writer: any IndexWriting
@@ -27,6 +28,8 @@ public final class IndexCoordinator {
     private var lastGeneration = Int64.min
     private var completedGenerationByScope: [String: Int64] = [:]
     private var watcherBaselineEventID: UInt64?
+    private var pendingRescanScopeIDs: Set<String> = []
+    private var activeScanScopeID: String?
 
     public init(
         scanner: any ScopeScanning,
@@ -72,6 +75,9 @@ public final class IndexCoordinator {
         issues = []
         progress = IndexProgress()
         scopesByID = Dictionary(uniqueKeysWithValues: enabledScopes.map { ($0.id, $0) })
+        scopeStates = Dictionary(uniqueKeysWithValues: enabledScopes.map {
+            ($0.id, ScopeRuntimeState(state: .paused))
+        })
         completedGenerationByScope = Dictionary(
             uniqueKeysWithValues: enabledScopes.map { ($0.id, $0.completedGeneration) }
         )
@@ -98,7 +104,10 @@ public final class IndexCoordinator {
             $0.completedGeneration > 0 && $0.lastEventID != nil
         }
         if canResumeFromCheckpoint {
-            status = .watching
+            for scope in enabledScopes {
+                scopeStates[scope.id] = ScopeRuntimeState(state: .watching)
+            }
+            deriveGlobalStatus()
             startEventDrainIfNeeded()
             return
         }
@@ -107,6 +116,7 @@ public final class IndexCoordinator {
             guard let self else { return }
             _ = await self.performFullScan(scopes: enabledScopes)
             self.scanTask = nil
+            self.startNextScanIfNeeded()
             if self.status == .watching {
                 self.startEventDrainIfNeeded()
             }
@@ -120,8 +130,25 @@ public final class IndexCoordinator {
         scanTask = nil
         eventTask = nil
         pendingEvents.removeAll()
+        pendingRescanScopeIDs.removeAll()
+        activeScanScopeID = nil
         watcher.stop()
+        for id in scopeStates.keys {
+            scopeStates[id] = ScopeRuntimeState(state: .paused)
+        }
         status = .paused
+    }
+
+    public func rescan(scopeID: String) {
+        guard !isPaused, scopesByID[scopeID]?.isEnabled == true else { return }
+        pendingRescanScopeIDs.insert(scopeID)
+        startNextScanIfNeeded()
+    }
+
+    public func rescanAll() {
+        guard !isPaused else { return }
+        pendingRescanScopeIDs.formUnion(scopesByID.keys)
+        startNextScanIfNeeded()
     }
 
     public func removeMissingPath(_ path: String) {
@@ -159,59 +186,143 @@ public final class IndexCoordinator {
 
     @discardableResult
     private func performFullScan(scopes: [IndexScope]) async -> Bool {
-        status = .initialScan
+        for scope in scopes {
+            if Task.isCancelled || isPaused { return false }
+            guard await performScopeScan(scope) else { return false }
+        }
+        deriveGlobalStatus()
+        return !isPaused
+    }
+
+    private func performScopeScan(_ scope: IndexScope) async -> Bool {
+        activeScanScopeID = scope.id
+        scopeStates[scope.id] = ScopeRuntimeState(state: .scanning)
+        deriveGlobalStatus()
+        let generation = nextGeneration()
         do {
-            for scope in scopes {
-                try Task.checkCancellation()
-                let generation = nextGeneration()
-                try await writer.beginScopeScan(scope, generation: generation)
-                let errorBox = ScanWriteErrorBox()
-                let summary = try await scanner.scan(
-                    scope: scope,
-                    generation: generation,
-                    onBatch: { [writer] entries in
-                        do {
-                            try await writer.upsertBatch(
-                                entries,
-                                scopeID: scope.id,
-                                generation: generation
-                            )
-                        } catch {
-                            await errorBox.record(error)
-                        }
-                    },
-                    onProgress: { [weak self] progress in
-                        await MainActor.run {
-                            self?.progress = progress
-                        }
+            try Task.checkCancellation()
+            try await writer.beginScopeScan(scope, generation: generation)
+            let errorBox = ScanWriteErrorBox()
+            let summary = try await scanner.scan(
+                scope: scope,
+                generation: generation,
+                onBatch: { [writer] entries in
+                    do {
+                        try await writer.upsertBatch(entries, scopeID: scope.id, generation: generation)
+                    } catch {
+                        await errorBox.record(error)
                     }
+                },
+                onProgress: { [weak self] progress in
+                    await MainActor.run {
+                        self?.progress = progress
+                        self?.scopeStates[scope.id] = ScopeRuntimeState(state: .scanning, progress: progress)
+                    }
+                }
+            )
+            if let writeError = await errorBox.error { throw writeError }
+            let completedAt = Date()
+            try await writer.completeScopeScan(scopeID: scope.id, generation: generation, completedAt: completedAt)
+            try await writer.resolveIssues(scopeID: scope.id, resolvedAt: completedAt)
+            for issue in summary.issues {
+                issues.append(issue)
+                try await writer.recordIssue(
+                    scopeID: scope.id,
+                    path: issue.path,
+                    category: Self.indexIssueCategory(for: issue.category),
+                    message: issue.message,
+                    occurredAt: completedAt
                 )
-                if let writeError = await errorBox.error {
-                    throw writeError
-                }
-                issues.append(contentsOf: summary.issues)
-                try await writer.completeScopeScan(scopeID: scope.id, generation: generation)
-                completedGenerationByScope[scope.id] = generation
-                if let watcherBaselineEventID {
-                    try await writer.updateEventCheckpoint(
-                        scopeID: scope.id,
-                        eventID: watcherBaselineEventID
-                    )
-                }
             }
-            if !isPaused {
-                status = .watching
+            completedGenerationByScope[scope.id] = generation
+            if let watcherBaselineEventID {
+                try await writer.updateEventCheckpoint(
+                    scopeID: scope.id,
+                    eventID: watcherBaselineEventID,
+                    occurredAt: completedAt
+                )
             }
-            return !isPaused
+            scopeStates[scope.id] = ScopeRuntimeState(state: .watching, progress: progress)
         } catch is CancellationError {
-            if isPaused { status = .paused }
+            scopeStates[scope.id] = ScopeRuntimeState(state: .paused, progress: progress)
+            activeScanScopeID = nil
+            deriveGlobalStatus()
             return false
-        } catch FileScanError.rootPermissionDenied {
-            status = .permissionNeeded
-            return false
+        } catch FileScanError.rootPermissionDenied(let path) {
+            let message = "Permission denied: \(path)"
+            let issue = ScanIssue(path: path, category: .permissionDenied, message: message)
+            issues.append(issue)
+            try? await writer.recordIssue(
+                scopeID: scope.id,
+                path: path,
+                category: .permissionDenied,
+                message: message,
+                occurredAt: Date()
+            )
+            scopeStates[scope.id] = ScopeRuntimeState(state: .permissionNeeded, progress: progress, message: message)
+        } catch FileScanError.rootUnavailable(let path) {
+            let message = "Indexing location is unavailable: \(path)"
+            try? await writer.recordIssue(
+                scopeID: scope.id,
+                path: path,
+                category: .unavailableRoot,
+                message: message,
+                occurredAt: Date()
+            )
+            scopeStates[scope.id] = ScopeRuntimeState(state: .offline, progress: progress, message: message)
         } catch {
-            status = .error(message: error.localizedDescription)
+            let message = error.localizedDescription
+            try? await writer.recordIssue(
+                scopeID: scope.id,
+                path: scope.rootPath,
+                category: .scanFailure,
+                message: message,
+                occurredAt: Date()
+            )
+            scopeStates[scope.id] = ScopeRuntimeState(state: .error, progress: progress, message: message)
+            activeScanScopeID = nil
+            status = .error(message: message)
             return false
+        }
+        activeScanScopeID = nil
+        deriveGlobalStatus()
+        return true
+    }
+
+    private func startNextScanIfNeeded() {
+        guard scanTask == nil, !isPaused, let scopeID = pendingRescanScopeIDs.sorted().first,
+              let scope = scopesByID[scopeID] else { return }
+        pendingRescanScopeIDs.remove(scopeID)
+        scanTask = Task { [weak self] in
+            guard let self else { return }
+            _ = await self.performFullScan(scopes: [scope])
+            self.scanTask = nil
+            self.startNextScanIfNeeded()
+        }
+    }
+
+    private func deriveGlobalStatus() {
+        if isPaused {
+            status = .paused
+        } else if scopeStates.values.contains(where: { $0.state == .scanning }) {
+            status = .initialScan
+        } else if scopeStates.values.contains(where: { $0.state == .watching }) {
+            status = .watching
+        } else if scopeStates.values.contains(where: { $0.state == .permissionNeeded }) {
+            status = .permissionNeeded
+        } else if let error = scopeStates.values.first(where: { $0.state == .error })?.message {
+            status = .error(message: error)
+        } else {
+            status = .paused
+        }
+    }
+
+    private static func indexIssueCategory(for category: ScanIssueCategory) -> IndexIssueCategory {
+        switch category {
+        case .permissionDenied: .permissionDenied
+        case .missing: .unavailableRoot
+        case .metadata: .metadataRead
+        case .enumeration: .scanFailure
         }
     }
 
@@ -238,6 +349,15 @@ public final class IndexCoordinator {
                 let plan = FileEventPlanner.plan(events: relevant, scopeRoot: scope.rootPath)
                 do {
                     if plan.requiresFullReconciliation || !plan.reconcileRoots.isEmpty {
+                        if plan.requiresFullReconciliation {
+                            try await writer.recordIssue(
+                                scopeID: scope.id,
+                                path: scope.rootPath,
+                                category: .droppedEvents,
+                                message: "File system events were dropped; a safe reconciliation was scheduled.",
+                                occurredAt: Date()
+                            )
+                        }
                         guard await performFullScan(scopes: [scope]) else { return }
                     } else {
                         try await apply(plan: plan, to: scope)
@@ -251,12 +371,14 @@ public final class IndexCoordinator {
                 } catch is CancellationError {
                     return
                 } catch FileMetadataClientError.permissionDenied(let path) {
-                    issues.append(
-                        ScanIssue(
-                            path: path,
-                            category: .permissionDenied,
-                            message: "Permission denied: \(path)"
-                        )
+                    let message = "Permission denied: \(path)"
+                    issues.append(ScanIssue(path: path, category: .permissionDenied, message: message))
+                    try? await writer.recordIssue(
+                        scopeID: scope.id,
+                        path: path,
+                        category: .permissionDenied,
+                        message: message,
+                        occurredAt: Date()
                     )
                 } catch {
                     status = .error(message: error.localizedDescription)

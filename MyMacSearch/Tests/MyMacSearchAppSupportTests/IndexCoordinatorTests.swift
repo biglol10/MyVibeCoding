@@ -120,6 +120,51 @@ final class IndexCoordinatorTests: XCTestCase {
         let finalScanCount = await scanner.scanCountValue()
         XCTAssertEqual(finalScanCount, 2)
     }
+
+    @MainActor
+    func testTargetedRescanTouchesOnlyRequestedScope() async throws {
+        let scanner = PerScopeCountingScanner()
+        let coordinator = IndexCoordinator(
+            scanner: scanner,
+            writer: RecordingIndexWriter(),
+            metadataClient: CoordinatorMetadataClient(),
+            policy: IndexingPolicy(homePath: "/Users/test", includeHidden: false),
+            watcher: RecordingWatcher(),
+            generationProvider: { 500 }
+        )
+        let home = IndexScope(id: "home", rootPath: "/home", completedGeneration: 1, lastEventID: 10)
+        let downloads = IndexScope(id: "downloads", rootPath: "/downloads", completedGeneration: 1, lastEventID: 10)
+
+        coordinator.start(scopes: [home, downloads])
+        try await eventually { coordinator.status == .watching }
+        coordinator.rescan(scopeID: downloads.id)
+        try await eventually { await scanner.count(for: downloads.id) == 1 }
+
+        let homeCount = await scanner.count(for: home.id)
+        XCTAssertEqual(homeCount, 0)
+        XCTAssertEqual(coordinator.scopeStates[home.id]?.state, .watching)
+        XCTAssertEqual(coordinator.scopeStates[downloads.id]?.state, .watching)
+    }
+
+    @MainActor
+    func testPermissionFailureDoesNotHideHealthyScope() async throws {
+        let coordinator = IndexCoordinator(
+            scanner: SelectivePermissionScanner(deniedScopeID: "private"),
+            writer: RecordingIndexWriter(),
+            metadataClient: CoordinatorMetadataClient(),
+            policy: IndexingPolicy(homePath: "/Users/test", includeHidden: false),
+            watcher: RecordingWatcher()
+        )
+
+        coordinator.start(scopes: [
+            IndexScope(id: "private", rootPath: "/private"),
+            IndexScope(id: "downloads", rootPath: "/downloads")
+        ])
+
+        try await eventually { coordinator.scopeStates["downloads"]?.state == .watching }
+        XCTAssertEqual(coordinator.scopeStates["private"]?.state, .permissionNeeded)
+        XCTAssertEqual(coordinator.status, .watching)
+    }
 }
 
 private actor RecordingIndexWriter: IndexWriting {
@@ -213,6 +258,42 @@ private actor CountingScanner: ScopeScanning {
     }
 
     func scanCountValue() -> Int { scanCount }
+}
+
+private actor PerScopeCountingScanner: ScopeScanning {
+    private var counts: [String: Int] = [:]
+
+    func scan(
+        scope: IndexScope,
+        generation: Int64,
+        onBatch: @escaping FileScanner.BatchHandler,
+        onProgress: @escaping FileScanner.ProgressHandler
+    ) async throws -> ScanSummary {
+        counts[scope.id, default: 0] += 1
+        return ScanSummary(scannedCount: 0, skippedCount: 0, permissionDeniedCount: 0, issues: [], completed: true)
+    }
+
+    func count(for scopeID: String) -> Int { counts[scopeID, default: 0] }
+}
+
+private actor SelectivePermissionScanner: ScopeScanning {
+    let deniedScopeID: String
+
+    init(deniedScopeID: String) {
+        self.deniedScopeID = deniedScopeID
+    }
+
+    func scan(
+        scope: IndexScope,
+        generation: Int64,
+        onBatch: @escaping FileScanner.BatchHandler,
+        onProgress: @escaping FileScanner.ProgressHandler
+    ) async throws -> ScanSummary {
+        if scope.id == deniedScopeID {
+            throw FileScanError.rootPermissionDenied(scope.rootPath)
+        }
+        return ScanSummary(scannedCount: 0, skippedCount: 0, permissionDeniedCount: 0, issues: [], completed: true)
+    }
 }
 
 @MainActor
