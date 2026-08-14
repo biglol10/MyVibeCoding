@@ -61,7 +61,7 @@ MyMacSearch/scripts/run-performance-benchmark.sh
 MYMACSEARCH_RUN_MILLION_BENCHMARK=1 swift test --package-path MyMacSearch -c release --filter IndexPerformanceTests
 ```
 
-2026-08-14 개발 Mac의 release 검증에서 100만 metadata 생성·인덱싱은 264.59초였습니다. 200건 결과 창을 사용한 10개 정렬의 warm selective 검색 p95는 6.56–7.74ms였고, Index Center 상태 snapshot은 5.87ms였습니다. 이 수치는 synthetic benchmark이며 실제 디스크 스캔 시간은 파일 시스템과 권한에 따라 달라집니다.
+2026-08-14 최종 release 검증에서 100만 metadata 생성·인덱싱은 247.38초였습니다. 200건 결과 창을 사용한 10개 정렬의 warm selective 검색 p95는 8.69–40.52ms였고 모두 50ms 기준 안이었습니다. Index Center 상태 snapshot은 2.67ms였습니다. 이 수치는 synthetic benchmark이며 실제 디스크 스캔 시간은 파일 시스템과 권한에 따라 달라집니다.
 
 ## 앱 번들 및 개인 설치 ZIP
 
