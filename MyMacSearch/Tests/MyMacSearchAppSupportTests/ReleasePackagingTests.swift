@@ -42,6 +42,7 @@ final class ReleasePackagingTests: XCTestCase {
         XCTAssertTrue(installer.contains(".MyMacSearch.backup"))
         XCTAssertTrue(installer.contains("codesign --verify --deep --strict"))
         XCTAssertTrue(installer.contains("rollback"))
+        XCTAssertTrue(installer.contains("if [[ -e \"$INSTALL_STAGE\" ]]"))
     }
 
     func testDistributionCheckComparesPackagedAndInstalledExecutableHashes() throws {

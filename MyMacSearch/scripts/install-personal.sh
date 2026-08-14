@@ -25,8 +25,10 @@ rollback() {
   fi
 
   echo "Installation failed; restoring the previous app." >&2
-  run_privileged rm -rf "$INSTALL_STAGE" || true
-  if [[ $INSTALLED_NEW_APP -eq 1 ]]; then
+  if [[ -e "$INSTALL_STAGE" ]]; then
+    run_privileged rm -rf "$INSTALL_STAGE" || true
+  fi
+  if [[ $INSTALLED_NEW_APP -eq 1 && -e "$APP_DEST" ]]; then
     run_privileged rm -rf "$APP_DEST" || true
   fi
   if [[ $BACKUP_CREATED -eq 1 && -d "$INSTALL_BACKUP" ]]; then

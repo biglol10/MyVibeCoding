@@ -6,6 +6,7 @@
 
 # Swift Package Manager
 .build/
+MyMacSearch/build/
 DerivedData/
 *.xcuserdata/
 *.xcworkspace/xcuserdata/
