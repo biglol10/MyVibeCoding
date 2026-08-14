@@ -165,6 +165,37 @@ final class IndexCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.scopeStates["private"]?.state, .permissionNeeded)
         XCTAssertEqual(coordinator.status, .watching)
     }
+
+    @MainActor
+    func testMatchingRemountReconcilesOfflineScopeWithoutDeletingCachedRows() async throws {
+        let scanner = PerScopeCountingScanner()
+        let writer = RecordingIndexWriter()
+        let coordinator = IndexCoordinator(
+            scanner: scanner,
+            writer: writer,
+            metadataClient: CoordinatorMetadataClient(),
+            policy: IndexingPolicy(homePath: "/Users/test", includeHidden: false),
+            watcher: RecordingWatcher()
+        )
+        let scope = IndexScope(
+            id: "external",
+            rootPath: "/Volumes/Work",
+            volumeType: .external,
+            completedGeneration: 1,
+            lastEventID: 10
+        )
+        coordinator.start(scopes: [scope])
+        try await eventually { coordinator.status == .watching }
+
+        coordinator.updateAvailability(scopeID: scope.id, availability: .offline)
+        XCTAssertEqual(coordinator.scopeStates[scope.id]?.state, .offline)
+        let offlineOperations = await writer.operations
+        XCTAssertFalse(offlineOperations.contains(where: { $0.hasPrefix("delete:") }))
+
+        coordinator.updateAvailability(scopeID: scope.id, availability: .available)
+        try await eventually { await scanner.count(for: scope.id) == 1 }
+        XCTAssertEqual(coordinator.scopeStates[scope.id]?.state, .watching)
+    }
 }
 
 private actor RecordingIndexWriter: IndexWriting {

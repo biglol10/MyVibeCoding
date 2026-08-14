@@ -151,6 +151,31 @@ public final class IndexCoordinator {
         startNextScanIfNeeded()
     }
 
+    public func updateAvailability(scopeID: String, availability: VolumeAvailability) {
+        guard scopesByID[scopeID] != nil else { return }
+        switch availability {
+        case .available:
+            if scopeStates[scopeID]?.state == .offline {
+                scopeStates[scopeID] = ScopeRuntimeState(state: .paused)
+                rescan(scopeID: scopeID)
+            }
+        case .offline:
+            pendingRescanScopeIDs.remove(scopeID)
+            scopeStates[scopeID] = ScopeRuntimeState(
+                state: .offline,
+                message: "The indexed volume is not currently available. Cached results are preserved."
+            )
+        case .identityMismatch(let actualUUID):
+            pendingRescanScopeIDs.remove(scopeID)
+            let actual = actualUUID ?? "unknown"
+            scopeStates[scopeID] = ScopeRuntimeState(
+                state: .offline,
+                message: "A different volume is mounted at this path (identity: \(actual)). Re-add it to index explicitly."
+            )
+        }
+        deriveGlobalStatus()
+    }
+
     public func removeMissingPath(_ path: String) {
         Task { [weak self, writer] in
             do {

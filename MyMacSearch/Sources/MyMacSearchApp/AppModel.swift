@@ -24,6 +24,7 @@ final class AppModel {
     private let homeURL: URL
     private let settingsStore: SearchSettingsStore
     private let shortcutController = GlobalShortcutController()
+    private let volumeMonitor = VolumeAvailabilityMonitor()
     private var actionService: ResultActionService?
 
     init() {
@@ -83,8 +84,18 @@ final class AppModel {
         let existing = Set(settings.scopes.map(\.rootPath))
         for url in panel.urls.map(\.standardizedFileURL) where !existing.contains(url.path) {
             let volumeType = Self.volumeType(for: url)
+            let expectedVolumeUUID: String?
+            if volumeType == .internalLocal {
+                expectedVolumeUUID = nil
+            } else {
+                expectedVolumeUUID = try? url.resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString
+            }
             settings.scopes.append(
-                SearchScopeSetting(rootPath: url.path, volumeType: volumeType)
+                SearchScopeSetting(
+                    rootPath: url.path,
+                    volumeType: volumeType,
+                    expectedVolumeUUID: expectedVolumeUUID
+                )
             )
             if volumeType == .external { settings.externalVolumesEnabled = true }
             if volumeType == .network { settings.networkVolumesEnabled = true }
@@ -148,6 +159,7 @@ final class AppModel {
 
     private func rebuildServices(startIndexing: Bool) {
         coordinator?.pause()
+        volumeMonitor.stop()
         startupError = nil
         do {
             let databaseURL = applicationSupportURL.appendingPathComponent("Index.sqlite3")
@@ -176,12 +188,27 @@ final class AppModel {
             searchViewModel.refresh()
             if startIndexing {
                 coordinator.start(scopes: allowedIndexScopes())
+                startVolumeMonitoring(coordinator: coordinator)
             }
         } catch {
             startupError = error.localizedDescription
             searchViewModel = nil
             coordinator = nil
             actionService = nil
+        }
+    }
+
+    private func startVolumeMonitoring(coordinator: IndexCoordinator) {
+        let scopes = settings.scopes.compactMap { scope -> MonitoredVolumeScope? in
+            guard scope.isEnabled, scope.volumeType != .internalLocal else { return nil }
+            return MonitoredVolumeScope(
+                id: scope.id,
+                rootPath: scope.rootPath,
+                expectedVolumeUUID: scope.expectedVolumeUUID
+            )
+        }
+        volumeMonitor.start(scopes: scopes) { [weak coordinator] scopeID, availability in
+            coordinator?.updateAvailability(scopeID: scopeID, availability: availability)
         }
     }
 

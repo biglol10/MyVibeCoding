@@ -6,17 +6,20 @@ public struct SearchScopeSetting: Codable, Equatable, Identifiable, Sendable {
     public var rootPath: String
     public var volumeType: IndexedVolumeType
     public var isEnabled: Bool
+    public var expectedVolumeUUID: String?
 
     public init(
         id: String = UUID().uuidString,
         rootPath: String,
         volumeType: IndexedVolumeType = .internalLocal,
-        isEnabled: Bool = true
+        isEnabled: Bool = true,
+        expectedVolumeUUID: String? = nil
     ) {
         self.id = id
         self.rootPath = URL(fileURLWithPath: rootPath).standardizedFileURL.path
         self.volumeType = volumeType
         self.isEnabled = isEnabled
+        self.expectedVolumeUUID = expectedVolumeUUID
     }
 
     public var indexScope: IndexScope {

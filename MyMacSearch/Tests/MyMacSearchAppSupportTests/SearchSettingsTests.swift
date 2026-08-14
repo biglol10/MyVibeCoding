@@ -47,4 +47,25 @@ final class SearchSettingsTests: XCTestCase {
         XCTAssertEqual(recovered, first)
         XCTAssertTrue(store.didRecoverLastGood)
     }
+
+    func testMissingOptionalVolumeIdentityDecodesFromVersionOneSettings() throws {
+        let data = Data(
+            """
+            {
+              "schemaVersion": 1,
+              "scopes": [{"id":"work","rootPath":"/Volumes/Work","volumeType":"external","isEnabled":true}],
+              "excludedPaths": [],
+              "includeHidden": false,
+              "externalVolumesEnabled": true,
+              "networkVolumesEnabled": false,
+              "onboardingConfirmed": true,
+              "globalShortcut": {"keyCode":49,"modifiers":2048}
+            }
+            """.utf8
+        )
+
+        let settings = try JSONDecoder().decode(SearchSettings.self, from: data)
+
+        XCTAssertNil(settings.scopes[0].expectedVolumeUUID)
+    }
 }
