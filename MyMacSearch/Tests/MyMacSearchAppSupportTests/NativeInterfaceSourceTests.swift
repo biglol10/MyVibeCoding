@@ -36,6 +36,17 @@ final class NativeInterfaceSourceTests: XCTestCase {
         XCTAssertTrue(try source("Views/SearchRootView.swift").contains("SearchResultsTable"))
     }
 
+    func testProductivityInterfaceKeepsSearchFirstAndAddsWorkflowControls() throws {
+        let root = try source("Views/SearchRootView.swift")
+        let table = try source("Views/SearchResultsTable.swift")
+        XCTAssertTrue(root.contains("Search files and folders"))
+        XCTAssertTrue(root.contains("Saved Searches"))
+        XCTAssertTrue(root.contains("Recent"))
+        XCTAssertTrue(root.contains("SearchFilterTokensView"))
+        XCTAssertTrue(table.contains("SearchSort"))
+        XCTAssertTrue(try allAppSource().contains("Save Search"))
+    }
+
     private func source(_ relativePath: String) throws -> String {
         try String(
             contentsOf: packageRoot()

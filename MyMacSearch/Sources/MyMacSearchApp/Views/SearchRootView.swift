@@ -6,6 +6,7 @@ struct SearchRootView: View {
     @Bindable var model: AppModel
     @FocusState private var searchFieldFocused: Bool
     @Environment(\.openWindow) private var openWindow
+    @State private var showingSaveSearch = false
 
     var body: some View {
         Group {
@@ -52,12 +53,40 @@ struct SearchRootView: View {
         } detail: {
             VStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
-                    TextField("Search files and folders", text: $search.query)
-                        .textFieldStyle(.roundedBorder)
-                        .controlSize(.large)
-                        .font(.system(size: 20, weight: .regular))
-                        .focused($searchFieldFocused)
-                        .accessibilityIdentifier("mainSearchField")
+                    HStack(spacing: 8) {
+                        TextField("Search files and folders", text: $search.query)
+                            .textFieldStyle(.roundedBorder)
+                            .controlSize(.large)
+                            .font(.system(size: 20, weight: .regular))
+                            .focused($searchFieldFocused)
+                            .accessibilityIdentifier("mainSearchField")
+
+                        Menu {
+                            ForEach(SearchSort.allCases, id: \.self) { sort in
+                                Button {
+                                    search.chooseSort(sort)
+                                } label: {
+                                    if search.sort == sort {
+                                        Label(sort.displayName, systemImage: "checkmark")
+                                    } else {
+                                        Text(sort.displayName)
+                                    }
+                                }
+                            }
+                        } label: {
+                            Label(search.sort.displayName, systemImage: "arrow.up.arrow.down")
+                        }
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
+
+                        Button("Save Search") { showingSaveSearch = true }
+                            .keyboardShortcut("s", modifiers: [.command])
+                            .disabled(search.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || search.parserError != nil)
+                    }
+
+                    if !search.tokens.isEmpty {
+                        SearchFilterTokensView(tokens: search.tokens, onRemove: search.removeToken)
+                    }
 
                     if let parserError = search.parserError {
                         Text(parserError.localizedDescription)
@@ -94,15 +123,59 @@ struct SearchRootView: View {
         .task {
             searchFieldFocused = true
         }
+        .sheet(isPresented: $showingSaveSearch) {
+            SaveSearchSheet(query: search.query, sort: search.sort) { name in
+                search.saveCurrentSearch(name: name)
+            }
+        }
     }
 }
 
 private struct SearchSidebar: View {
     let model: AppModel
     let search: SearchViewModel
+    @State private var renameTarget: SavedSearch?
+    @State private var renameText = ""
 
     var body: some View {
         List {
+            if !search.savedSearches.isEmpty {
+                Section("Saved Searches") {
+                    ForEach(search.savedSearches) { saved in
+                        Button(saved.name) { search.activateSavedSearch(saved.id) }
+                            .buttonStyle(.plain)
+                            .help(saved.query)
+                            .contextMenu {
+                                Button("Rename…") {
+                                    renameTarget = saved
+                                    renameText = saved.name
+                                }
+                                Button("Update with Current Search") {
+                                    search.replaceSavedSearch(id: saved.id)
+                                }
+                                Button("Remove", role: .destructive) {
+                                    search.removeSavedSearch(id: saved.id)
+                                }
+                            }
+                    }
+                    .onMove(perform: search.moveSavedSearch)
+                }
+            }
+
+            if !search.recentSearches.isEmpty {
+                Section("Recent") {
+                    ForEach(search.recentSearches) { recent in
+                        Button(recent.query) { search.activateRecentSearch(recent) }
+                            .buttonStyle(.plain)
+                            .lineLimit(1)
+                            .help(recent.query)
+                    }
+                    Button("Clear Recent Searches") { search.clearRecentSearches() }
+                        .font(.caption)
+                        .buttonStyle(.plain)
+                }
+            }
+
             Section("Locations") {
                 ForEach(model.settings.scopes.filter(\.isEnabled)) { scope in
                     Button {
@@ -145,6 +218,24 @@ private struct SearchSidebar: View {
             }
         }
         .listStyle(.sidebar)
+        .sheet(item: $renameTarget) { saved in
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Rename Saved Search").font(.headline)
+                TextField("Name", text: $renameText)
+                HStack {
+                    Spacer()
+                    Button("Cancel") { renameTarget = nil }
+                    Button("Rename") {
+                        search.renameSavedSearch(id: saved.id, name: renameText)
+                        renameTarget = nil
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(renameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .padding(20)
+            .frame(width: 360)
+        }
     }
 
     private func appendFilter(_ filter: String) {
