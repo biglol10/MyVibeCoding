@@ -124,4 +124,32 @@ final class SQLiteSearchTests: XCTestCase {
             XCTAssertEqual(page.entries.map(\.name), expectedNames, "sort: \(sort)")
         }
     }
+
+    func testSizeRangesUseBoundPredicatesAtExactBoundaries() async throws {
+        let fixture = try TemporaryIndexFixture()
+        defer { fixture.remove() }
+        let scope = IndexScope(id: "home", rootPath: "/scope")
+        try await fixture.writer.beginScopeScan(scope, generation: 1)
+        try await fixture.writer.upsertBatch(
+            [
+                .testEntry(path: "/scope/small.bin", sizeBytes: 99),
+                .testEntry(path: "/scope/lower.bin", sizeBytes: 100),
+                .testEntry(path: "/scope/inside.bin", sizeBytes: 150),
+                .testEntry(path: "/scope/upper.bin", sizeBytes: 200)
+            ],
+            scopeID: scope.id,
+            generation: 1
+        )
+
+        let page = try await fixture.reader.search(
+            request: SearchRequest(
+                query: SearchQuery(sizeRange: .closed(100, 200)),
+                sort: .sizeSmallest
+            ),
+            limit: 20,
+            after: nil
+        )
+
+        XCTAssertEqual(page.entries.map(\.name), ["lower.bin", "inside.bin", "upper.bin"])
+    }
 }

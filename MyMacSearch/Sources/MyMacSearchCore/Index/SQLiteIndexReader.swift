@@ -191,6 +191,26 @@ public actor SQLiteIndexReader {
             innerBindings.append(.double(range.lowerBound.timeIntervalSince1970))
             innerBindings.append(.double(range.upperBound.timeIntervalSince1970))
         }
+        if let range = query.sizeRange {
+            switch range {
+            case .greaterThan(let bytes):
+                predicates.append("e.size_bytes > ?")
+                innerBindings.append(.int64(bytes))
+            case .atLeast(let bytes):
+                predicates.append("e.size_bytes >= ?")
+                innerBindings.append(.int64(bytes))
+            case .lessThan(let bytes):
+                predicates.append("e.size_bytes < ?")
+                innerBindings.append(.int64(bytes))
+            case .atMost(let bytes):
+                predicates.append("e.size_bytes <= ?")
+                innerBindings.append(.int64(bytes))
+            case .closed(let lower, let upper):
+                predicates.append("e.size_bytes >= ? AND e.size_bytes <= ?")
+                innerBindings.append(.int64(lower))
+                innerBindings.append(.int64(upper))
+            }
+        }
 
         let filterSQL = predicates.isEmpty ? "" : "WHERE " + predicates.joined(separator: " AND ")
         let order = searchOrder(sort: request.sort, cursor: cursor)

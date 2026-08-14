@@ -52,4 +52,39 @@ final class SearchQueryParserTests: XCTestCase {
         let query = try SearchQueryParser.parse("name:CAFÉ")
         XCTAssertEqual(query.nameTerms, ["cafe"])
     }
+
+    func testParsesSupportedSizeFilters() throws {
+        let cases: [(String, ByteSizeRange)] = [
+            ("size:>100MB", .greaterThan(104_857_600)),
+            ("size:>=1GB", .atLeast(1_073_741_824)),
+            ("size:<500KB", .lessThan(512_000)),
+            ("size:<=2MB", .atMost(2_097_152)),
+            ("size:10MB..1GB", .closed(10_485_760, 1_073_741_824))
+        ]
+
+        for (input, expected) in cases {
+            XCTAssertEqual(try SearchQueryParser.parse(input).sizeRange, expected, input)
+        }
+    }
+
+    func testRejectsAmbiguousOrInvalidSizeFilters() {
+        for input in ["size:100", "size:1PB", "size:-1MB", "size:1.5MB", "size:..1GB", "size:2GB..1GB"] {
+            XCTAssertThrowsError(try SearchQueryParser.parse(input), input) { error in
+                guard case SearchQueryParseError.invalidSize = error else {
+                    return XCTFail("Expected invalidSize for \(input), got \(error)")
+                }
+            }
+        }
+    }
+
+    func testDetailedTokensPreserveOriginalCharacterRangesIncludingQuotes() throws {
+        let input = #"report kind:pdf path:"Project Files""#
+
+        let parsed = try SearchQueryParser.parseDetailed(input)
+
+        XCTAssertEqual(parsed.tokens.map(\.rawText), ["kind:pdf", #"path:"Project Files""#])
+        let pathToken = parsed.tokens[1]
+        let characters = Array(input)
+        XCTAssertEqual(String(characters[pathToken.characterRange]), #"path:"Project Files""#)
+    }
 }
