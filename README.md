@@ -12,7 +12,7 @@
 | MyMacSearch | 자체 SQLite FTS5 인덱스와 FSEvents 변경 감지로 파일명·경로·메타데이터를 빠르게 찾는 읽기 전용 SwiftUI 검색 도구 | [MyMacSearch](./MyMacSearch) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacSearch/MyMacSearch-personal-mac.zip) |
 | MyMacStats | CPU, RAM, Disk I/O, Network, Battery, Processes 상태, refresh 설정 저장, RAM 알림을 보여주는 SwiftUI 시스템 모니터 | [MyMacStats](./MyMacStats) | [MyMacStats-test-build.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacStats/MyMacStats-test-build.zip) |
 | MyMacCalendar | 로컬 우선 일정 관리, 반복 일정, 검색, 알림, 빠른 추가 확인, 자동 휴일 가져오기, 메뉴바/플로팅 위젯 복구를 제공하는 SwiftUI 캘린더 | [MyMacCalendar](./MyMacCalendar) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacCalendar/MyMacCalendar-personal-mac.zip) |
-| MyMacMarkdownViewer | 긴 Markdown 문서를 읽으면서 필요한 블록만 자연스럽게 수정하는 로컬 우선 macOS 앱 | [MyMacMarkdownViewer](./MyMacMarkdownViewer) | - |
+| MyMacMarkdownViewer | 긴 Markdown 문서를 읽으면서 필요한 블록만 자연스럽게 수정하는 로컬 우선 macOS 앱 | [MyMacMarkdownViewer](./MyMacMarkdownViewer) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacMarkdownViewer/MyMarkdownViewer-0.1.0-macOS.zip) |
 | FlowPilot_mac | SwiftUI 네이티브 macOS 활동 추적, 브라우저 도메인 수집, 메뉴바 일시정지/재개, 기존 Tauri/Windows 소스 포함 | [FlowPilot_mac](./FlowPilot_mac) | [Swift Native zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.zip), [Swift Native DMG](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.dmg) |
 
 ## 클론
@@ -131,5 +131,5 @@ macOS 앱을 다른 Mac에서 앱 더블클릭만으로 실행할 수 있게 공
 - MyMacSearch 개인용 zip: `MyMacSearch/scripts/package-personal.sh`
 - MyMacStats 개인용 zip: `MyMacStats/scripts/build-app-bundle.sh --deploy-personal`
 - MyMacCalendar 개인용 zip: `MyMacCalendar/scripts/package_personal.sh`
-- MyMacMarkdownViewer: `MyMacMarkdownViewer/scripts/build.sh`
+- MyMacMarkdownViewer 개인용 zip: `MyMacMarkdownViewer/scripts/build.sh`
 - FlowPilot Swift Native 개인용 zip/DMG: `FlowPilot_mac`에서 `npm run package:macos:native`, `npm run package:macos:native:dmg`
