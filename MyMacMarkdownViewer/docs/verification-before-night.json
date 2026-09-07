@@ -1,0 +1,132 @@
+{
+  "verifiedAt": "2026-09-06",
+  "app-qa.json": {
+    "autosave": true,
+    "bomAndCRLF": true,
+    "cleanExternalReload": true,
+    "completed": true,
+    "deletedFileNotRecreated": true,
+    "dirtyExternalConflict": true,
+    "editsDuringSaveStayDirty": true,
+    "initial": {
+      "background": "rgb(25, 27, 30)",
+      "errors": 0,
+      "theme": "dark",
+      "viewport": 1332,
+      "widgets": 1,
+      "width": 1332
+    },
+    "lightTheme": "light",
+    "nativePerformance": {
+      "bytes": 2990014,
+      "fileReadThroughTwoFramesMs": 1142.956018447876,
+      "lines": 20003,
+      "programmaticInputP95Ms": 75
+    },
+    "nativePerformanceBudget": true,
+    "permissionFailureKeepsEditAndRecovery": true,
+    "platform": "WKWebView",
+    "realIMEVerified": false,
+    "recoveryPersisted": true,
+    "recoveryRestored": true,
+    "saveAfterPermissionRestored": true,
+    "secondSaveIncludesNewerEdit": true,
+    "staleSessionIgnored": true,
+    "unchangedBytes": true,
+    "undoAcrossSave": true,
+    "unsupportedOpenKeepsDocument": true
+  },
+  "automatedTests": {
+    "swift": 9,
+    "markdown": 4,
+    "webkit": 18,
+    "total": 31
+  },
+  "editorPerformance": {
+    "openMs": 259,
+    "inputP95Ms": 37,
+    "bytes": 2990014,
+    "lines": 20003
+  },
+  "readingGeometry": {
+    "maxVerticalShiftPx": 0,
+    "maxTextHorizontalShiftPx": 0,
+    "maxLineHeightChangePx": 0
+  },
+  "nativeUI": {
+    "sidebarDragged": true,
+    "sidebarMinWidth": 200,
+    "sidebarMaxWidth": 560,
+    "sidebarWidthBeforeRestart": 388,
+    "sidebarWidthAfterRestart": 388,
+    "sidebarHideShowPreservesWidth": true,
+    "longTreeNamesTruncated": true,
+    "longWindowTitleTruncatedAndNotDuplicated": true,
+    "quotedHeadingMarkersHiddenOutsideHeadingEdit": true,
+    "sourceDocumentSHA256": "1809bdadf6be47ce621f3690a2c66866329b61358ab224371f8ecb03fbdd325c",
+    "sourceDocumentUnchanged": true,
+    "physicalKoreanIME": "pending-user-confirmation"
+  },
+  "previousReleaseVerification": {
+    "scope": "Reading UI release before sidebar and nested heading fixes; crash/relaunch tests not repeated for this UI-only follow-up.",
+    "zipSHA256": "570b24f06fe31f1e90ad9fb27417a66b29f6bccb3b6a65c54c9e5912700232b8",
+    "crash-qa.json": {
+      "autosave": true,
+      "bomAndCRLF": true,
+      "cleanExternalReload": true,
+      "crashPrepared": true,
+      "dirtyExternalConflict": true,
+      "initial": {
+        "background": "rgb(25, 27, 30)",
+        "errors": 0,
+        "theme": "dark",
+        "viewport": 885,
+        "widgets": 0,
+        "width": 885
+      },
+      "lightTheme": "light",
+      "platform": "WKWebView",
+      "realIMEVerified": false,
+      "recoveryPersisted": true,
+      "staleSessionIgnored": true,
+      "unchangedBytes": true,
+      "undoAcrossSave": true
+    },
+    "relaunch-qa.json": {
+      "completed": true,
+      "platform": "WKWebView",
+      "realIMEVerified": false,
+      "recoveryAfterProcessDeath": true
+    },
+    "nativeUI": {
+      "selectedListItemEditing": true,
+      "headingAndListVisualPositionsStable": true,
+      "koreanEmojiPasteSourceToggleUndoBytesEqual": true,
+      "physicalKoreanIME": "pending-user-confirmation"
+    },
+    "earlierAcceptanceUI": {
+      "commandWProtectsUnsavedText": true,
+      "closeCancelPreservesText": true,
+      "savePanelCancelAllowsContinuedEditing": true,
+      "koreanPasteReplaceUndo": true,
+      "discardedCheckpointAbsentAfterExit": true,
+      "updatedIconVisibleInNativeAlert": true,
+      "physicalKoreanIME": "pending-user-confirmation",
+      "scope": "Earlier 2026-09-06 acceptance run; see Acceptance-2026-09-06.md. Current UI checks are under nativeUI."
+    }
+  },
+  "release": {
+    "version": "0.1.0",
+    "architectures": [
+      "x86_64",
+      "arm64"
+    ],
+    "minimumMacOS": "14.0",
+    "signing": "ad-hoc",
+    "notarized": false,
+    "zipSHA256": "e750fd8be4e7f9e18a63cacfc72410f9434af1b41dbcd2af7788162b263dda01",
+    "webResourceFiles": 234,
+    "webResourcesMatchBuild": true,
+    "zipInstallationMatchesRelease": true
+  }
+}

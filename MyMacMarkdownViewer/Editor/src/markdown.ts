@@ -1,0 +1,68 @@
+import { parser, GFM } from '@lezer/markdown';
+import type { Tree, SyntaxNode } from '@lezer/common';
+import type { Heading } from './protocol';
+
+export const markdownParser = parser.configure(GFM);
+export interface Block { from: number; to: number; kind: string; source: string; node?: SyntaxNode }
+
+export function blocksFor(text: string, tree: Tree = markdownParser.parse(text)): Block[] {
+  const blocks: Block[] = [];
+  let node = tree.topNode.firstChild;
+  while (node) {
+    blocks.push({ from: node.from, to: node.to, kind: node.name, source: text.slice(node.from, node.to), node });
+    node = node.nextSibling;
+  }
+  // The CommonMark parser sees multiline display math as adjacent paragraphs. Merge only complete $$ pairs.
+  for (let i = 0; i < blocks.length; i++) {
+    if (!/^\$\$(?:\s|$)/.test(blocks[i].source)) continue;
+    const from = blocks[i].from;
+    const end = text.indexOf('$$', from + 2);
+    if (end < 0) continue;
+    let j = i;
+    while (j + 1 < blocks.length && blocks[j].to < end + 2) j++;
+    if (blocks[j].to < end + 2) continue;
+    blocks.splice(i, j - i + 1, { from, to: blocks[j].to, kind: 'DisplayMath', source: text.slice(from, blocks[j].to) });
+  }
+  return blocks;
+}
+
+export function outlineFor(text: string): Heading[] {
+  const headings: Heading[] = [];
+  const tree = markdownParser.parse(text);
+  tree.iterate({ enter(node) {
+    const match = /^(?:ATX|Setext)Heading([1-6])$/.exec(node.name);
+    if (!match) return;
+    const source = text.slice(node.from, node.to);
+    headings.push({ from: node.from, level: Number(match[1]),
+      title: source.replace(/^#{1,6}\s*/, '').replace(/\n[=-]+\s*$/, '').replace(/\s+#+\s*$/, '').replace(/[*_`]/g, '').trim() });
+  }});
+  return headings;
+}
+
+export function relativeDestination(destination: string, oldBase: string, newBase: string): string {
+  if (!destination || /^(?:[a-z][\w+.-]*:|\/|#)/i.test(destination)) return destination;
+  try {
+    const target = new URL(destination, oldBase);
+    const newURL = new URL(newBase);
+    if (target.protocol !== 'file:' || newURL.protocol !== 'file:') return destination;
+    const targetParts = target.pathname.split('/').filter(Boolean);
+    const baseParts = newURL.pathname.split('/').filter(Boolean);
+    while (targetParts.length && baseParts.length && targetParts[0] === baseParts[0]) { targetParts.shift(); baseParts.shift(); }
+    return [...baseParts.map(() => '..'), ...targetParts].join('/') + target.search + target.hash;
+  } catch { return destination; }
+}
+
+export function rebaseMarkdown(text: string, oldBase: string, newBase: string): string {
+  if (!oldBase || oldBase === newBase) return text;
+  const edits: { from: number; to: number; insert: string }[] = [];
+  markdownParser.parse(text).iterate({ enter(node) {
+    if (node.name !== 'URL') return;
+    const raw = text.slice(node.from, node.to);
+    const angle = raw.startsWith('<') && raw.endsWith('>');
+    const value = angle ? raw.slice(1, -1) : raw;
+    const next = relativeDestination(value, oldBase, newBase);
+    if (next !== value) edits.push({ from: node.from, to: node.to, insert: angle ? `<${next}>` : next });
+  }});
+  for (const edit of edits.reverse()) text = text.slice(0, edit.from) + edit.insert + text.slice(edit.to);
+  return text;
+}

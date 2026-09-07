@@ -12,6 +12,7 @@
 | MyMacSearch | 자체 SQLite FTS5 인덱스와 FSEvents 변경 감지로 파일명·경로·메타데이터를 빠르게 찾는 읽기 전용 SwiftUI 검색 도구 | [MyMacSearch](./MyMacSearch) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacSearch/MyMacSearch-personal-mac.zip) |
 | MyMacStats | CPU, RAM, Disk I/O, Network, Battery, Processes 상태, refresh 설정 저장, RAM 알림을 보여주는 SwiftUI 시스템 모니터 | [MyMacStats](./MyMacStats) | [MyMacStats-test-build.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacStats/MyMacStats-test-build.zip) |
 | MyMacCalendar | 로컬 우선 일정 관리, 반복 일정, 검색, 알림, 빠른 추가 확인, 자동 휴일 가져오기, 메뉴바/플로팅 위젯 복구를 제공하는 SwiftUI 캘린더 | [MyMacCalendar](./MyMacCalendar) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacCalendar/MyMacCalendar-personal-mac.zip) |
+| MyMacMarkdownViewer | 긴 Markdown 문서를 읽으면서 필요한 블록만 자연스럽게 수정하는 로컬 우선 macOS 앱 | [MyMacMarkdownViewer](./MyMacMarkdownViewer) | - |
 | FlowPilot_mac | SwiftUI 네이티브 macOS 활동 추적, 브라우저 도메인 수집, 메뉴바 일시정지/재개, 기존 Tauri/Windows 소스 포함 | [FlowPilot_mac](./FlowPilot_mac) | [Swift Native zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.zip), [Swift Native DMG](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.dmg) |
 
 ## 클론
@@ -65,6 +66,13 @@ cd MyMacCalendar
 swift run MyMacCalendar
 ```
 
+MyMacMarkdownViewer:
+
+```bash
+cd MyMacMarkdownViewer
+swift run MyMarkdownViewer
+```
+
 FlowPilot_mac:
 
 ```bash
@@ -91,6 +99,7 @@ npm run tauri -- dev
 ├── MyMacSearch/          # SQLite FTS5 기반 SwiftUI 파일명/경로 검색 앱
 ├── MyMacStats/           # SwiftUI macOS 시스템 모니터 앱
 ├── MyMacCalendar/        # SwiftUI macOS 캘린더 앱
+├── MyMacMarkdownViewer/  # 로컬 Markdown 읽기·편집 앱
 ├── FlowPilot_mac/        # SwiftUI native + Tauri/React/Rust 활동 추적 앱
 └── downloads/            # GitHub README에서 연결하는 다운로드 파일
 ```
@@ -104,6 +113,7 @@ npm run tauri -- dev
 - MyMacSearch: macOS 14 이상, Swift 6 호환 toolchain, 시스템 SQLite FTS5
 - MyMacStats: macOS 14 이상
 - MyMacCalendar: macOS 14 이상
+- MyMacMarkdownViewer: macOS 14 이상, Swift 6, Node.js 22/npm
 - FlowPilot_mac: Swift 5.9+/Xcode Command Line Tools, Node.js 22 LTS/npm, Rust 1.77.2 이상, Tauri 2
 - 캡처/활동 추적/정리/캘린더/파일 관리자/파일 검색 프로그램은 macOS 개인정보 보호 권한이 필요할 수 있습니다.
 
@@ -121,4 +131,5 @@ macOS 앱을 다른 Mac에서 앱 더블클릭만으로 실행할 수 있게 공
 - MyMacSearch 개인용 zip: `MyMacSearch/scripts/package-personal.sh`
 - MyMacStats 개인용 zip: `MyMacStats/scripts/build-app-bundle.sh --deploy-personal`
 - MyMacCalendar 개인용 zip: `MyMacCalendar/scripts/package_personal.sh`
+- MyMacMarkdownViewer: `MyMacMarkdownViewer/scripts/build.sh`
 - FlowPilot Swift Native 개인용 zip/DMG: `FlowPilot_mac`에서 `npm run package:macos:native`, `npm run package:macos:native:dmg`

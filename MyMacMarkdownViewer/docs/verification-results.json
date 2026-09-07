@@ -1,0 +1,98 @@
+{
+  "verifiedAt": "2026-09-06",
+  "app-qa.json": {
+    "autosave": true,
+    "bomAndCRLF": true,
+    "cleanExternalReload": true,
+    "completed": true,
+    "deletedFileNotRecreated": true,
+    "dirtyExternalConflict": true,
+    "editsDuringSaveStayDirty": true,
+    "initial": {
+      "background": "rgb(55, 59, 64)",
+      "errors": 0,
+      "theme": "night",
+      "viewport": 1396,
+      "widgets": 4,
+      "width": 1396
+    },
+    "lightTheme": "light",
+    "nativePerformance": {
+      "bytes": 2990014,
+      "fileReadThroughTwoFramesMs": 1140.7490968704224,
+      "lines": 20003,
+      "programmaticInputP95Ms": 76.00000000000182
+    },
+    "nativePerformanceBudget": true,
+    "nightNativeAppearance": true,
+    "nightTheme": {
+      "background": "rgb(55, 59, 64)",
+      "colorScheme": "dark",
+      "foreground": "rgb(222, 225, 229)",
+      "theme": "night"
+    },
+    "permissionFailureKeepsEditAndRecovery": true,
+    "platform": "WKWebView",
+    "realIMEVerified": false,
+    "recoveryPersisted": true,
+    "recoveryRestored": true,
+    "saveAfterPermissionRestored": true,
+    "secondSaveIncludesNewerEdit": true,
+    "staleSessionIgnored": true,
+    "unchangedBytes": true,
+    "undoAcrossSave": true,
+    "unsupportedOpenKeepsDocument": true
+  },
+  "automatedTests": {
+    "swift": 10,
+    "markdown": 4,
+    "webkit": 20,
+    "total": 34
+  },
+  "editorPerformance": {
+    "openMs": 234,
+    "inputP95Ms": 34,
+    "bytes": 2990014,
+    "lines": 20003
+  },
+  "readingGeometry": {
+    "maxVerticalShiftPx": 0,
+    "maxTextHorizontalShiftPx": 0,
+    "maxLineHeightChangePx": 0
+  },
+  "nativeUI": {
+    "themeChoices": [
+      "다크",
+      "Night · 청회색",
+      "라이트",
+      "시스템 설정 따르기"
+    ],
+    "nightSelectedThroughSettings": true,
+    "nightRetainedAfterQuitAndRelaunch": true,
+    "nightCanvasAndSidebarVisuallyVerified": true,
+    "sidebarWidthBeforeRestart": 324,
+    "sidebarWidthAfterRestart": 324,
+    "sourceDocumentSHA256": "1809bdadf6be47ce621f3690a2c66866329b61358ab224371f8ecb03fbdd325c",
+    "sourceDocumentUnchanged": true,
+    "physicalKoreanIME": "pending-user-confirmation"
+  },
+  "previousReleaseVerification": {
+    "scope": "Earlier sidebar/heading and reading UI releases, including crash/relaunch verification; not repeated for this theme addition.",
+    "record": "verification-before-night.json",
+    "zipSHA256": "e750fd8be4e7f9e18a63cacfc72410f9434af1b41dbcd2af7788162b263dda01"
+  },
+  "release": {
+    "version": "0.1.0",
+    "architectures": [
+      "x86_64",
+      "arm64"
+    ],
+    "minimumMacOS": "14.0",
+    "signing": "ad-hoc",
+    "notarized": false,
+    "zipSHA256": "bf5b04a992c348c02a0729d57bd2004af900bb8d9c5692987bc93d34f5db3a4a",
+    "webResourceFiles": 234,
+    "webResourcesMatchBuild": true,
+    "zipInstallationMatchesRelease": true
+  }
+}
