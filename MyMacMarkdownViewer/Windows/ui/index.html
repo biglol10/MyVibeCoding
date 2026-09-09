@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self' app:; style-src 'self' 'unsafe-inline'; script-src 'self' app:; frame-src app:; img-src 'self' app: data:;"
+    />
+    <title>MyMarkdownViewer</title>
+    <link rel="stylesheet" href="./shell.css" />
+  </head>
+  <body>
+    <main class="shell" aria-label="MyMarkdownViewer">
+      <header class="titlebar">
+        <nav class="app-menus" aria-label="앱 메뉴">
+          <details class="dropdown"><summary>파일</summary><div class="popup">
+            <button data-action="new">새 문서 <kbd>Ctrl+N</kbd></button>
+            <button data-action="openDialog">문서 열기… <kbd>Ctrl+O</kbd></button>
+            <button data-action="chooseFolder">폴더 열기…</button>
+            <button data-action="quickOpen">빠른 파일 열기… <kbd>Ctrl+P</kbd></button><hr>
+            <button data-action="save">저장 <kbd>Ctrl+S</kbd></button>
+            <button data-action="saveAs">다른 이름으로 저장…</button><hr>
+            <button data-action="recovery">임시본 복구…</button>
+          </div></details>
+          <details class="dropdown"><summary>편집</summary><div class="popup">
+            <button data-action="command:undo">실행 취소 <kbd>Ctrl+Z</kbd></button>
+            <button data-action="command:redo">다시 실행</button><hr>
+            <button data-action="command:find">문서에서 찾기 <kbd>Ctrl+F</kbd></button>
+            <button data-action="folderSearch">폴더 전체 검색 <kbd>Ctrl+Shift+F</kbd></button>
+          </div></details>
+          <details class="dropdown"><summary>서식</summary><div class="popup">
+            <button data-action="command:heading">제목</button>
+            <button data-action="command:bold">굵게 <kbd>Ctrl+B</kbd></button>
+            <button data-action="command:italic">기울임 <kbd>Ctrl+I</kbd></button>
+            <button data-action="command:link">링크… <kbd>Ctrl+K</kbd></button><hr>
+            <button data-action="command:list">목록</button><button data-action="command:task">할 일</button>
+            <button data-action="command:quote">인용문</button><button data-action="command:codeBlock">코드 블록</button>
+          </div></details>
+          <details class="dropdown"><summary>보기</summary><div class="popup">
+            <button data-action="toggleSidebar">사이드바 표시 / 숨기기 <kbd>Ctrl+Shift+L</kbd></button>
+            <button data-action="showOutline">목차</button><button data-action="showFiles">파일</button><hr>
+            <button data-action="source">원문 모드 <kbd>Ctrl+/</kbd></button>
+          </div></details>
+        </nav>
+        <div id="doc-title" class="doc-title">새 문서</div>
+      </header>
+      <div
+        id="notice"
+        class="notice"
+        role="status"
+        aria-live="polite"
+        hidden
+      ></div>
+      <div class="workspace">
+        <aside id="sidebar" class="sidebar" aria-label="탐색">
+          <div class="tabs" role="tablist">
+            <button
+              role="tab"
+              aria-selected="true"
+              aria-controls="files-panel"
+              data-tab="files"
+            >
+              파일</button
+            ><button
+              role="tab"
+              aria-selected="false"
+              aria-controls="outline-panel"
+              data-tab="outline"
+            >
+              목차</button
+            ><button
+              role="tab"
+              aria-selected="false"
+              aria-controls="search-panel"
+              data-tab="search"
+            >
+              찾기
+            </button>
+          </div>
+          <section id="files-panel" class="tab-panel" role="tabpanel">
+            <div class="panel-head">
+              <span id="root-label" title="현재 폴더">폴더를 열어 시작</span>
+              <details class="dropdown folder-menu"><summary aria-label="파일 관리" title="파일 관리">•••</summary>
+                <div id="file-tools" class="popup">
+                  <button data-action="chooseFolder">폴더 열기…</button><hr>
+                  <button data-file-action="createFile">새 문서</button>
+                  <button data-file-action="createFolder">새 폴더</button><hr>
+                  <button data-file-action="rename">이름 변경…</button>
+                  <button data-file-action="move">이동…</button>
+                  <button data-file-action="trash">휴지통으로 보내기</button><hr>
+                  <button data-action="refresh">새로 고침</button>
+                </div>
+              </details>
+            </div>
+            <div
+              id="tree"
+              class="tree"
+              role="tree"
+              tabindex="0"
+              aria-label="파일 목록"
+            ></div>
+          </section>
+          <section id="outline-panel" class="tab-panel" role="tabpanel" hidden>
+            <div id="outline" class="outline"></div>
+          </section>
+          <section id="search-panel" class="tab-panel" role="tabpanel" hidden>
+            <form id="search-form" class="search-form">
+              <label
+                >폴더에서 찾기<input
+                  id="search-query"
+                  autocomplete="off"
+                  placeholder="찾을 내용" /></label
+              ><label class="check"
+                ><input id="case-sensitive" type="checkbox" />대소문자
+                구분</label
+              >
+              <div>
+                <button class="primary">찾기</button
+                ><button id="cancel-search" type="button">중단</button>
+              </div>
+            </form>
+            <div id="search-results" class="search-results"></div>
+          </section>
+        </aside>
+        <div
+          id="resize"
+          class="resize"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="사이드바 너비"
+          tabindex="0"
+        ></div>
+        <section class="editor-area">
+          <iframe
+            id="editor-frame"
+            src="app://editor/index.html"
+            title="Markdown 편집기"
+          ></iframe>
+        </section>
+      </div>
+      <footer class="statusbar">
+        <button data-action="toggleSidebar" class="icon-button" title="사이드바 표시 / 숨기기 (Ctrl+Shift+L)" aria-label="사이드바 표시 / 숨기기" aria-expanded="true"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button><button data-action="settings" class="icon-button" title="설정" aria-label="설정"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6M16 14v6"/></svg></button><span id="save-state">저장됨</span
+        ><span id="position">0줄 · 0자 · 0단어</span
+        ><button id="mode" data-action="source" title="원문 모드 전환 (Ctrl+/)">읽기/편집</button>
+      </footer>
+    </main>
+    <dialog id="settings-dialog">
+      <form method="dialog">
+        <h2>설정</h2>
+        <label
+          >테마<select id="set-theme">
+            <option value="dark">다크</option>
+            <option value="night">나이트</option>
+            <option value="light">라이트</option>
+          </select></label
+        ><label
+          >글자 크기<input
+            id="set-font-size"
+            type="range"
+            min="12"
+            max="30" /></label
+        ><label
+          >줄 간격<input
+            id="set-line-height"
+            type="range"
+            min="1.3"
+            max="2.4"
+            step=".1" /></label
+        ><label
+          >읽기 폭<input
+            id="set-content-width"
+            type="range"
+            min="500"
+            max="1200"
+            step="10" /></label
+        ><label
+          >글꼴<select id="set-font-family">
+            <option value="system">시스템</option>
+            <option value="serif">명조</option>
+            <option value="mono">고정폭</option>
+          </select></label
+        ><label class="check"
+          ><input id="set-remote-images" type="checkbox" />원격 이미지
+          표시</label
+        ><label class="check"
+          ><input id="set-autosave" type="checkbox" />자동 저장</label
+        >
+        <menu>
+          <button value="cancel">취소</button
+          ><button id="save-settings" value="default" class="primary">
+            적용
+          </button>
+        </menu>
+      </form>
+    </dialog>
+    <dialog id="recovery-dialog">
+      <form method="dialog">
+        <h2>복구 가능한 임시본</h2>
+        <div id="recovery-list"></div>
+        <menu><button>닫기</button></menu>
+      </form>
+    </dialog>
+    <dialog id="replace-dialog">
+      <form method="dialog">
+        <h2>바꾸기 검토</h2>
+        <p id="replace-summary"></p>
+        <div id="replace-files"></div>
+        <div id="replace-outcomes"></div>
+        <menu>
+          <button value="cancel">취소</button
+          ><button id="apply-replace" value="default" class="primary">
+            선택한 파일 바꾸기
+          </button>
+        </menu>
+      </form>
+    </dialog>
+    <dialog id="item-dialog" aria-labelledby="item-dialog-title">
+      <form id="item-form" novalidate>
+        <h2 id="item-dialog-title">이름 입력</h2>
+        <label id="item-label">이름<input id="item-input" autocomplete="off" required /></label>
+        <label id="item-select-label" hidden>대상 폴더<select id="item-select"></select></label>
+        <p id="item-help" hidden></p>
+        <p id="item-error" role="alert" hidden></p>
+        <menu>
+          <button id="item-cancel" type="button">취소</button>
+          <button type="submit" class="primary">확인</button>
+        </menu>
+      </form>
+    </dialog>
+    <script type="module" src="./shell.mjs"></script>
+  </body>
+</html>

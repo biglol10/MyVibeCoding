@@ -38,17 +38,57 @@ public struct DocumentCodec: Codable, Sendable {
 
     public func encode(_ text: String) -> Data {
         if text == originalText { return originalData }
+        // LF is selected only when the original contains no CR at all.
+        if lineEnding == "\n" {
+            return (hasBOM ? Data([0xEF, 0xBB, 0xBF]) : Data()) + Data(text.utf8)
+        }
         // Retain the exact terminator of unchanged lines, including mixed CRLF/LF files.
         let original = String(data: hasBOM ? originalData.dropFirst(3) : originalData[...], encoding: .utf8) ?? ""
         let oldLines = Self.linesWithEndings(original)
+        // Uniform endings need no line alignment, even after a large rewrite.
+        if oldLines.dropLast().allSatisfy({ $0.1 == lineEnding }) {
+            var bytes = hasBOM ? Data([0xEF, 0xBB, 0xBF]) : Data()
+            bytes.append(Data((lineEnding == "\n" ? text : text.replacingOccurrences(of: "\n", with: lineEnding)).utf8))
+            return bytes
+        }
         let newLines = text.components(separatedBy: "\n")
         let oldBodies = oldLines.map(\.0)
-        let difference = newLines.difference(from: oldBodies)
-        var endings = oldLines.map(\.1)
-        for change in difference {
-            switch change {
-            case .remove(let offset, _, _): endings.remove(at: offset)
-            case .insert(let offset, _, _): endings.insert(lineEnding, at: offset)
+        // Trim stable edges before comparing. A whole-file rewrite must not invoke
+        // an unbounded quadratic diff merely to choose newline terminators.
+        var prefix = 0
+        while prefix < min(oldBodies.count, newLines.count), oldBodies[prefix] == newLines[prefix] { prefix += 1 }
+        var suffix = 0
+        while suffix < min(oldBodies.count, newLines.count) - prefix,
+              oldBodies[oldBodies.count - suffix - 1] == newLines[newLines.count - suffix - 1] { suffix += 1 }
+        let oldEnd = oldBodies.count - suffix, newEnd = newLines.count - suffix
+        var endings = Array(repeating: lineEnding, count: newLines.count)
+        for i in 0..<prefix { endings[i] = oldLines[i].1 }
+        for i in 0..<suffix { endings[newEnd + i] = oldLines[oldEnd + i].1 }
+        if oldEnd > prefix, newEnd > prefix {
+            let oldMiddle = Array(oldBodies[prefix..<oldEnd]), newMiddle = Array(newLines[prefix..<newEnd])
+            if oldMiddle.count <= 262_144 / newMiddle.count {
+                var middleEndings = Array(oldLines[prefix..<oldEnd].map(\.1))
+                for change in newMiddle.difference(from: oldMiddle) {
+                    switch change {
+                    case .remove(let offset, _, _): middleEndings.remove(at: offset)
+                    case .insert(let offset, _, _): middleEndings.insert(lineEnding, at: offset)
+                    }
+                }
+                endings.replaceSubrange(prefix..<newEnd, with: middleEndings)
+            } else {
+                // For massive rewrites, retain monotonic matching lines in linear
+                // space. Changed/new lines use the document's existing default.
+                var positions: [String: [Int]] = [:], cursors: [String: Int] = [:]
+                for i in prefix..<oldEnd { positions[oldBodies[i], default: []].append(i) }
+                var last = prefix - 1
+                for i in prefix..<newEnd {
+                    let line = newLines[i]
+                    guard let candidates = positions[line] else { continue }
+                    var cursor = cursors[line, default: 0]
+                    while cursor < candidates.count, candidates[cursor] <= last { cursor += 1 }
+                    if cursor < candidates.count { last = candidates[cursor]; endings[i] = oldLines[last].1; cursor += 1 }
+                    cursors[line] = cursor
+                }
             }
         }
         let body = newLines.enumerated().map { i, line in

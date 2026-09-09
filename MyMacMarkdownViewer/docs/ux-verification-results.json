@@ -1,0 +1,85 @@
+{
+  "date": "2026-09-09",
+  "environment": {
+    "macOS": "26.6.2",
+    "architecture": "arm64",
+    "configuration": "Debug",
+    "platform": "WKWebView"
+  },
+  "tests": {
+    "swift": 26,
+    "markdown": 6,
+    "webkit": 25
+  },
+  "native": {
+    "autosave": true,
+    "bomAndCRLF": true,
+    "cleanExternalReload": true,
+    "completed": true,
+    "deletedFileNotRecreated": true,
+    "dirtyExternalConflict": true,
+    "editsDuringSaveStayDirty": true,
+    "initial": {
+      "background": "rgb(25, 27, 30)",
+      "errors": 0,
+      "text": "# 조용한 문서 공간\n\n문서나 폴더를 열어 시작하세요. 읽던 흐름에서 필요한 부분만 자연스럽게 고칠 수 있습니다.\n\n## 읽기와 편집\n\n- **⌘O** 문서 열기 · **⌘⇧O** 폴더 열기\n- **⌘P** 빠른 파일 열기 · **⌘F** 문서 검색\n- **⌘⇧M** 원문 모드 전환\n\n> 기본 테마는 다크 모드입니다. 설정에서 글꼴과 읽기 폭을 조절할 수 있습니다.\n",
+      "theme": "dark",
+      "viewport": 884,
+      "widgets": 0,
+      "width": 884
+    },
+    "lightTheme": "light",
+    "nativePerformance": {
+      "bytes": 2990014,
+      "fileReadThroughTwoFramesMs": 1191.7520761489868,
+      "lines": 20003,
+      "programmaticInputP95Ms": 81
+    },
+    "nativePerformanceBudget": true,
+    "nightNativeAppearance": true,
+    "nightTheme": {
+      "background": "rgb(55, 59, 64)",
+      "colorScheme": "dark",
+      "foreground": "rgb(222, 225, 229)",
+      "theme": "night"
+    },
+    "permissionFailureKeepsEditAndRecovery": true,
+    "platform": "WKWebView",
+    "realIMEVerified": false,
+    "recoveryPersisted": true,
+    "recoveryRestored": true,
+    "saveAfterPermissionRestored": true,
+    "secondSaveIncludesNewerEdit": true,
+    "staleSessionIgnored": true,
+    "unchangedBytes": true,
+    "undoAcrossSave": true,
+    "unsupportedOpenKeepsDocument": true,
+    "workspaceFolderMoveRebasesOnlyExternalRelativeLinks": true,
+    "workspaceFolderMoveRebindsOpenDocument": true,
+    "workspaceNewQueryKeepsFreshResults": true,
+    "workspaceOtherDocumentsUnchanged": true,
+    "workspacePartialReplaceReportsEachFile": true,
+    "workspaceRenamePreservesUndo": true,
+    "workspaceRenameSavesDirtyDocument": true,
+    "workspaceReplacementRefreshesEditor": true,
+    "workspaceReviewedReplacement": true,
+    "workspaceSearchFindsNestedDocuments": true,
+    "workspaceSearchSelectsMatch": true
+  },
+  "sourceSHA256": {
+    "Sources/App/FolderSearchView.swift": "58cc1633ef511cdde94a865ab1435921f4790ca53e10767dca67ba79a69db1d7",
+    "Sources/App/WorkspaceView.swift": "3ce828f03e2865d25aea444d78d9ae8bedb95e6e57fc7e71772f6e931a38aafd",
+    "Editor/src/render.ts": "591b58c263480b175ebf4f99df71fbb485aa506ca9a35ea480a864c644f291fe",
+    "Editor/src/livePreview.ts": "6b169b16cb6c8745315f3614e2bf61781359c4ed17df07c86b0ae707016efabd",
+    "Editor/src/textPreview.ts": "3d53c06a4634a94b035dba59685bc01b5fda9c66c88cc39e6c957bf01b4ee370",
+    "Editor/src/style.css": "24487e2d46b74abda6ea961cc136719c97c596d16a065c18bfb51b93183d3f66",
+    "Editor/tests/browser/editor.spec.ts": "f103f9db3486bc93227d31d0635d3956adaf23ea9d52aed746731a4671087075"
+  },
+  "manualUI": {
+    "smallWindowAndExpandedWindow": true,
+    "longPathsAndOutline": true,
+    "replacementPreviewAndResults": true,
+    "nativeComplexCheckboxClickAndSpace": true,
+    "escapedMarkerAndCodeRemainText": true
+  }
+}

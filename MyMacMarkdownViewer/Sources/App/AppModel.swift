@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 import MyMarkdownCore
 #endif
 
-struct OutlineEntry: Identifiable {
+struct OutlineEntry: Identifiable, Equatable {
     var title: String; var level: Int; var from: Int
     var id: Int { from }
 }
@@ -16,6 +16,17 @@ final class AppModel: ObservableObject {
     let access = AccessManager()
     let bridge = EditorBridge()
     let store: FileStore
+    let workspaceFiles = WorkspaceFiles()
+    @Published var workspaceBusy = false
+    @Published var workspaceNotice: String?
+    @Published var folderQuery = "" { didSet { if folderQuery != oldValue { invalidateFolderSearch() } } }
+    @Published var folderCaseSensitive = false { didSet { if folderCaseSensitive != oldValue { invalidateFolderSearch() } } }
+    @Published var folderReplacement = ""
+    @Published var folderSearching = false
+    @Published var folderSearchReport: FolderSearch.ScanReport?
+    @Published var replacementReview: FolderReplacementReview?
+    private var folderSearchTask: Task<Void, Never>?
+    private var searchGeneration = UUID()
     @Published var settings: ReadingSettings {
         didSet {
             if let data = try? JSONEncoder().encode(settings) { UserDefaults.standard.set(data, forKey: "readingSettings") }
@@ -65,6 +76,8 @@ final class AppModel: ObservableObject {
     private var recoveryTask: Task<Void, Never>?
     private var indexTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
+    private var externalCheckTask: Task<Void, Never>?
+    var revisionForQA: Int { revision }
     private var observation: FileObservation?
     private var folderObservation: FolderObservation?
     private var fileFolderObservation: FolderObservation?
@@ -165,18 +178,23 @@ final class AppModel: ObservableObject {
                 let changes = try JSONDecoder().decode([TextChange].self, from: JSONSerialization.data(withJSONObject: values))
                 text = try TextChange.apply(changes, to: text); revision = next
                 composing = body["composing"] as? Bool ?? false
-                isDirty = text != codec.originalText; scheduleRecovery(); scheduleAutosave()
+                let dirty = text != codec.originalText
+                if isDirty != dirty { isDirty = dirty }
+                scheduleRecovery(); scheduleAutosave()
             } catch { desynchronized = true; showError(error) }
         case "metadata":
             guard body["revision"] as? Int == revision else { return }
-            outline = (body["headings"] as? [[String: Any]] ?? []).compactMap {
+            let nextOutline: [OutlineEntry] = (body["headings"] as? [[String: Any]] ?? []).compactMap {
                 guard let title = $0["title"] as? String, let level = $0["level"] as? Int, let from = $0["from"] as? Int else { return nil }
                 return OutlineEntry(title: title, level: level, from: from)
             }
+            if outline != nextOutline { outline = nextOutline }
             characters = body["characters"] as? Int ?? 0; words = body["words"] as? Int ?? 0; lines = body["lines"] as? Int ?? 1
         case "position":
             anchor = body["anchor"] as? Int ?? 0; head = body["head"] as? Int ?? anchor
-            scrollTop = body["scrollTop"] as? Double ?? 0; visibleFrom = body["visibleFrom"] as? Int ?? 0
+            scrollTop = body["scrollTop"] as? Double ?? 0
+            let nextVisible = body["visibleFrom"] as? Int ?? 0
+            if visibleFrom != nextVisible { visibleFrom = nextVisible }
         case "composition": composing = body["active"] as? Bool ?? false; scheduleRecovery(); scheduleAutosave()
         case "save": Task { _ = await save() }
         case "sourceMode": sourceMode = body["enabled"] as? Bool ?? false
@@ -235,7 +253,8 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func save(automatic: Bool = false) async -> Bool {
+    func save(automatic: Bool = false, workspace: Bool = false) async -> Bool {
+        guard !workspaceBusy || workspace else { return false }
         while isSaving { try? await Task.sleep(for: .milliseconds(30)); if Task.isCancelled { return false } }
         guard !hasConflict, !desynchronized else { return false }
         if documentURL == nil { return automatic ? false : await saveAs() }
@@ -263,7 +282,7 @@ final class AppModel: ObservableObject {
     }
 
     func saveAs() async -> Bool {
-        guard !isSaving else { return false }
+        guard !isSaving, !workspaceBusy else { return false }
         do { try await syncSnapshot() } catch { showError(error); return false }
         guard !composing else { return false }
         let panel = NSSavePanel(); panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
@@ -367,10 +386,24 @@ final class AppModel: ObservableObject {
         catch { showError(error) }
     }
     private func observeDocument() {
+        externalCheckTask?.cancel()
         observation?.stop(); observation = nil; fileFolderObservation?.stop(); fileFolderObservation = nil
         guard let documentURL else { return }
-        observation = FileObservation(url: documentURL) { [weak self] in Task { @MainActor in await self?.checkExternalChange() } }
-        fileFolderObservation = FolderObservation(url: documentURL.deletingLastPathComponent()) { [weak self] in Task { await self?.checkExternalChange() } }
+        observation = FileObservation(url: documentURL) { [weak self] in Task { @MainActor in self?.scheduleExternalCheck() } }
+        fileFolderObservation = FolderObservation(url: documentURL.deletingLastPathComponent()) { [weak self] in Task { self?.scheduleExternalCheck() } }
+    }
+    private func scheduleExternalCheck() {
+        externalCheckTask?.cancel()
+        let current = sessionID
+        externalCheckTask = Task {
+            do {
+                repeat {
+                    try await Task.sleep(for: .milliseconds(250))
+                    guard current == sessionID else { return }
+                } while isSaving || transitioning || isLoading
+                await checkExternalChange()
+            } catch is CancellationError {} catch { showError(error) }
+        }
     }
     func checkExternalChange() async {
         guard let url = documentURL, !isSaving, !transitioning, !isLoading else { return }
@@ -389,6 +422,7 @@ final class AppModel: ObservableObject {
     func didBecomeActive() { Task { await checkExternalChange(); if folderURL != nil { refreshFolder() } }; systemAppearanceChanged() }
 
     func chooseFolder() {
+        guard !workspaceBusy else { return }
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.prompt = "폴더 열기"
         if panel.runModal() == .OK, let url = panel.url { Task { await setFolder(url) } }
     }
@@ -398,6 +432,8 @@ final class AppModel: ObservableObject {
         if panel.runModal() == .OK, let url = panel.url { access.grant(url); sendSettings() }
     }
     private func setFolder(_ url: URL) async {
+        folderSearchTask?.cancel(); folderSearchReport = nil; replacementReview = nil
+        searchGeneration = UUID(); folderSearching = false
         folderObservation?.stop(); indexTask?.cancel(); refreshTask?.cancel()
         access.grant(url); folderURL = url; folderGeneration = UUID(); children = [:]; rootEntries = []; indexedFiles = []
         UserDefaults.standard.set(url.path, forKey: "lastFolder")
@@ -520,5 +556,248 @@ final class AppModel: ObservableObject {
         access.grant(url)
         let disk = try await store.read(url)
         resetDocument(url: url, codec: disk.codec)
+    }
+}
+
+struct FolderReplacementReview: Identifiable {
+    let id = UUID()
+    let root: URL
+    let query: String
+    let replacement: String
+    let plan: FolderSearch.ReplacementPlan
+}
+
+extension AppModel {
+    private func requestedName(title: String, initial: String) -> String? {
+        let alert = NSAlert(); alert.messageText = title
+        let field = NSTextField(string: initial); field.frame = NSRect(x: 0, y: 0, width: 320, height: 24)
+        alert.accessoryView = field; alert.addButton(withTitle: "확인"); alert.addButton(withTitle: "취소")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        return field.stringValue
+    }
+
+    func createWorkspaceItem(in directory: URL?, folder: Bool) {
+        guard !workspaceBusy, let root = folderURL, let directory = directory ?? folderURL,
+              let name = requestedName(title: folder ? "새 폴더" : "새 Markdown 문서", initial: folder ? "새 폴더" : "새 문서.md") else { return }
+        Task {
+            workspaceBusy = true
+            do {
+                let result = try await (folder
+                    ? workspaceFiles.createFolder(root: root, directory: directory, name: name)
+                    : workspaceFiles.createDocument(root: root, directory: directory, name: name))
+                expanded.insert(directory.path); refreshFolder(); invalidateFolderSearch()
+                workspaceBusy = false
+                if !folder { await open(result) }
+            } catch { workspaceBusy = false; showError(error) }
+        }
+    }
+
+    func renameWorkspaceItem(_ entry: FileEntry) {
+        guard !workspaceBusy, let name = requestedName(title: "이름 변경", initial: entry.name) else { return }
+        // Validate a single component before constructing a URL (which would normalize ../).
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              ![".", ".."].contains(name), !name.contains("/"), !name.contains("\0") else {
+            showError(WorkspaceFileError.invalidName); return
+        }
+        let resolvedName = !entry.isDirectory && !name.lowercased().hasSuffix(".md") ? name + ".md" : name
+        Task { await relocateWorkspaceItem(entry, to: entry.url.deletingLastPathComponent().appendingPathComponent(resolvedName, isDirectory: entry.isDirectory)) }
+    }
+
+    func chooseWorkspaceDestination(_ entry: FileEntry) {
+        guard !workspaceBusy else { return }
+        let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true
+        panel.directoryURL = folderURL; panel.prompt = "여기로 이동"
+        panel.message = "현재 작업 폴더 안의 목적지를 선택하세요. 이동한 문서의 상대 링크를 보정합니다. 다른 문서에서 이 항목으로 연결한 링크는 바꾸지 않습니다."
+        guard panel.runModal() == .OK, let directory = panel.url else { return }
+        Task { await relocateWorkspaceItem(entry, to: directory.appendingPathComponent(entry.name, isDirectory: entry.isDirectory)) }
+    }
+
+    private func isInside(_ url: URL, _ parent: URL) -> Bool {
+        let path = url.standardizedFileURL.path, root = parent.standardizedFileURL.path
+        return path == root || path.hasPrefix(root + "/")
+    }
+
+    private func beginWorkspaceChange() async -> Bool {
+        guard !workspaceBusy, !transitioning else { return false }
+        workspaceBusy = true; transitioning = true; autosaveTask?.cancel()
+        bridge.send(message("lock", ["locked": true]))
+        do {
+            try await syncSnapshot()
+            guard !composing else { throw DocumentError.unavailable }
+            return true
+        } catch { showError(error); endWorkspaceChange(); return false }
+    }
+
+    private func endWorkspaceChange() {
+        bridge.send(message("lock", ["locked": false]))
+        transitioning = false; workspaceBusy = false; scheduleAutosave()
+    }
+
+    private func saveWorkspaceDocumentIfNeeded(in root: URL) async -> Bool {
+        guard let documentURL, isInside(documentURL, root) else { return true }
+        if hasConflict || desynchronized { showError(DocumentError.conflict); return false }
+        if !isDirty { return true }
+        return await save(workspace: true)
+    }
+
+    func relocateWorkspaceItem(_ entry: FileEntry, to destination: URL) async {
+        guard let root = folderURL, destination != entry.url, await beginWorkspaceChange() else { return }
+        defer { endWorkspaceChange() }
+        guard await saveWorkspaceDocumentIfNeeded(in: entry.url) else { return }
+        let currentURL = documentURL
+        let currentMoved = currentURL.map { isInside($0, entry.url) } ?? false
+        var didMove = false
+        var recoveryIDs: [String] = []
+        do {
+            let files = try await workspaceFiles.markdownDocuments(root: root, source: entry.url)
+            var changes: [(DiskDocument, URL, String, String)] = []
+            for file in files {
+                let disk = try await store.read(file)
+                let target = URL(fileURLWithPath: destination.path + file.path.dropFirst(entry.url.path.count))
+                let rebased = try await bridge.rebaseMoved(disk.codec.originalText, oldBase: file.deletingLastPathComponent(),
+                    newBase: target.deletingLastPathComponent(), source: entry.url, destination: destination, directory: entry.isDirectory)
+                let id = UUID().uuidString
+                changes.append((disk, target, rebased, id))
+            }
+            // Preflight every document before any relocation, then retain originals for interrupted rebasing.
+            for (disk, _, _, _) in changes {
+                guard try await store.read(disk.url).hash == disk.hash else { throw DocumentError.conflict }
+            }
+            for (disk, target, rebased, id) in changes where rebased != disk.codec.originalText {
+                try await store.writeRecovery(RecoveryRecord(id: id, path: target.path, text: disk.codec.originalText, codec: disk.codec, revision: 0))
+                recoveryIDs.append(id)
+            }
+            _ = try await workspaceFiles.move(root: root, source: entry.url, destination: destination)
+            didMove = true
+            var failures: [String] = []
+            for (disk, target, rebased, id) in changes where rebased != disk.codec.originalText {
+                do {
+                    _ = try await workspaceFiles.markdownDocuments(root: root, source: target)
+                    _ = try await store.save(target, text: rebased, codec: disk.codec, expectedHash: disk.hash)
+                    try await store.removeRecovery(id); recoveryIDs.removeAll { $0 == id }
+                } catch { failures.append("\(target.lastPathComponent): \(error.localizedDescription)") }
+            }
+            if currentMoved, let currentURL {
+                let target = URL(fileURLWithPath: destination.path + currentURL.path.dropFirst(entry.url.path.count))
+                try await adoptRelocatedDocument(target)
+            }
+            expanded = Set(expanded.map { path in
+                (path == entry.url.path || path.hasPrefix(entry.url.path + "/")) ? destination.path + path.dropFirst(entry.url.path.count) : path
+            })
+            expanded.insert(destination.deletingLastPathComponent().path)
+            UserDefaults.standard.set(Array(expanded), forKey: "expanded:\(root.path)")
+            workspaceNotice = failures.isEmpty ? "\(entry.name)을(를) 이동했습니다." : "이동은 완료했지만 일부 링크 보정에 실패했습니다. 원문은 복구 목록에 보관했습니다.\n" + failures.joined(separator: "\n")
+            if !failures.isEmpty { errorMessage = workspaceNotice }
+        } catch {
+            if !didMove {
+                for id in recoveryIDs { try? await store.removeRecovery(id) }
+            } else if currentMoved, let currentURL {
+                // Never keep autosave bound to the old path after the filesystem move succeeded.
+                documentURL = URL(fileURLWithPath: destination.path + currentURL.path.dropFirst(entry.url.path.count))
+                hasConflict = true; observeDocument()
+            }
+            showError(error)
+        }
+        refreshFolder(); invalidateFolderSearch()
+    }
+
+    private func adoptRelocatedDocument(_ url: URL) async throws {
+        let disk = try await store.read(url)
+        await finishRecoveryTask(); try await store.removeRecovery(recoveryID)
+        persistPosition()
+        let nextSession = UUID().uuidString
+        bridge.send(message("relocate", ["text": disk.codec.originalText, "nextDocumentID": url.path,
+            "nextSessionID": nextSession, "baseURL": url.deletingLastPathComponent().absoluteString]))
+        documentURL = url; documentID = url.path; sessionID = nextSession; revision = 0
+        text = disk.codec.originalText; codec = disk.codec; isDirty = false; hasConflict = false; desynchronized = false
+        access.grant(url); observeDocument(); persistPosition()
+        NSDocumentController.shared.noteNewRecentDocumentURL(url)
+    }
+
+    func trashWorkspaceItem(_ entry: FileEntry) {
+        guard !workspaceBusy else { return }
+        let alert = NSAlert()
+        alert.messageText = "‘\(entry.name)’을(를) 휴지통으로 보낼까요?"
+        alert.informativeText = entry.isDirectory ? "폴더 안의 모든 항목도 함께 이동합니다. 다른 문서의 연결은 자동 수정하지 않습니다." : "Finder의 휴지통에서 되돌릴 수 있습니다. 다른 문서의 연결은 자동 수정하지 않습니다."
+        alert.addButton(withTitle: "휴지통으로 보내기"); alert.addButton(withTitle: "취소")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        Task {
+            guard let root = folderURL, await beginWorkspaceChange() else { return }
+            defer { endWorkspaceChange() }
+            guard await saveWorkspaceDocumentIfNeeded(in: entry.url) else { return }
+            do {
+                _ = try await workspaceFiles.trash(root: root, source: entry.url)
+                if let documentURL, isInside(documentURL, entry.url) {
+                    await finishRecoveryTask(); try await store.removeRecovery(recoveryID)
+                    resetDocument(url: nil, codec: try DocumentCodec(data: Data()))
+                }
+                expanded = expanded.filter { $0 != entry.url.path && !$0.hasPrefix(entry.url.path + "/") }
+                refreshFolder(); invalidateFolderSearch(); workspaceNotice = "\(entry.name)을(를) 휴지통으로 보냈습니다."
+            } catch { showError(error) }
+        }
+    }
+
+    func showFolderSearch() {
+        sidebarVisible = true; sidebarMode = "search"
+        if folderURL == nil { chooseFolder() }
+    }
+
+    func invalidateFolderSearch() {
+        folderSearchTask?.cancel(); searchGeneration = UUID(); folderSearchReport = nil; folderSearching = false
+    }
+
+    func runFolderSearch() {
+        guard !workspaceBusy else { return }
+        invalidateFolderSearch(); workspaceNotice = nil
+        guard let root = folderURL, !folderQuery.isEmpty else { return }
+        let generation = searchGeneration, options = FolderSearch.Options(query: folderQuery, caseSensitive: folderCaseSensitive)
+        folderSearching = true
+        folderSearchTask = Task {
+            guard await beginWorkspaceChange() else { folderSearching = false; return }
+            let ready = await saveWorkspaceDocumentIfNeeded(in: root)
+            endWorkspaceChange()
+            guard ready, !Task.isCancelled else { folderSearching = false; return }
+            let result = await FolderSearch.scan(folder: root, options: options)
+            guard generation == searchGeneration, !Task.isCancelled else { return }
+            folderSearchReport = result; folderSearching = false
+        }
+    }
+
+    func openSearchMatch(_ file: FolderSearch.FileResult, match: FolderSearch.Match) async {
+        guard !workspaceBusy else { return }
+        await open(file.url)
+        guard documentURL == file.url else { return }
+        do {
+            try await syncSnapshot()
+            guard !isDirty, DocumentCodec.hash(codec.originalData) == file.originalHash else {
+                workspaceNotice = "검색 후 문서가 바뀌었습니다. 다시 검색해 주세요."; return
+            }
+            bridge.send(message("jump", ["from": match.range.lowerBound, "to": match.range.upperBound]))
+        } catch { showError(error) }
+    }
+
+    func reviewFolderReplacement() {
+        guard let root = folderURL, let report = folderSearchReport, report.isComplete, !report.files.isEmpty, !workspaceBusy else { return }
+        replacementReview = FolderReplacementReview(root: root, query: folderQuery, replacement: folderReplacement, plan: report.replacementPlan)
+    }
+
+    func applyFolderReplacement(_ review: FolderReplacementReview, selected: Set<URL>) async -> FolderSearch.ApplyReport? {
+        guard folderURL == review.root, !selected.isEmpty, await beginWorkspaceChange() else { return nil }
+        defer { endWorkspaceChange() }
+        guard await saveWorkspaceDocumentIfNeeded(in: review.root) else { return nil }
+        let report = await FolderSearch.apply(plan: review.plan, replacement: review.replacement, including: selected, store: store)
+        if let documentURL, report.outcomes.contains(where: { $0.url == documentURL && $0.status == .saved }) {
+            do { try await adoptRelocatedDocument(documentURL) } catch { hasConflict = true; showError(error) }
+        }
+        invalidateFolderSearch(); refreshFolder()
+        return report
+    }
+
+    func setQAWorkspace(_ root: URL) async throws {
+        let args = ProcessInfo.processInfo.arguments
+        guard args.contains("--qa"), let index = args.firstIndex(of: "--qa-root"), args.indices.contains(index + 1),
+              isInside(root, URL(fileURLWithPath: args[index + 1])) else { throw DocumentError.unsafePath }
+        await setFolder(root)
     }
 }

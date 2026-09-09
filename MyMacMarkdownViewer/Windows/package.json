@@ -1,0 +1,22 @@
+{
+  "name": "mymarkdownviewer-windows",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "main.mjs",
+  "description": "Portable Markdown editor for Windows",
+  "author": "MyMarkdownViewer",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.test.mjs",
+    "prepare:editor": "node scripts/prepare-editor.mjs",
+    "package:win": "node scripts/package.mjs"
+  },
+  "dependencies": {
+    "diff": "8.0.4"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "44.3.0"
+  }
+}

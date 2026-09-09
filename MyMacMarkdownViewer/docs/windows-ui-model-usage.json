@@ -1,0 +1,14 @@
+{
+  "gpt-5.6-luna": {
+    "tokens": 2305641,
+    "percent": 3.9
+  },
+  "gpt-5.6-terra": {
+    "tokens": 11018504,
+    "percent": 18.5
+  },
+  "gpt-6-astra": {
+    "tokens": 46270372,
+    "percent": 77.6
+  }
+}

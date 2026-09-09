@@ -13,6 +13,32 @@ struct DocumentTests {
         #expect(String(data: edited.dropFirst(3), encoding: .utf8)?.contains("한글 👩🏽‍💻\nlast\r") == true)
     }
 
+    @Test func largeUniformRewriteKeepsBOMEndingsAndFinalNewline() throws {
+        for ending in ["\n", "\r\n", "\r"] {
+            let source = (0..<4000).map { "기존 줄 \($0)" }.joined(separator: ending)
+            let text = (0..<4000).map { "바뀐 줄 \($0) 😀" }.joined(separator: "\n") + "\n"
+            let codec = try DocumentCodec(data: Data([0xEF, 0xBB, 0xBF]) + Data(source.utf8))
+            let began = Date.now
+            let bytes = codec.encode(text)
+            #expect(Date.now.timeIntervalSince(began) < 2)
+            #expect(bytes == Data([0xEF, 0xBB, 0xBF]) + Data(text.replacingOccurrences(of: "\n", with: ending).utf8))
+        }
+    }
+
+    @Test func largeMixedRewritePreservesStableAndMatchedLineTerminators() throws {
+        let old = "prefix\r\n" + (0..<4000).map { "old \($0)\n" }.joined() + "unchanged middle\r" + (0..<4000).map { "tail \($0)\n" }.joined() + "suffix\r\n"
+        let text = "prefix\n" + (0..<4000).map { "new \($0)\n" }.joined() + "unchanged middle\n" + (0..<4000).map { "changed \($0)\n" }.joined() + "suffix\n"
+        let codec = try DocumentCodec(data: Data(old.utf8))
+        let began = Date.now
+        let encoded = codec.encode(text)
+        #expect(Date.now.timeIntervalSince(began) < 2)
+        let output = String(data: encoded, encoding: .utf8)!
+        #expect(DocumentCodec.normalize(output) == text)
+        #expect(output.hasPrefix("prefix\r\n"))
+        #expect(output.contains("unchanged middle\rchanged 0\r\n"))
+        #expect(output.hasSuffix("suffix\r\n"))
+    }
+
     @Test func unsupportedEncodingFailsWithoutLossyConversion() {
         #expect(throws: DocumentError.unsupportedEncoding) { try DocumentCodec(data: Data([0xFF, 0xFE, 0x41, 0x00])) }
         #expect(throws: DocumentError.unsupportedEncoding) { try DocumentCodec(data: Data([0xC0, 0xAF])) }

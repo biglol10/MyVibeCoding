@@ -26,9 +26,8 @@ export function blocksFor(text: string, tree: Tree = markdownParser.parse(text))
   return blocks;
 }
 
-export function outlineFor(text: string): Heading[] {
+export function outlineFor(text: string, tree: Tree = markdownParser.parse(text)): Heading[] {
   const headings: Heading[] = [];
-  const tree = markdownParser.parse(text);
   tree.iterate({ enter(node) {
     const match = /^(?:ATX|Setext)Heading([1-6])$/.exec(node.name);
     if (!match) return;
@@ -39,12 +38,26 @@ export function outlineFor(text: string): Heading[] {
   return headings;
 }
 
-export function relativeDestination(destination: string, oldBase: string, newBase: string): string {
+export interface Relocation { source: string; destination: string; directory: boolean }
+
+export function relativeDestination(destination: string, oldBase: string, newBase: string, relocation?: Relocation): string {
   if (!destination || /^(?:[a-z][\w+.-]*:|\/|#)/i.test(destination)) return destination;
   try {
     const target = new URL(destination, oldBase);
     const newURL = new URL(newBase);
     if (target.protocol !== 'file:' || newURL.protocol !== 'file:') return destination;
+    // Windows volumes and UNC shares cannot be expressed by walking up with ../.
+    const volume = (url: URL) => url.host ? `${url.host.toLowerCase()}/${url.pathname.split('/')[1]?.toLowerCase()}` : /^\/[a-z]:\//i.test(url.pathname) ? url.pathname.slice(1, 3).toLowerCase() : '';
+    if (volume(target) !== volume(newURL)) return target.href;
+    if (relocation) {
+      const source = new URL(relocation.source).pathname.replace(/\/$/, '');
+      const moved = new URL(relocation.destination).pathname.replace(/\/$/, '');
+      if (target.pathname === source || (relocation.directory && target.pathname.startsWith(source + '/'))) {
+        target.pathname = moved + target.pathname.slice(source.length);
+      }
+      // Moving a whole folder keeps its internal relative references byte-identical.
+      if (new URL(destination, newBase).href === target.href) return destination;
+    }
     const targetParts = target.pathname.split('/').filter(Boolean);
     const baseParts = newURL.pathname.split('/').filter(Boolean);
     while (targetParts.length && baseParts.length && targetParts[0] === baseParts[0]) { targetParts.shift(); baseParts.shift(); }
@@ -52,15 +65,15 @@ export function relativeDestination(destination: string, oldBase: string, newBas
   } catch { return destination; }
 }
 
-export function rebaseMarkdown(text: string, oldBase: string, newBase: string): string {
-  if (!oldBase || oldBase === newBase) return text;
+export function rebaseMarkdown(text: string, oldBase: string, newBase: string, relocation?: Relocation): string {
+  if (!oldBase || (oldBase === newBase && !relocation)) return text;
   const edits: { from: number; to: number; insert: string }[] = [];
   markdownParser.parse(text).iterate({ enter(node) {
     if (node.name !== 'URL') return;
     const raw = text.slice(node.from, node.to);
     const angle = raw.startsWith('<') && raw.endsWith('>');
     const value = angle ? raw.slice(1, -1) : raw;
-    const next = relativeDestination(value, oldBase, newBase);
+    const next = relativeDestination(value, oldBase, newBase, relocation);
     if (next !== value) edits.push({ from: node.from, to: node.to, insert: angle ? `<${next}>` : next });
   }});
   for (const edit of edits.reverse()) text = text.slice(0, edit.from) + edit.insert + text.slice(edit.to);

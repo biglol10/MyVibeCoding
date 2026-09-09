@@ -1,0 +1,82 @@
+{
+  "date": "2026-09-09",
+  "environment": {
+    "architecture": "arm64",
+    "macOS": "26.6.2",
+    "build": "Debug",
+    "bundle": "com.personal.MyMarkdownViewer.WorkspaceQA"
+  },
+  "sourceDigestSHA256": "e6f1d431992a3d08d5b13504643a711c8702ae548564b001227d2f42bbecf5af",
+  "tests": {
+    "swift": 26,
+    "markdown": 6,
+    "webkit": 22,
+    "typescript": "passed",
+    "nativeBuild": "passed"
+  },
+  "native": {
+    "autosave": true,
+    "bomAndCRLF": true,
+    "cleanExternalReload": true,
+    "completed": true,
+    "deletedFileNotRecreated": true,
+    "dirtyExternalConflict": true,
+    "editsDuringSaveStayDirty": true,
+    "initial": {
+      "background": "rgb(25, 27, 30)",
+      "errors": 0,
+      "text": "# 조용한 문서 공간\n\n문서나 폴더를 열어 시작하세요. 읽던 흐름에서 필요한 부분만 자연스럽게 고칠 수 있습니다.\n\n## 읽기와 편집\n\n- **⌘O** 문서 열기 · **⌘⇧O** 폴더 열기\n- **⌘P** 빠른 파일 열기 · **⌘F** 문서 검색\n- **⌘⇧M** 원문 모드 전환\n\n> 기본 테마는 다크 모드입니다. 설정에서 글꼴과 읽기 폭을 조절할 수 있습니다.\n",
+      "theme": "dark",
+      "viewport": 879,
+      "widgets": 0,
+      "width": 879
+    },
+    "lightTheme": "light",
+    "nativePerformance": {
+      "bytes": 2990014,
+      "fileReadThroughTwoFramesMs": 682.731032371521,
+      "lines": 20003,
+      "programmaticInputP95Ms": 76
+    },
+    "nativePerformanceBudget": true,
+    "nightNativeAppearance": true,
+    "nightTheme": {
+      "background": "rgb(55, 59, 64)",
+      "colorScheme": "dark",
+      "foreground": "rgb(222, 225, 229)",
+      "theme": "night"
+    },
+    "permissionFailureKeepsEditAndRecovery": true,
+    "platform": "WKWebView",
+    "realIMEVerified": false,
+    "recoveryPersisted": true,
+    "recoveryRestored": true,
+    "saveAfterPermissionRestored": true,
+    "secondSaveIncludesNewerEdit": true,
+    "staleSessionIgnored": true,
+    "unchangedBytes": true,
+    "undoAcrossSave": true,
+    "unsupportedOpenKeepsDocument": true,
+    "workspaceFolderMoveRebasesOnlyExternalRelativeLinks": true,
+    "workspaceFolderMoveRebindsOpenDocument": true,
+    "workspaceNewQueryKeepsFreshResults": true,
+    "workspaceOtherDocumentsUnchanged": true,
+    "workspacePartialReplaceReportsEachFile": true,
+    "workspaceRenamePreservesUndo": true,
+    "workspaceRenameSavesDirtyDocument": true,
+    "workspaceReplacementRefreshesEditor": true,
+    "workspaceReviewedReplacement": true,
+    "workspaceSearchFindsNestedDocuments": true,
+    "workspaceSearchSelectsMatch": true
+  },
+  "ui": {
+    "createdDocumentFromSidebar": true,
+    "previewShowsBeforeAfter": true,
+    "selectedFileApplied": true,
+    "excludedFileReported": true,
+    "resultRowsUpdated": true,
+    "trashConfirmationAndCancel": true,
+    "actualTrashAndRestore": false
+  },
+  "distributionUpdated": false
+}

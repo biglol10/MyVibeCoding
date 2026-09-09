@@ -2,6 +2,9 @@ import AppKit
 import SwiftUI
 import WebKit
 import UniformTypeIdentifiers
+#if SWIFT_PACKAGE
+import MyMarkdownCore
+#endif
 
 @MainActor
 final class EditorBridge: NSObject, ObservableObject, WKScriptMessageHandler, WKNavigationDelegate, WKURLSchemeHandler {
@@ -53,6 +56,18 @@ final class EditorBridge: NSObject, ObservableObject, WKScriptMessageHandler, WK
         else { result = try await webView.callAsyncJavaScript("return window.MarkdownHost.snapshot()", arguments: [:], in: nil, contentWorld: .page) }
         guard let snapshot = result as? [String: Any] else { throw CocoaError(.coderReadCorrupt) }
         return snapshot
+    }
+
+    func rebaseMoved(_ text: String, oldBase: URL, newBase: URL, source: URL, destination: URL, directory: Bool) async throws -> String {
+        guard isReady, let webView else { throw DocumentError.unavailable }
+        await sendTask?.value
+        let result = try await webView.callAsyncJavaScript(
+            "return window.MarkdownHost.rebaseMoved(text, oldBase, newBase, source, destination, directory)",
+            arguments: ["text": text, "oldBase": oldBase.absoluteString, "newBase": newBase.absoluteString,
+                        "source": source.absoluteString, "destination": destination.absoluteString, "directory": directory],
+            in: nil, contentWorld: .page)
+        guard let value = result as? String else { throw DocumentError.invalidChange }
+        return value
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {

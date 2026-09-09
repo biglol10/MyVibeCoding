@@ -1,0 +1,80 @@
+{
+  "date": "2026-09-09",
+  "version": "0.1.0",
+  "build": "1",
+  "installedApp": "/Applications/MyMarkdownViewer.app",
+  "backup": "build/previous-installed-65jrw47e/MyMarkdownViewer.app",
+  "configuration": "Release",
+  "architecture": [
+    "x86_64",
+    "arm64"
+  ],
+  "executedEnvironment": {
+    "macOS": "26.6.2",
+    "architecture": "arm64",
+    "platform": "WKWebView"
+  },
+  "zipSHA256": "0dd03d88171577b3059227d078ca40b51ffd4b360550e07c4d6db88c6a8cc3bf",
+  "zipContentsMatchApp": true,
+  "installedManifestMatchesRelease": true,
+  "matchedFileCount": 241,
+  "signatureVerified": true,
+  "installedAppLaunchVerified": true,
+  "installedUIVerified": true,
+  "nativeQA": {
+    "autosave": true,
+    "bomAndCRLF": true,
+    "cleanExternalReload": true,
+    "completed": true,
+    "deletedFileNotRecreated": true,
+    "dirtyExternalConflict": true,
+    "editsDuringSaveStayDirty": true,
+    "initial": {
+      "background": "rgb(25, 27, 30)",
+      "errors": 0,
+      "text": "# 조용한 문서 공간\n\n문서나 폴더를 열어 시작하세요. 읽던 흐름에서 필요한 부분만 자연스럽게 고칠 수 있습니다.\n\n## 읽기와 편집\n\n- **⌘O** 문서 열기 · **⌘⇧O** 폴더 열기\n- **⌘P** 빠른 파일 열기 · **⌘F** 문서 검색\n- **⌘⇧M** 원문 모드 전환\n\n> 기본 테마는 다크 모드입니다. 설정에서 글꼴과 읽기 폭을 조절할 수 있습니다.\n",
+      "theme": "dark",
+      "viewport": 884,
+      "widgets": 0,
+      "width": 884
+    },
+    "lightTheme": "light",
+    "nativePerformance": {
+      "bytes": 2990014,
+      "fileReadThroughTwoFramesMs": 1081.9209814071655,
+      "lines": 20003,
+      "programmaticInputP95Ms": 67
+    },
+    "nativePerformanceBudget": true,
+    "nightNativeAppearance": true,
+    "nightTheme": {
+      "background": "rgb(55, 59, 64)",
+      "colorScheme": "dark",
+      "foreground": "rgb(222, 225, 229)",
+      "theme": "night"
+    },
+    "permissionFailureKeepsEditAndRecovery": true,
+    "platform": "WKWebView",
+    "realIMEVerified": false,
+    "recoveryPersisted": true,
+    "recoveryRestored": true,
+    "saveAfterPermissionRestored": true,
+    "secondSaveIncludesNewerEdit": true,
+    "staleSessionIgnored": true,
+    "unchangedBytes": true,
+    "undoAcrossSave": true,
+    "unsupportedOpenKeepsDocument": true,
+    "workspaceFolderMoveRebasesOnlyExternalRelativeLinks": true,
+    "workspaceFolderMoveRebindsOpenDocument": true,
+    "workspaceNewQueryKeepsFreshResults": true,
+    "workspaceOtherDocumentsUnchanged": true,
+    "workspacePartialReplaceReportsEachFile": true,
+    "workspaceRenamePreservesUndo": true,
+    "workspaceRenameSavesDirtyDocument": true,
+    "workspaceReplacementRefreshesEditor": true,
+    "workspaceReviewedReplacement": true,
+    "workspaceSearchFindsNestedDocuments": true,
+    "workspaceSearchSelectsMatch": true
+  },
+  "physicalIME": "Deferred by user; Mac built-in keyboard and macOS two-set planned"
+}

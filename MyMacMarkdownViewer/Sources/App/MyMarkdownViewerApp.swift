@@ -40,6 +40,7 @@ struct MyMarkdownViewerApp: App {
             CommandGroup(after: .textEditing) {
                 Divider()
                 Button("문서에서 찾기") { model.command("find") }.keyboardShortcut("f")
+                Button("폴더 전체 검색") { model.showFolderSearch() }.keyboardShortcut("f", modifiers: [.command, .shift])
                 Button("찾아 바꾸기") { model.command("replace") }.keyboardShortcut("f", modifiers: [.command, .option])
             }
             CommandMenu("서식") {

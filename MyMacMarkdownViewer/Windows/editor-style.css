@@ -1,0 +1,3 @@
+/* Leave space for editable heading markers, even in a narrow writing pane. */
+.cm-content {padding-left:max(40px,calc(var(--font-size) * 2.8))!important;padding-right:32px!important}
+.cm-line.md-prose,.preview-widget p,.preview-widget li {word-break:keep-all;overflow-wrap:anywhere}

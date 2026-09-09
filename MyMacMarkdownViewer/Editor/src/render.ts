@@ -13,12 +13,20 @@ import sql from 'highlight.js/lib/languages/sql';
 import yaml from 'highlight.js/lib/languages/yaml';
 import { session } from './protocol';
 import type { Settings } from './protocol';
+import { markdownParser } from './markdown';
 
 for (const [name, grammar] of Object.entries({ javascript, typescript, swift, python, json, bash, css, xml, sql, yaml })) hljs.registerLanguage(name, grammar);
 const md = new MarkdownIt({ html: false, linkify: false, typographer: false, highlight(code, language) {
   if (hljs.getLanguage(language)) return hljs.highlight(code, { language, ignoreIllegals: true }).value;
   return '';
 }});
+
+md.renderer.rules.list_item_open = (tokens, index, options, env, renderer) => {
+  const token = tokens[index];
+  const offset = (env as { taskOffsets?: Map<number, number> }).taskOffsets?.get(token.map?.[0] ?? -1);
+  if (offset !== undefined) token.attrSet('data-task-offset', String(offset));
+  return renderer.renderToken(tokens, index, options);
+};
 
 md.inline.ruler.after('escape', 'math_inline', (state, silent) => {
   const start = state.pos;
@@ -55,17 +63,24 @@ export function renderBlock(source: string, settings: Settings): HTMLElement {
     try { katex.render(math, element, { displayMode: true, trust: false, throwOnError: true, strict: 'ignore', maxSize: 20, maxExpand: 1000 }); }
     catch (error) { showRenderError(element, source, String(error)); }
   } else {
-    element.innerHTML = md.render(source, { settings });
+    const taskOffsets = new Map<number, number>();
+    markdownParser.parse(source).iterate({ enter(node) {
+      if (node.name === 'TaskMarker') taskOffsets.set(source.slice(0, node.from).split('\n').length - 1, node.from + 1);
+    }});
+    element.innerHTML = md.render(source, { settings, taskOffsets });
     // Keep checkboxes as explicit editor transactions; never rely on mutated DOM as the document.
     element.querySelectorAll('li').forEach(li => {
+      if (li.dataset.taskOffset === undefined) return;
       const walker = document.createTreeWalker(li, NodeFilter.SHOW_TEXT);
-      const text = walker.nextNode();
+      let text = walker.nextNode();
+      while (text && !text.textContent?.trim()) text = walker.nextNode();
+      if (text?.parentElement?.closest('li') !== li || text?.parentElement?.closest('pre, code')) return;
       if (!text || !/^\[[ xX]\] /.test(text.textContent ?? '')) return;
       const checked = /^\[[xX]\]/.test(text.textContent!);
       const button = document.createElement('button');
       button.className = 'task-checkbox'; button.type = 'button';
       button.setAttribute('role', 'checkbox'); button.setAttribute('aria-checked', String(checked));
-      button.setAttribute('aria-label', '할 일 완료 상태 변경'); button.dataset.task = '';
+      button.setAttribute('aria-label', '할 일 완료 상태 변경'); button.dataset.task = li.dataset.taskOffset;
       button.textContent = checked ? '✓' : '';
       text.textContent = text.textContent!.slice(4); text.parentNode!.insertBefore(button, text);
       li.classList.add('task-item');

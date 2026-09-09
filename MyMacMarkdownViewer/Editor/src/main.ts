@@ -25,8 +25,12 @@ const welcome = `# 조용한 문서 공간\n\n긴 글을 편하게 읽고, 필�
 function emitMetadata() {
   clearTimeout(metadataTimer);
   metadataTimer = setTimeout(() => {
+    if (view.state.field(previewOptions).composing) return;
     const text = view.state.doc.toString();
-    post('metadata', { headings: outlineFor(text), characters: [...text].length, words: text.trim() ? text.trim().split(/\s+/).length : 0, lines: view.state.doc.lines });
+    let characters = 0, words = 0;
+    for (const _ of text) characters++;
+    const word = /\S+/g; while (word.exec(text)) words++;
+    post('metadata', { headings: outlineFor(text, view.state.field(livePreview).tree), characters, words, lines: view.state.doc.lines });
   }, 180);
 }
 
@@ -91,7 +95,7 @@ function makeState(text: string, anchor = 0, head = anchor) {
     EditorView.domEventHandlers({
       mousedown(event) {
         const link = (event.target as HTMLElement).closest<HTMLElement>('.md-link[data-href]');
-        if (link && event.metaKey) { event.preventDefault(); post('openLink', { href: link.dataset.href }); return true; }
+        if (link && (event.metaKey || event.ctrlKey)) { event.preventDefault(); post('openLink', { href: link.dataset.href }); return true; }
         return false;
       },
       compositionstart() { view.dispatch({ effects: setComposition.of(true) }); post('composition', { active: true }); },
@@ -200,10 +204,21 @@ const host = {
     }
     if (message.type === 'settings') { applySettings(message.settings); return; }
     if (!accepts(message)) return;
+    if (message.type === 'relocate') {
+      loading = true;
+      if (message.text !== view.state.doc.toString()) {
+        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: message.text },
+          selection: { anchor: Math.min(view.state.selection.main.anchor, message.text.length), head: Math.min(view.state.selection.main.head, message.text.length) } });
+      }
+      setSession({ documentID: message.nextDocumentID, sessionID: message.nextSessionID, revision: 0, baseURL: message.baseURL });
+      // Refresh local image URLs after the file's base and editing session change.
+      view.dispatch({ effects: updateSettings.of(settings) });
+      loading = false; emitMetadata(); post('opened'); return;
+    }
     if (message.type === 'command') command(message.command);
     if (message.type === 'jump') {
       navigationAnchor = Math.min(view.state.doc.length, message.from);
-      view.dispatch({ selection: { anchor: navigationAnchor }, effects: EditorView.scrollIntoView(navigationAnchor, { y: 'start', yMargin: 32 }) }); view.focus();
+      view.dispatch({ selection: { anchor: navigationAnchor, head: Math.min(view.state.doc.length, message.to ?? navigationAnchor) }, effects: EditorView.scrollIntoView(navigationAnchor, { y: 'start', yMargin: 32 }) }); view.focus();
     }
     if (message.type === 'insert') {
       if (!canEdit()) return;
@@ -213,6 +228,9 @@ const host = {
   },
   snapshot() { return { ...session, text: view.state.doc.toString(), anchor: view.state.selection.main.anchor, head: view.state.selection.main.head, scrollTop: view.scrollDOM.scrollTop, visibleFrom: visibleFrom(), composing: view.composing || view.state.field(previewOptions).composing }; },
   prepareSaveAs(newBase: string) { return { ...host.snapshot(), text: rebaseMarkdown(view.state.doc.toString(), session.baseURL, newBase) }; },
+  rebaseMoved(text: string, oldBase: string, newBase: string, source: string, destination: string, directory: boolean) {
+    return rebaseMarkdown(text, oldBase, newBase, { source, destination, directory });
+  },
   focus() { view.focus(); },
 };
 Object.defineProperty(window, 'MarkdownHost', { value: host, writable: false });

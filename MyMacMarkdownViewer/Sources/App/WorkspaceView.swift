@@ -77,6 +77,7 @@ struct WorkspaceView: View {
         }
         .sheet(isPresented: $model.quickOpen) { QuickOpenView(model: model) }
         .sheet(isPresented: $model.showRecovery) { RecoveryView(model: model) }
+        .sheet(item: $model.replacementReview) { review in FolderReplaceView(model: model, review: review) }
         }
     }
 
@@ -122,14 +123,21 @@ struct WorkspaceView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             Picker("사이드바", selection: $model.sidebarMode) {
-                Text("파일").tag("files"); Text("목차").tag("outline")
+                Text("파일").tag("files"); Text("목차").tag("outline"); Text("검색").tag("search")
             }.pickerStyle(.segmented).labelsHidden().padding(12)
             if model.sidebarMode == "files" {
                 HStack {
-                    Text(model.folderURL?.lastPathComponent ?? "작업 폴더").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    Text(model.folderURL?.lastPathComponent ?? "작업 폴더").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary).lineLimit(2).lineSpacing(3).truncationMode(.middle)
                         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading).help(model.folderURL?.path ?? "작업 폴더")
                     Spacer()
-                    Button { model.chooseFolder() } label: { Image(systemName: "folder.badge.plus") }.buttonStyle(.plain).help("폴더 열기")
+                    if model.folderURL != nil {
+                        Menu {
+                            Button("새 문서…") { model.createWorkspaceItem(in: nil, folder: false) }
+                            Button("새 폴더…") { model.createWorkspaceItem(in: nil, folder: true) }
+                        } label: { Image(systemName: "plus").frame(width: 26, height: 28) }.menuStyle(.borderlessButton).fixedSize()
+                            .help("작업 폴더에 만들기").disabled(model.workspaceBusy)
+                    }
+                    Button { model.chooseFolder() } label: { Image(systemName: "folder.badge.plus").frame(width: 28, height: 28) }.buttonStyle(.plain).help("폴더 열기")
                 }.padding(.horizontal, 14).padding(.vertical, 8)
                 if model.folderURL == nil {
                     VStack(alignment: .leading, spacing: 12) {
@@ -145,6 +153,8 @@ struct WorkspaceView: View {
                         }
                     }
                 }
+            } else if model.sidebarMode == "search" {
+                FolderSearchView(model: model)
             } else {
                 if model.outline.isEmpty {
                     Text("문서의 제목이 여기에 표시됩니다.").font(.callout).foregroundStyle(.secondary).padding(16)
@@ -153,13 +163,13 @@ struct WorkspaceView: View {
                         LazyVStack(alignment: .leading, spacing: 2) {
                             ForEach(model.outline) { entry in
                                 Button { model.jump(entry.from) } label: {
-                                    Text(entry.title).font(.system(size: 12, weight: entry.level <= 2 ? .medium : .regular))
+                                    Text(entry.title).font(.system(size: 13, weight: entry.level <= 2 ? .medium : .regular))
                                         .foregroundStyle(model.currentHeading == entry.from ? .primary : .secondary)
-                                        .lineLimit(2).multilineTextAlignment(.leading)
-                                        .padding(.leading, CGFloat((entry.level - 1) * 10 + 10)).padding(.trailing, 8).padding(.vertical, 7)
+                                        .lineLimit(3).lineSpacing(3).multilineTextAlignment(.leading)
+                                        .padding(.leading, CGFloat((entry.level - 1) * 10 + 10)).padding(.trailing, 8).padding(.vertical, 9)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                         .background(model.currentHeading == entry.from ? Color.primary.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 5))
-                                }.buttonStyle(.plain)
+                                }.buttonStyle(.plain).help(entry.title)
                             }
                         }.padding(.horizontal, 8)
                     }
@@ -169,7 +179,7 @@ struct WorkspaceView: View {
             HStack {
                 if model.indexing { ProgressView().controlSize(.mini); Text("파일 찾는 중…") }
                 else { Text(model.folderURL == nil ? "파일은 원래 위치에 보관됩니다" : "\(model.indexedFiles.count)개의 Markdown 문서") }
-            }.font(.system(size: 10)).foregroundStyle(.tertiary).padding(14)
+            }.font(.system(size: 11)).foregroundStyle(.secondary).padding(14)
         }.frame(maxHeight: .infinity).background { chromeBackground }
     }
 }
@@ -180,23 +190,34 @@ private struct FileTreeRows: View {
     let depth: Int
     let width: CGFloat
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: 1) {
+        LazyVStack(alignment: .leading, spacing: 2) {
             ForEach(entries) { entry in
                 Button {
                     if entry.isDirectory { model.toggleFolder(entry) }
                     else { Task { await model.open(entry.url) } }
                 } label: {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 8) {
                         Image(systemName: entry.isDirectory ? (model.expanded.contains(entry.id) ? "chevron.down" : "chevron.right") : "doc.text")
                             .font(.system(size: entry.isDirectory ? 9 : 12)).foregroundStyle(.secondary).frame(width: 14)
                         if entry.isDirectory { Image(systemName: "folder").foregroundStyle(.secondary).frame(width: 16) }
-                        Text(entry.name).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                        Text(entry.name).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
                             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                    }.padding(.leading, min(CGFloat(depth * 13 + 8), max(8, width - 110))).padding(.trailing, 8).frame(width: width, height: 28)
+                    }.padding(.leading, min(CGFloat(depth * 13 + 8), max(8, width - 110))).padding(.trailing, 8).frame(width: width, height: 32)
                         .contentShape(Rectangle())
                         .background(model.documentURL == entry.url ? Color.primary.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 5))
                 }.buttonStyle(.plain).help(entry.url.path).accessibilityLabel(entry.name)
-                    .contextMenu { Button("Finder에서 보기") { model.reveal(entry.url) } }
+                    .contextMenu {
+                        if entry.isDirectory {
+                            Button("여기에 새 문서…") { model.createWorkspaceItem(in: entry.url, folder: false) }
+                            Button("여기에 새 폴더…") { model.createWorkspaceItem(in: entry.url, folder: true) }
+                            Divider()
+                        }
+                        Button("이름 변경…") { model.renameWorkspaceItem(entry) }
+                        Button("이동…") { model.chooseWorkspaceDestination(entry) }
+                        Button("휴지통으로 보내기…", role: .destructive) { model.trashWorkspaceItem(entry) }
+                        Divider()
+                        Button("Finder에서 보기") { model.reveal(entry.url) }
+                    }.disabled(model.workspaceBusy)
                 if entry.isDirectory, model.expanded.contains(entry.id) {
                     AnyView(FileTreeRows(model: model, entries: model.children[entry.id] ?? [], depth: depth + 1, width: width))
                 }

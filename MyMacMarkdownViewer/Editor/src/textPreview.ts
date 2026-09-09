@@ -79,18 +79,26 @@ class PrefixWidget extends WidgetType {
       button.setAttribute('role', 'checkbox'); button.setAttribute('aria-checked', String(this.checked));
       button.setAttribute('aria-label', '할 일 완료 상태 변경'); button.dataset.task = '';
       button.textContent = this.checked ? '✓' : '';
-      button.addEventListener('mousedown', event => {
+      button.addEventListener('mousedown', event => { event.preventDefault(); event.stopPropagation(); });
+      button.addEventListener('click', event => {
         event.preventDefault(); event.stopPropagation();
         if (view.state.readOnly || view.composing || this.isComposing(view.state)) return;
         const from = view.posAtDOM(span), line = view.state.doc.lineAt(from);
         const match = /\[([ xX])\]/.exec(line.text);
-        if (match) view.dispatch({ changes: { from: line.from + match.index + 1, to: line.from + match.index + 2, insert: this.checked ? ' ' : 'x' }, userEvent: 'input' });
+        if (match) toggleTaskAt(view, button, line.from + match.index + 1, this.checked ? ' ' : 'x');
       });
       span.append(button);
     } else { span.textContent = this.heading ? '' : this.label; span.setAttribute('aria-hidden', 'true'); }
     return span;
   }
   ignoreEvent() { return this.checked !== null; }
+}
+
+export function toggleTaskAt(view: EditorView, button: Element, from: number, insert: string) {
+  const restoreFocus = document.activeElement === button;
+  const index = [...view.dom.querySelectorAll('.task-checkbox')].indexOf(button);
+  view.dispatch({ changes: { from, to: from + 1, insert }, userEvent: 'input' });
+  if (restoreFocus) queueMicrotask(() => view.dom.querySelectorAll<HTMLButtonElement>('.task-checkbox')[index]?.focus());
 }
 
 class MathWidget extends WidgetType {

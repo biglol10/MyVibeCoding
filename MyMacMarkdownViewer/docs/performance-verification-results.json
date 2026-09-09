@@ -1,0 +1,197 @@
+{
+  "date": "2026-09-09T22:15:17",
+  "host": "macOS 26.6.2 Apple Silicon arm64",
+  "macPackage": {
+    "artifact": "dist/MyMarkdownViewer-0.1.0-macOS.zip",
+    "bytes": 6121104,
+    "sha256": "702bb365797c3c04523577fabf566f2255911ac4dec8a67691cfdbe7e29a8e70",
+    "architecture": [
+      "x86_64",
+      "arm64"
+    ],
+    "signatureVerified": true,
+    "zipIntegrity": true,
+    "zipMatchedFileCount": 241,
+    "editorResourcesMatchCurrentBuild": true,
+    "installedApplicationReplaced": false,
+    "IntelExecutionVerified": false
+  },
+  "windowsPackage": {
+    "date": "2026-09-09",
+    "target": "Windows 11 x64 Intel/AMD",
+    "artifact": "dist/windows/MyMarkdownViewer-0.1.0-Windows-x64.zip",
+    "bytes": 160999596,
+    "sha256": "e1bcaecc23f810850c9e1b36f76b6a5c8437483a0899365727045ca3cf587110",
+    "zipEntryCount": 79,
+    "zipIntegrity": true,
+    "peMachine": "0x8664 AMD64",
+    "sourceResourceMatch": true,
+    "actualWindowsExecution": false,
+    "physicalWindowsIME": false,
+    "signed": false,
+    "validationHost": "macOS 26.6.2 arm64 Electron 44.3.0",
+    "tests": {
+      "core": 13,
+      "markdown": 7,
+      "webkit": 27,
+      "electronIntegration": 17,
+      "electronUI": 9
+    }
+  },
+  "editorBefore": {
+    "platform": "WebKit",
+    "bytes": 2078907,
+    "lines": 10003,
+    "openMilliseconds": 691,
+    "selectionMilliseconds": {
+      "p50": 12,
+      "p95": 22,
+      "max": 44
+    },
+    "inputMilliseconds": {
+      "p50": 21,
+      "p95": 24,
+      "max": 24
+    },
+    "sourcePreserved": true
+  },
+  "editorAfter": {
+    "platform": "WebKit",
+    "bytes": 2078907,
+    "lines": 10003,
+    "openMilliseconds": 264,
+    "selectionMilliseconds": {
+      "p50": 3,
+      "p95": 4,
+      "max": 8
+    },
+    "inputMilliseconds": {
+      "p50": 9,
+      "p95": 13,
+      "max": 15
+    },
+    "sourcePreserved": true
+  },
+  "windowsBefore": {
+    "host": "macOS arm64 Electron44.3",
+    "entries": 1200,
+    "idleMilliseconds": 5200,
+    "idle": {
+      "reads": 3,
+      "lists": 1
+    },
+    "afterTwentyEdits": {
+      "reads": 7,
+      "lists": 2
+    },
+    "ui": {
+      "treeMutations": 27623,
+      "treePayloads": 23
+    },
+    "sourceSaved": true
+  },
+  "windowsAfter": {
+    "host": "macOS arm64 Electron44.3",
+    "entries": 1200,
+    "idleMilliseconds": 5200,
+    "idle": {
+      "reads": 0,
+      "lists": 0
+    },
+    "afterTwentyEdits": {
+      "reads": 4,
+      "lists": 0
+    },
+    "ui": {
+      "treeMutations": 0,
+      "treePayloads": 0
+    },
+    "sourceSaved": true
+  },
+  "nativeFinal": {
+    "autosave": true,
+    "bomAndCRLF": true,
+    "cleanExternalReload": true,
+    "completed": true,
+    "deletedFileNotRecreated": true,
+    "dirtyExternalConflict": true,
+    "editsDuringSaveStayDirty": true,
+    "initial": {
+      "background": "rgb(25, 27, 30)",
+      "errors": 0,
+      "text": "# 성능 개선 검증\n\n**한글 문장**과 여백을 함께 확인합니다.\n\n- [ ] 파일 관리\n- [x] 저장과 복구\n\n## 표\n\n| 기능 | 상태 |\n| --- | --- |\n| 편집 | 확인 |\n",
+      "theme": "dark",
+      "viewport": 879,
+      "widgets": 1,
+      "width": 879
+    },
+    "lightTheme": "light",
+    "nativeBridgeAppliedEdits": 12,
+    "nativeBridgeInputP95Ms": 42.73498058319092,
+    "nativePerformance": {
+      "bytes": 2990014,
+      "fileReadThroughTwoFramesMs": 666.5459871292114,
+      "lines": 20003,
+      "programmaticInputP95Ms": 19
+    },
+    "nativePerformanceBudget": true,
+    "nightNativeAppearance": true,
+    "nightTheme": {
+      "background": "rgb(55, 59, 64)",
+      "colorScheme": "dark",
+      "foreground": "rgb(222, 225, 229)",
+      "theme": "night"
+    },
+    "permissionFailureKeepsEditAndRecovery": true,
+    "platform": "WKWebView",
+    "realIMEVerified": false,
+    "recoveryPersisted": true,
+    "recoveryRestored": true,
+    "saveAfterPermissionRestored": true,
+    "secondSaveIncludesNewerEdit": true,
+    "staleSessionIgnored": true,
+    "unchangedBytes": true,
+    "undoAcrossSave": true,
+    "unsupportedOpenKeepsDocument": true,
+    "workspaceFolderMoveRebasesOnlyExternalRelativeLinks": true,
+    "workspaceFolderMoveRebindsOpenDocument": true,
+    "workspaceNewQueryKeepsFreshResults": true,
+    "workspaceOtherDocumentsUnchanged": true,
+    "workspacePartialReplaceReportsEachFile": true,
+    "workspaceRenamePreservesUndo": true,
+    "workspaceRenameSavesDirtyDocument": true,
+    "workspaceReplacementRefreshesEditor": true,
+    "workspaceReviewedReplacement": true,
+    "workspaceSearchFindsNestedDocuments": true,
+    "workspaceSearchSelectsMatch": true
+  },
+  "swiftCodecBenchmark": {
+    "lines": 4000,
+    "beforeMs": 46805.85205554962,
+    "afterMs": 16.232013702392578,
+    "configuration": "swiftc -O, uniform CRLF full rewrite"
+  },
+  "tests": {
+    "swiftCore": 29,
+    "windowsCore": 13,
+    "markdown": 7,
+    "webkit": 27,
+    "electronIntegration": 17,
+    "electronUI": 9,
+    "windowsActualExecution": false,
+    "physicalIME": false,
+    "packagedWindowsCodeOnMac": true
+  },
+  "sources": {
+    "Editor/src/main.ts": "c1da3ba5fb77ec2125c7662881a455f27350e2fe42eb46612a46bb132aa0440d",
+    "Editor/src/livePreview.ts": "65a11a333a6f8af79b4be59eccbc6ea4b5f970f18edc32d6024ee274725ceace",
+    "Editor/src/markdown.ts": "da233630e329e37b344fd9c603b99b17b88f5ccac305343be8b45360b3fa789c",
+    "Sources/App/AppModel.swift": "437529f48cc207c27f94373a9d9e4b3dc655e618ed51f19d23ca879d13ebfde5",
+    "Sources/App/AppQA.swift": "f1db99a398e38ffe006589714dea69cf5ad581f210d18ff32af0ddaa6448ab77",
+    "Sources/Core/DocumentCodec.swift": "47ee8c68138ca9406dda8b0b670c17dcef2373e56f4dfdbb6e39e5c81159873e",
+    "Sources/Core/FolderSearch.swift": "dc3056cc309dbb2927514bc6caecfaa52016a8aa7fb08198a2ec530e3ebe1a95",
+    "Windows/main.mjs": "7bb654d9396ad0d219b217952bdaf48546bce620bcce78bb755b9fad39e3f957",
+    "Windows/core.mjs": "52fd78b814c85e4b75caf1e28d6ba51c4529011a8c7fd197648403cb8b4005bd",
+    "Windows/ui/shell.mjs": "f96aea7e52311c2139e9f10b7256159997fbbde5fcdab38d5cdae6618c3870e6"
+  }
+}

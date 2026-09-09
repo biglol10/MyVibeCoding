@@ -1,0 +1,18 @@
+{
+  "snapshot": "2026-09-09T22:15:17",
+  "basis": "Entire thread and direct child logs. Sum final cumulative counts per monotonic segment; includes cached input, not cost.",
+  "models": {
+    "gpt-5.6-luna": {
+      "tokens": 2305641,
+      "percent": 4.0
+    },
+    "gpt-5.6-terra": {
+      "tokens": 11018504,
+      "percent": 19.2
+    },
+    "gpt-6-astra": {
+      "tokens": 44020638,
+      "percent": 76.8
+    }
+  }
+}

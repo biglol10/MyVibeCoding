@@ -10,3 +10,7 @@ Sources/App/Resources/Editor/*
 *.xcuserstate
 xcuserdata/
 .swiftpm/
+Windows/node_modules/
+Windows/editor/
+Windows/.stage/
+Windows/test-results/

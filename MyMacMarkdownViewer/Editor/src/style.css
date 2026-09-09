@@ -51,6 +51,7 @@ body {font-family:var(--font-family)}
 .preview-widget .task-item {list-style:none;position:relative}
 .task-checkbox {width:16px;height:16px;border:1px solid var(--muted);border-radius:4px;vertical-align:middle;display:inline-flex;align-items:center;justify-content:center;background:transparent;color:var(--background);margin:0 .55em 0 -1.35em;padding:0;cursor:pointer;font-size:12px}
 .task-checkbox[aria-checked=true] {background:var(--accent);border-color:var(--accent)}
+.task-checkbox:focus-visible {outline:2px solid var(--accent);outline-offset:3px}
 .image-placeholder {display:inline-block;background:var(--surface);color:var(--muted);border:1px dashed var(--border);border-radius:6px;padding:12px;font:inherit;font-size:.82em}
 .image-placeholder button {color:var(--accent);border:0;background:none;font:inherit;cursor:pointer}
 .math-block,.diagram-block {overflow-x:auto;text-align:center;padding:12px 0}

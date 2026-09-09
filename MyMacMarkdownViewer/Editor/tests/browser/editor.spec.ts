@@ -269,3 +269,118 @@ test('large document opens and accepts edits within the performance budget', asy
   await writeFile('test-results/performance.json', JSON.stringify(result, null, 2));
   expect(result.openMs).toBeLessThan(2000); expect(result.inputP95Ms).toBeLessThan(100);
 });
+
+test('file relocation retains undo and ignores messages from the former session', async ({ page }) => {
+  const result = await page.evaluate(() => {
+    const t = window.__editorTest!; t.load('원문 👩🏽‍💻'); t.select(0); t.insert('입력 ');
+    const before = t.snapshot();
+    window.MarkdownHost.receive({ type: 'relocate', ...before, nextDocumentID: 'renamed.md', nextSessionID: 'renamed-session', baseURL: 'file:///renamed/' });
+    window.MarkdownHost.receive({ type: 'insert', ...before, text: '옛 세션' });
+    t.command('undo');
+    return t.snapshot();
+  });
+  expect(result.text).toBe('원문 👩🏽‍💻');
+  expect(result.documentID).toBe('renamed.md');
+  expect(result.sessionID).toBe('renamed-session');
+});
+
+test('folder search jump selects the UTF-16 match including emoji safely', async ({ page }) => {
+  const result = await page.evaluate(() => {
+    const t = window.__editorTest!; t.load('앞 👩🏽‍💻 한글 뒤');
+    const snapshot = t.snapshot(), from = snapshot.text.indexOf('한글');
+    window.MarkdownHost.receive({ type: 'jump', ...snapshot, from, to: from + 2 });
+    const current = t.snapshot();
+    return current.text.slice(current.anchor, current.head);
+  });
+  expect(result).toBe('한글');
+});
+
+test('checkboxes support keyboard activation, retain focus and preserve surrounding spaces', async ({ page }) => {
+  const source = '# 체크리스트\n\n- [ ] 앞  두 칸 **강조** 뒤\n\n끝';
+  await page.evaluate(text => window.__editorTest!.load(text), source);
+  const checkbox = page.getByRole('checkbox');
+  await checkbox.focus(); await checkbox.press('Space');
+  await expect(checkbox).toHaveAttribute('aria-checked', 'true');
+  await expect(checkbox).toBeFocused();
+  expect(await page.evaluate(() => window.__editorTest!.snapshot().text)).toBe(source.replace('[ ]', '[x]'));
+  await checkbox.press('Enter');
+  await expect(checkbox).toHaveAttribute('aria-checked', 'false');
+  expect(await page.evaluate(() => window.__editorTest!.snapshot().text)).toBe(source);
+});
+
+test('visible spacing survives inline formatting in prose', async ({ page }) => {
+  const source = '# 확인\n\n앞  두 칸 **강조** 뒤 문장\n\n끝';
+  await page.evaluate(text => window.__editorTest!.load(text), source);
+  const spacing = await page.evaluate(() => {
+    const line = [...document.querySelectorAll('.cm-line')].find(node => node.textContent?.includes('앞  두 칸'))!;
+    const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+    let node: Node | null;
+    while ((node = walker.nextNode())) {
+      const at = node.textContent?.indexOf('  ') ?? -1;
+      if (at >= 0) {
+        const range = document.createRange(); range.setStart(node, at); range.setEnd(node, at + 2);
+        return range.getBoundingClientRect().width;
+      }
+    }
+    return 0;
+  });
+  expect(spacing).toBeGreaterThan(6);
+  expect(await page.evaluate(() => window.__editorTest!.snapshot().text)).toBe(source);
+});
+
+test('rendered complex list checkbox supports keyboard activation', async ({ page }) => {
+  const source = '# 확인\n\n- \\[ ] 문자로 쓴 표기\n\n- [ ] 작업\n\n  ```txt\n  - [ ] 코드 안의 표기\n  ```\n\n- [ ] 두 번째 작업\n\n끝';
+  await page.evaluate(text => window.__editorTest!.load(text), source);
+  const checkboxes = page.locator('.preview-widget').getByRole('checkbox');
+  await expect(checkboxes).toHaveCount(2);
+  const checkbox = checkboxes.nth(1);
+  await checkbox.focus(); await checkbox.press('Space');
+  await expect(checkbox).toHaveAttribute('aria-checked', 'true');
+  await expect(checkbox).toBeFocused();
+  expect(await page.evaluate(() => window.__editorTest!.snapshot().text)).toBe(source.replace('[ ] 두 번째', '[x] 두 번째'));
+  await checkbox.press('Enter');
+  await expect(checkbox).toHaveAttribute('aria-checked', 'false');
+  expect(await page.evaluate(() => window.__editorTest!.snapshot().text)).toBe(source);
+});
+
+
+test('localized selection decoration agrees with a full refresh across block boundaries', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => window.__editorTest);
+  const equal = await page.evaluate(() => {
+    const api = window.__editorTest!;
+    const source = '# 제목 **강조**\n\n일반 **본문**과 [링크](https://example.com)\n\n- [ ] 첫 항목\n- 둘째 항목\n\n```js\nconst value = 1;\n```\n\n마지막 문단\n';
+    api.load(source);
+    const shape = () => [...document.querySelectorAll('.cm-content .md-prefix-source,.cm-content .md-syntax,.cm-content .preview-widget')].map(node => [node.className.split(/\s+/).sort().join(' '), node.textContent]);
+    for (const [from, to] of [[5, 5], [25, 28], [60, 60], [98, 98], [0, source.length], [source.length, source.length], [14, 14]]) {
+      api.select(from, to);
+      const incremental = JSON.stringify(shape());
+      api.settings({});
+      if (JSON.stringify(shape()) !== incremental || api.snapshot().text !== source) return false;
+    }
+    return true;
+  });
+  expect(equal).toBe(true);
+});
+
+
+test('incremental edits match complete rendering through fences, blank lines and undo', async ({ page }) => {
+  await page.goto('/'); await page.waitForFunction(() => window.__editorTest);
+  const equal = await page.evaluate(() => {
+    const api = window.__editorTest!;
+    api.load('# 제목\n\n문장 **강조**\n\n- [ ] 항목\n- 둘째 항목\n\n```js\nlet x = 1;\n```\n\n마지막\n');
+    const shape = () => [...document.querySelectorAll('.cm-content .cm-line,.cm-content .preview-widget')].map(node => [node.className.split(/\s+/).sort().join(' '), node.textContent]);
+    for (const [position, insert] of [[3, '새 '], [0, '\n'], [16, '\n\n'], [0, '```\n'], [0, '\n'], [30, '\n# 제목 추가\n']] as [number, string][]) {
+      api.select(position); api.insert(insert);
+      const incremental = JSON.stringify(shape());
+      const source = api.snapshot().text;
+      api.settings({});
+      if (JSON.stringify(shape()) !== incremental || api.snapshot().text !== source) return false;
+      api.command('undo');
+      const undone = JSON.stringify(shape()); api.settings({});
+      if (JSON.stringify(shape()) !== undone) return false;
+    }
+    return true;
+  });
+  expect(equal).toBe(true);
+});

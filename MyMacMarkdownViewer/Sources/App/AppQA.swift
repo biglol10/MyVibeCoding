@@ -110,6 +110,7 @@ enum AppQA {
                 try await model.store.removeRecovery(record.id)
             }
             try await extendedChecks(model: model, root: root, report: &report)
+            try await workspaceChecks(model: model, root: root, report: &report)
             if let originalURL, originalURL.path.hasPrefix(root.path + "/") { try await model.resetQAFixture(originalURL) }
             report["completed"] = true
         } catch { report["error"] = error.localizedDescription; report["completed"] = false }
@@ -119,6 +120,77 @@ enum AppQA {
     private static func insert(_ text: String, model: AppModel) async throws {
         model.bridge.send(["type": "insert", "sessionID": model.sessionID, "documentID": model.documentID, "text": text])
         _ = try await model.bridge.snapshot()
+    }
+
+    private static func workspaceChecks(model: AppModel, root: URL, report: inout [String: Any]) async throws {
+        let work = root.appendingPathComponent("Workspace-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        try await model.setQAWorkspace(work)
+        model.settings.autosave = false
+        let folder = try await model.workspaceFiles.createFolder(root: work, directory: work, name: "자료")
+        let file = try await model.workspaceFiles.createDocument(root: work, directory: folder, name: "한글 문서")
+        try Data("# 검색 검증\n\n찾을말 👩🏽‍💻\n".utf8).write(to: file)
+        try await model.resetQAFixture(file)
+        _ = try await model.bridge.snapshot()
+        try await insert("새 입력 ", model: model)
+        let renamed = folder.appendingPathComponent("이름 변경.md")
+        await model.relocateWorkspaceItem(FileEntry(url: file, isDirectory: false), to: renamed)
+        let renamedText = try String(contentsOf: renamed, encoding: .utf8)
+        report["workspaceRenameSavesDirtyDocument"] = model.documentURL == renamed && renamedText.hasPrefix("새 입력 ")
+        model.command("undo"); _ = try await model.bridge.snapshot()
+        report["workspaceRenamePreservesUndo"] = (try await model.bridge.snapshot()["text"] as? String)?.hasPrefix("# 검색 검증") == true
+        _ = await model.save()
+
+        let outside = work.appendingPathComponent("연결.md")
+        try Data("찾을말\n".utf8).write(to: outside)
+        let links = folder.appendingPathComponent("링크.md")
+        let before = "[외부](../연결.md)\n[내부](이름%20변경.md)\n"
+        try Data(before.utf8).write(to: links)
+        let destinationParent = try await model.workspaceFiles.createFolder(root: work, directory: work, name: "새 위치")
+        let movedFolder = destinationParent.appendingPathComponent("자료", isDirectory: true)
+        await model.relocateWorkspaceItem(FileEntry(url: folder, isDirectory: true), to: movedFolder)
+        let movedFile = movedFolder.appendingPathComponent("이름 변경.md")
+        report["workspaceFolderMoveRebindsOpenDocument"] = model.documentURL == movedFile && !model.hasConflict
+        let after = try String(contentsOf: movedFolder.appendingPathComponent("링크.md"), encoding: .utf8)
+        report["workspaceFolderMoveRebasesOnlyExternalRelativeLinks"] = after.contains("../../%EC%97%B0%EA%B2%B0.md") && after.contains("[내부](이름%20변경.md)")
+        report["workspaceOtherDocumentsUnchanged"] = try String(contentsOf: outside, encoding: .utf8) == "찾을말\n"
+
+        model.folderQuery = "찾을말"; model.folderReplacement = "바꾼말"; model.showFolderSearch(); model.runFolderSearch()
+        for _ in 0..<200 { if !model.folderSearching { break }; try await Task.sleep(for: .milliseconds(25)) }
+        guard let found = model.folderSearchReport, found.isComplete, found.files.count == 2 else { throw DocumentError.unavailable }
+        report["workspaceSearchFindsNestedDocuments"] = true
+        if let file = found.files.first(where: { $0.url == movedFile }), let match = file.matches.first {
+            await model.openSearchMatch(file, match: match)
+            let snapshot = try await model.bridge.snapshot()
+            report["workspaceSearchSelectsMatch"] = snapshot["anchor"] as? Int == match.range.lowerBound && snapshot["head"] as? Int == match.range.upperBound
+        }
+        model.reviewFolderReplacement()
+        guard let review = model.replacementReview else { throw DocumentError.unavailable }
+        model.replacementReview = nil
+        let applied = await model.applyFolderReplacement(review, selected: Set(review.plan.files.map(\.url)))
+        let replacedText = try String(contentsOf: movedFile, encoding: .utf8)
+        report["workspaceReviewedReplacement"] = applied?.savedCount == 2 && replacedText.contains("바꾼말")
+        report["workspaceReplacementRefreshesEditor"] = (try await model.bridge.snapshot()["text"] as? String)?.contains("바꾼말") == true
+        model.folderQuery = "바꾼말"; model.runFolderSearch()
+        for _ in 0..<200 { if !model.folderSearching { break }; try await Task.sleep(for: .milliseconds(25)) }
+        report["workspaceNewQueryKeepsFreshResults"] = model.folderSearchReport?.files.count == 2
+
+        let partialRoot = work.appendingPathComponent("부분 실패", isDirectory: true)
+        try FileManager.default.createDirectory(at: partialRoot, withIntermediateDirectories: true)
+        for name in ["a.md", "b.md"] { try Data("부분실패검색어".utf8).write(to: partialRoot.appendingPathComponent(name)) }
+        let partialPlan = await FolderSearch.scan(folder: partialRoot, options: .init(query: "부분실패검색어"))
+        guard let delayedFile = partialPlan.files.last else { throw DocumentError.unavailable }
+        let hold = QAWriteHold(url: delayedFile.url)
+        NSFileCoordinator.addFilePresenter(hold)
+        defer { hold.release.signal(); NSFileCoordinator.removeFilePresenter(hold) }
+        let applying = Task { await FolderSearch.apply(plan: partialPlan.replacementPlan, replacement: "저장된 변경", store: model.store) }
+        for _ in 0..<200 { if hold.hasEntered { break }; try await Task.sleep(for: .milliseconds(25)) }
+        if hold.hasEntered { try Data("외부 수정 보존".utf8).write(to: delayedFile.url, options: .atomic) }
+        hold.release.signal()
+        let partialResult = await applying.value
+        let externalText = try String(contentsOf: delayedFile.url, encoding: .utf8)
+        report["workspacePartialReplaceReportsEachFile"] = hold.hasEntered && partialResult.preflightPassed && partialResult.savedCount == 1
+            && partialResult.outcomes.contains(where: { $0.status == .stale }) && externalText == "외부 수정 보존"
     }
 
     private static func extendedChecks(model: AppModel, root: URL, report: inout [String: Any]) async throws {
@@ -206,6 +278,24 @@ enum AppQA {
                 """, arguments: ["sessionID": model.sessionID, "documentID": model.documentID], in: nil, contentWorld: .page) as? Double
             report["nativePerformance"] = ["fileReadThroughTwoFramesMs": openMs, "programmaticInputP95Ms": editing ?? -1,
                                            "bytes": largeText.utf8.count, "lines": 20_003]
+            let editorRevision = try await web.callAsyncJavaScript("return window.MarkdownHost.snapshot().revision", arguments: [:], in: nil, contentWorld: .page) as? Int ?? -1
+            let drainBegan = Date.timeIntervalSinceReferenceDate
+            while model.revisionForQA < editorRevision, Date.timeIntervalSinceReferenceDate - drainBegan < 2 { try await Task.sleep(for: .milliseconds(1)) }
+            guard model.revisionForQA == editorRevision else { throw DocumentError.invalidChange }
+            var bridgeSamples: [Double] = []
+            for _ in 0..<12 {
+                let expectedRevision = model.revisionForQA + 1
+                let began = Date.timeIntervalSinceReferenceDate
+                _ = try await web.callAsyncJavaScript("window.MarkdownHost.receive({type:'insert', sessionID:sessionID, documentID:documentID, text:'나'}); return true", arguments: ["sessionID": model.sessionID, "documentID": model.documentID], in: nil, contentWorld: .page)
+                while model.revisionForQA < expectedRevision, Date.timeIntervalSinceReferenceDate - began < 2 {
+                    try await Task.sleep(for: .milliseconds(1))
+                }
+                guard model.revisionForQA == expectedRevision else { throw DocumentError.invalidChange }
+                bridgeSamples.append((Date.timeIntervalSinceReferenceDate - began) * 1000)
+            }
+            bridgeSamples.sort()
+            report["nativeBridgeInputP95Ms"] = bridgeSamples[11]
+            report["nativeBridgeAppliedEdits"] = bridgeSamples.count
             report["nativePerformanceBudget"] = openMs < 2000 && (editing ?? .infinity) < 100
         }
         try await model.resetQAFixture(file)
