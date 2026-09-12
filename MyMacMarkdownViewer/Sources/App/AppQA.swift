@@ -1,4 +1,5 @@
 import AppKit
+import PDFKit
 import WebKit
 #if SWIFT_PACKAGE
 import MyMarkdownCore
@@ -109,17 +110,135 @@ enum AppQA {
                 try await model.resetQAFixture(fixture)
                 try await model.store.removeRecovery(record.id)
             }
+            try await exportChecks(model: model, root: root, report: &report)
             try await extendedChecks(model: model, root: root, report: &report)
             try await workspaceChecks(model: model, root: root, report: &report)
+            let longExtension = root.appendingPathComponent("확장자 검증.MARKDOWN")
+            let longExtensionText = "# Markdown 확장자\n\n한글 문서 원문 보존\n"
+            try Data(longExtensionText.utf8).write(to: longExtension)
+            try await model.resetQAFixture(longExtension)
+            let extensionSnapshot = try await model.bridge.snapshot()
+            report["markdownExtensionNativeOpen"] = extensionSnapshot["text"] as? String == longExtensionText
+            let extensionSaved = await model.save()
+            let extensionBytes = try Data(contentsOf: longExtension)
+            report["markdownExtensionNativeSave"] = extensionSaved && extensionBytes == Data(longExtensionText.utf8)
             if let originalURL, originalURL.path.hasPrefix(root.path + "/") { try await model.resetQAFixture(originalURL) }
             report["completed"] = true
-        } catch { report["error"] = error.localizedDescription; report["completed"] = false }
+        } catch {
+            let native = error as NSError
+            report["error"] = error.localizedDescription
+            report["errorDomain"] = native.domain
+            report["errorCode"] = native.code
+            report["errorDetails"] = native.userInfo.reduce(into: [String: String]()) { values, entry in
+                values[String(describing: entry.key)] = String(describing: entry.value)
+            }
+            report["completed"] = false
+        }
         if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) { try? data.write(to: root.appendingPathComponent("app-qa.json"), options: .atomic) }
     }
 
     private static func insert(_ text: String, model: AppModel) async throws {
         model.bridge.send(["type": "insert", "sessionID": model.sessionID, "documentID": model.documentID, "text": text])
         _ = try await model.bridge.snapshot()
+    }
+
+    private static func exportChecks(model: AppModel, root: URL, report: inout [String: Any]) async throws {
+        let file = root.appendingPathComponent("export-test.md")
+        let assets = root.appendingPathComponent("assets", isDirectory: true)
+        try FileManager.default.createDirectory(at: assets, withIntermediateDirectories: true)
+        let pixel = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")!
+        try pixel.write(to: assets.appendingPathComponent("pixel.png"), options: .atomic)
+        model.access.grant(root)
+        let markdown = """
+        # 내보내기 검증
+
+        ![로컬 이미지](assets/pixel.png)
+
+        인라인 수식 $x^2 + y^2$과 수식 블록입니다.
+
+        $$
+        \\int_0^1 x^2 dx
+        $$
+
+        | 이름 | 값 |
+        | --- | ---: |
+        | 한글 | 123 |
+
+        ```mermaid
+        graph LR
+          A[시작] --> B[완료]
+        ```
+
+        """ + String(repeating: "한글 본문과 **굵은 글씨**를 여러 페이지에 출력합니다.\n\n", count: 180)
+            + "\nENDQA9C3A\n"
+        try Data(markdown.utf8).write(to: file, options: .atomic)
+        try await model.resetQAFixture(file)
+        let html = try await model.bridge.exportHTML()
+        let htmlURL = root.appendingPathComponent("export-test.html")
+        try Data(html.utf8).write(to: htmlURL, options: .atomic)
+        report["standaloneHTMLExport"] = html.localizedCaseInsensitiveContains("<!doctype html")
+            && html.localizedCaseInsensitiveContains("<style") && html.contains("내보내기 검증")
+            && html.contains("data:image/png;base64,") && html.contains("class=\"katex")
+            && html.localizedCaseInsensitiveContains("<table") && html.contains("<svg") && !html.contains("app://")
+
+        let pdfURL = root.appendingPathComponent("export-test.pdf")
+        try await HTMLPrintRenderer().savePDF(html: html, to: pdfURL)
+        let pdfData = try Data(contentsOf: pdfURL)
+        let pdfDocument = PDFDocument(url: pdfURL)
+        let pageCount = pdfDocument?.pageCount ?? 0
+        let pdfText = pdfDocument?.string ?? ""
+        let firstInk = try pdfDocument?.page(at: 0).map { try renderedInk($0, to: root.appendingPathComponent("export-first.png")) } ?? 0
+        let lastInk = try pdfDocument?.page(at: max(0, pageCount - 1)).map { try renderedInk($0, to: root.appendingPathComponent("export-last.png")) } ?? 0
+        report["nativePDFExport"] = ["header": pdfData.starts(with: Data("%PDF-".utf8)), "pageCount": pageCount,
+                                     "multiPage": pageCount > 1, "bytes": pdfData.count,
+                                     "containsStart": pdfText.contains("내보내기 검증"),
+                                     "containsEnd": pdfText.contains("ENDQA9C3A"),
+                                     "firstPageInkFraction": firstInk, "lastPageInkFraction": lastInk]
+
+        model.settings.focusMode = true; model.settings.typewriterMode = true
+        UserDefaults.standard.synchronize()
+        let restored = UserDefaults.standard.data(forKey: "readingSettings")
+            .flatMap { try? JSONDecoder().decode(ReadingSettings.self, from: $0) }
+        report["editorModeSettingsPersisted"] = restored?.focusMode == true && restored?.typewriterMode == true
+
+        let commandFile = root.appendingPathComponent("command-test.md")
+        let base = "# 명령 제목\n\n본문\n"
+        let expectations: [String: (String) -> Bool] = [
+            "table": { $0.hasPrefix("\n| 제목 | 내용 |\n| :--- | ---: |\n|  |  |\n") },
+            "toc": { $0.hasPrefix("## 목차\n\n- [명령 제목](#명령-제목)\n") },
+            "footnote": { $0.hasPrefix("[^1]# 명령 제목") && $0.hasSuffix("[^1]: 각주 내용") },
+            "frontMatter": { $0.hasPrefix("---\ntitle: 문서 제목\n---\n\n# 명령 제목") },
+            "orderedList": { $0.hasPrefix("1. # 명령 제목") },
+            "strike": { $0.hasPrefix("~~~~# 명령 제목") },
+            "horizontalRule": { $0.hasPrefix("\n---\n# 명령 제목") },
+            "mathBlock": { $0.hasPrefix("\n$$\n\n$$\n# 명령 제목") },
+        ]
+        var commandResults: [String: Bool] = [:]
+        for command in ["table", "toc", "footnote", "frontMatter", "orderedList", "strike", "horizontalRule", "mathBlock"] {
+            try Data(base.utf8).write(to: commandFile, options: .atomic)
+            try await model.resetQAFixture(commandFile)
+            model.command(command)
+            let source = try await model.bridge.snapshot()["text"] as? String ?? ""
+            commandResults[command] = expectations[command]?(source) == true
+        }
+        report["insertCommands"] = commandResults
+    }
+
+    private static func renderedInk(_ page: PDFPage, to url: URL) throws -> Double {
+        let image = page.thumbnail(of: NSSize(width: 595, height: 842), for: .mediaBox)
+        guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:]) else { throw CocoaError(.fileReadCorruptFile) }
+        try png.write(to: url, options: .atomic)
+        var ink = 0, samples = 0
+        for y in stride(from: 0, to: bitmap.pixelsHigh, by: 3) {
+            for x in stride(from: 0, to: bitmap.pixelsWide, by: 3) {
+                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                samples += 1
+                if color.alphaComponent > 0.05,
+                   color.redComponent < 0.97 || color.greenComponent < 0.97 || color.blueComponent < 0.97 { ink += 1 }
+            }
+        }
+        return samples == 0 ? 0 : Double(ink) / Double(samples)
     }
 
     private static func workspaceChecks(model: AppModel, root: URL, report: inout [String: Any]) async throws {
@@ -129,6 +248,10 @@ enum AppQA {
         model.settings.autosave = false
         let folder = try await model.workspaceFiles.createFolder(root: work, directory: work, name: "자료")
         let file = try await model.workspaceFiles.createDocument(root: work, directory: folder, name: "한글 문서")
+        model.searchWorkspaceItem(FileEntry(url: folder, isDirectory: true))
+        report["contextSearchUsesSelectedFolder"] = model.folderSearchScope == folder
+        model.showFolderSearch()
+        report["wholeWorkspaceSearchResetsContextScope"] = model.folderSearchScope == nil
         try Data("# 검색 검증\n\n찾을말 👩🏽‍💻\n".utf8).write(to: file)
         try await model.resetQAFixture(file)
         _ = try await model.bridge.snapshot()

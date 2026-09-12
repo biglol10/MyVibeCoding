@@ -69,6 +69,42 @@ public actor WorkspaceFiles {
         return target
     }
 
+    /// Creates a sibling copy without replacing any existing item. Links are copied as links.
+    public func duplicate(root: URL, source: URL) throws -> URL {
+        let safeRoot = try validateRoot(root)
+        let source = try validateExisting(source, within: safeRoot)
+        guard source != safeRoot else { throw WorkspaceFileError.rootProtected }
+        let directory = try source.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
+        let ext = directory ? "" : source.pathExtension
+        let base = ext.isEmpty ? source.lastPathComponent : source.deletingPathExtension().lastPathComponent
+        let parent = source.deletingLastPathComponent()
+        var number = 1
+        var target: URL
+        while true {
+            let suffix = number == 1 ? " 복사본" : " 복사본 \(number)"
+            target = parent.appendingPathComponent(base + suffix + (ext.isEmpty ? "" : "." + ext))
+            do { try ensureNoCollision(at: target); break }
+            catch WorkspaceFileError.alreadyExists { number += 1 }
+        }
+        try validateNewTarget(target, within: safeRoot)
+        var coordinationError: NSError?
+        var outcome: Result<Void, Error> = .failure(WorkspaceFileError.unavailable)
+        NSFileCoordinator().coordinate(readingItemAt: source, options: [], writingItemAt: target, options: [], error: &coordinationError) { from, to in
+            outcome = Result {
+                _ = try self.validateExisting(from, within: safeRoot)
+                try self.ensureNoCollision(at: to)
+                let staging = to.deletingLastPathComponent().appendingPathComponent(".mymarkdown-copy-" + UUID().uuidString)
+                defer { try? self.fileManager.removeItem(at: staging) }
+                try self.fileManager.copyItem(at: from, to: staging)
+                try self.ensureNoCollision(at: to)
+                try self.fileManager.moveItem(at: staging, to: to)
+            }
+        }
+        if let coordinationError { throw coordinationError }
+        try outcome.get()
+        return target
+    }
+
     /// Moves `source` to the exact final `destination`, which may give it a new name.
     public func move(root: URL, source: URL, destination: URL) throws -> URL {
         let safeRoot = try validateRoot(root)
@@ -134,7 +170,7 @@ public actor WorkspaceFiles {
         let safeSource = try validateExisting(source, within: safeRoot)
         let sourceValues = try safeSource.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
         if sourceValues.isDirectory != true {
-            guard sourceValues.isRegularFile == true, safeSource.pathExtension.lowercased() == "md" else {
+            guard sourceValues.isRegularFile == true, MarkdownFileSupport.isMarkdownFile(safeSource) else {
                 throw WorkspaceFileError.unavailable
             }
             guard fileManager.isReadableFile(atPath: safeSource.path) else { throw WorkspaceFileError.unavailable }
@@ -161,7 +197,7 @@ public actor WorkspaceFiles {
                 if values.isDirectory == true { enumerator.skipDescendants() }
                 continue
             }
-            guard values.isDirectory != true, values.isRegularFile == true, url.pathExtension.lowercased() == "md" else { continue }
+            guard values.isDirectory != true, values.isRegularFile == true, MarkdownFileSupport.isMarkdownFile(url) else { continue }
             guard fileManager.isReadableFile(atPath: url.path) else { throw WorkspaceFileError.unavailable }
             documents.append(url.standardizedFileURL)
         }
@@ -233,7 +269,7 @@ public actor WorkspaceFiles {
 
     private func documentName(from name: String) throws -> String {
         let filename = try validName(name)
-        return filename.lowercased().hasSuffix(".md") ? filename : filename + ".md"
+        return MarkdownFileSupport.isMarkdownFile(URL(fileURLWithPath: filename)) ? filename : filename + ".md"
     }
 
     private func ensureNoCollision(at target: URL) throws {

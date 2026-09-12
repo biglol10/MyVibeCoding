@@ -70,6 +70,8 @@ struct WorkspaceView: View {
                     Button("폴더 열기…") { model.chooseFolder() }
                     Button("이미지 삽입…") { model.chooseImage() }
                     Divider()
+                    Toggle("집중 모드", isOn: $model.settings.focusMode)
+                    Toggle("타자기 모드", isOn: $model.settings.typewriterMode)
                     Toggle("외부 이미지 불러오기", isOn: Binding(get: { model.remoteImages }, set: { _ in model.toggleRemoteImages() }))
                     SettingsLink { Text("읽기 설정…") }
                 } label: { Image(systemName: "ellipsis.circle") }.help("문서 옵션")
@@ -148,7 +150,7 @@ struct WorkspaceView: View {
                 } else {
                     GeometryReader { size in
                         ScrollView {
-                            FileTreeRows(model: model, entries: model.rootEntries, depth: 0, width: max(0, size.size.width - 12))
+                            FileTreeRows(model: model, rows: model.visibleFileRows, width: max(0, size.size.width - 12))
                                 .padding(.horizontal, 6).padding(.bottom, 16)
                         }
                     }
@@ -156,24 +158,7 @@ struct WorkspaceView: View {
             } else if model.sidebarMode == "search" {
                 FolderSearchView(model: model)
             } else {
-                if model.outline.isEmpty {
-                    Text("문서의 제목이 여기에 표시됩니다.").font(.callout).foregroundStyle(.secondary).padding(16)
-                } else {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 2) {
-                            ForEach(model.outline) { entry in
-                                Button { model.jump(entry.from) } label: {
-                                    Text(entry.title).font(.system(size: 13, weight: entry.level <= 2 ? .medium : .regular))
-                                        .foregroundStyle(model.currentHeading == entry.from ? .primary : .secondary)
-                                        .lineLimit(3).lineSpacing(3).multilineTextAlignment(.leading)
-                                        .padding(.leading, CGFloat((entry.level - 1) * 10 + 10)).padding(.trailing, 8).padding(.vertical, 9)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .background(model.currentHeading == entry.from ? Color.primary.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 5))
-                                }.buttonStyle(.plain).help(entry.title)
-                            }
-                        }.padding(.horizontal, 8)
-                    }
-                }
+                OutlineSidebarView(model: model).id(model.sessionID)
             }
             Spacer(minLength: 0)
             HStack {
@@ -186,12 +171,12 @@ struct WorkspaceView: View {
 
 private struct FileTreeRows: View {
     @ObservedObject var model: AppModel
-    let entries: [FileEntry]
-    let depth: Int
+    let rows: [FileTreeRow]
     let width: CGFloat
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 2) {
-            ForEach(entries) { entry in
+            ForEach(rows) { row in
+                let entry = row.entry
                 Button {
                     if entry.isDirectory { model.toggleFolder(entry) }
                     else { Task { await model.open(entry.url) } }
@@ -202,25 +187,26 @@ private struct FileTreeRows: View {
                         if entry.isDirectory { Image(systemName: "folder").foregroundStyle(.secondary).frame(width: 16) }
                         Text(entry.name).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
                             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                    }.padding(.leading, min(CGFloat(depth * 13 + 8), max(8, width - 110))).padding(.trailing, 8).frame(width: width, height: 32)
+                    }.padding(.leading, min(CGFloat(row.depth) * 13 + 8, max(8, width - 110))).padding(.trailing, 8).frame(width: width, height: 32)
                         .contentShape(Rectangle())
                         .background(model.documentURL == entry.url ? Color.primary.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 5))
                 }.buttonStyle(.plain).help(entry.url.path).accessibilityLabel(entry.name)
                     .contextMenu {
-                        if entry.isDirectory {
-                            Button("여기에 새 문서…") { model.createWorkspaceItem(in: entry.url, folder: false) }
-                            Button("여기에 새 폴더…") { model.createWorkspaceItem(in: entry.url, folder: true) }
-                            Divider()
-                        }
+                        Button(entry.isDirectory ? "펼치기" : "열기") { model.openWorkspaceItem(entry) }
+                        Divider()
+                        Button("새 문서…") { model.createWorkspaceItem(in: entry.isDirectory ? entry.url : entry.url.deletingLastPathComponent(), folder: false) }
+                        Button("새 폴더…") { model.createWorkspaceItem(in: entry.isDirectory ? entry.url : entry.url.deletingLastPathComponent(), folder: true) }
+                        Button("이 폴더에서 검색") { model.searchWorkspaceItem(entry) }
+                        Divider()
+                        Button("복제") { model.duplicateWorkspaceItem(entry) }
                         Button("이름 변경…") { model.renameWorkspaceItem(entry) }
                         Button("이동…") { model.chooseWorkspaceDestination(entry) }
                         Button("휴지통으로 보내기…", role: .destructive) { model.trashWorkspaceItem(entry) }
                         Divider()
+                        Button("경로 복사") { model.copyWorkspacePath(entry) }
                         Button("Finder에서 보기") { model.reveal(entry.url) }
+                        Button("정보 보기") { model.showWorkspaceInfo(entry) }
                     }.disabled(model.workspaceBusy)
-                if entry.isDirectory, model.expanded.contains(entry.id) {
-                    AnyView(FileTreeRows(model: model, entries: model.children[entry.id] ?? [], depth: depth + 1, width: width))
-                }
             }
         }.frame(width: width).clipped()
     }
@@ -231,11 +217,18 @@ private struct QuickOpenView: View {
     @State private var selection: URL?
     @FocusState private var focused: Bool
     var body: some View {
+        let candidates = model.filteredFiles
+        let selectedFile = selection.flatMap { candidates.contains($0) ? $0 : nil } ?? candidates.first
         VStack(spacing: 0) {
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("파일 이름이나 경로로 찾기", text: $model.quickQuery).textFieldStyle(.plain).focused($focused)
-                    .onSubmit { open(selection ?? model.filteredFiles.first) }
+                    .onSubmit { open(selectedFile) }
+                if model.folderURL != nil {
+                    Button { model.refreshFolder() } label: { Image(systemName: "arrow.clockwise") }
+                        .help("파일 목록 새로 고침").accessibilityLabel("파일 목록 새로 고침")
+                        .disabled(model.indexing)
+                }
                 Button("닫기") { model.quickOpen = false }.keyboardShortcut(.cancelAction)
             }.padding(18)
             Divider()
@@ -244,17 +237,35 @@ private struct QuickOpenView: View {
                     Button("폴더 열기…") { model.quickOpen = false; model.chooseFolder() }
                 }.frame(height: 300)
             } else {
-                List(model.filteredFiles, id: \.self, selection: $selection) { url in
+                List(candidates, id: \.self, selection: $selection) { url in
                     HStack { Image(systemName: "doc.text").foregroundStyle(.secondary); VStack(alignment: .leading, spacing: 3) {
-                        Text(url.lastPathComponent); Text(model.relativePath(url)).font(.caption).foregroundStyle(.secondary)
+                        Text(url.lastPathComponent).lineLimit(1).truncationMode(.middle)
+                        Text(model.relativePath(url)).font(.caption).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle)
                     } }.padding(.vertical, 3).tag(url).onTapGesture(count: 2) { open(url) }
                 }.frame(height: 320)
-                HStack { Text(model.indexing ? "파일 목록 갱신 중…" : "이름과 상대 경로에서 검색합니다").foregroundStyle(.secondary); Spacer(); Button("열기") { open(selection ?? model.filteredFiles.first) }.keyboardShortcut(.defaultAction) }.font(.caption).padding(12)
+                    .overlay {
+                        if candidates.isEmpty {
+                            Text(model.indexing ? "파일 목록 갱신 중…" : "일치하는 파일이 없습니다.")
+                                .foregroundStyle(.secondary).allowsHitTesting(false)
+                        }
+                    }
+                HStack {
+                    Text(model.indexing ? "파일 목록 갱신 중…" : "이름과 상대 경로에서 검색합니다").foregroundStyle(.secondary)
+                    Spacer()
+                    Button("열기") { open(selectedFile) }.keyboardShortcut(.defaultAction).disabled(selectedFile == nil)
+                }.font(.caption).padding(12)
             }
-        }.frame(width: 560).onAppear { focused = true; selection = model.filteredFiles.first }
-            .onChange(of: model.quickQuery) { _, _ in selection = model.filteredFiles.first }
+        }.frame(width: 560).onAppear {
+            focused = true; selection = candidates.first
+            if model.folderURL != nil { model.refreshFolder() }
+        }
+            .onChange(of: model.quickQuery) { _, _ in selection = candidates.first }
+            .onChange(of: candidates) { _, files in
+                if let selection, files.contains(selection) { return }
+                selection = files.first
+            }
     }
-    private func open(_ url: URL?) { guard let url else { return }; model.quickOpen = false; Task { await model.open(url) } }
+    private func open(_ url: URL?) { guard let url, model.filteredFiles.contains(url) else { return }; model.quickOpen = false; Task { await model.open(url) } }
 }
 
 private struct RecoveryView: View {
@@ -286,7 +297,13 @@ struct SettingsView: View {
                 HStack { Text("읽기 폭"); Slider(value: $model.settings.contentWidth, in: 500...1200, step: 20); Text("\(Int(model.settings.contentWidth))").monospacedDigit().frame(width: 44) }
             }
             Section("저장") { Toggle("입력 후 자동 저장", isOn: $model.settings.autosave); Text("입력을 멈춘 뒤 1초 후 저장합니다. 외부 변경이 발견되면 자동 저장을 멈춥니다.").font(.caption).foregroundStyle(.secondary) }
+            Section("편집") {
+                Toggle("집중 모드", isOn: $model.settings.focusMode)
+                Text("현재 문단을 또렷하게 표시합니다.").font(.caption).foregroundStyle(.secondary)
+                Toggle("타자기 모드", isOn: $model.settings.typewriterMode)
+                Text("입력 중인 줄을 화면 가운데에 가깝게 유지합니다.").font(.caption).foregroundStyle(.secondary)
+            }
             Section { Button("읽기 설정 초기화") { let autosave = model.settings.autosave; model.settings = ReadingSettings(); model.settings.autosave = autosave } }
-        }.formStyle(.grouped).padding(10).frame(width: 490, height: 420)
+        }.formStyle(.grouped).padding(10).frame(width: 490, height: 500)
     }
 }

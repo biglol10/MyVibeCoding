@@ -6,9 +6,12 @@ import { markdown, markdownKeymap } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
 import { syntaxHighlighting, defaultHighlightStyle, bracketMatching } from '@codemirror/language';
 import { GFM } from '@lezer/markdown';
-import { livePreview, previewOptions, setSourceMode, setComposition, updateSettings } from './livePreview';
+import { classHighlighter } from '@lezer/highlight';
+import { clearTableComposition, isTableComposing, livePreview, previewOptions, setSourceMode, setComposition, updateSettings } from './livePreview';
 import { outlineFor, rebaseMarkdown } from './markdown';
 import { post, session, setSession, defaultSettings, accepts, type Settings } from './protocol';
+import { frontMatterFor, nextFootnoteLabel, tableOfContentsMarkdown } from './semantic';
+import { renderStandaloneHTML } from './render';
 import 'katex/dist/katex.min.css';
 import './style.css';
 
@@ -62,6 +65,34 @@ function prefix(value: string) {
   view.dispatch({ changes, userEvent: 'input' }); view.focus();
 }
 
+function insert(value: string) {
+  if (!canEdit()) return;
+  view.dispatch(view.state.replaceSelection(value)); view.focus();
+}
+
+function insertFrontMatter() {
+  if (!canEdit() || frontMatterFor(view.state.doc.toString())) return;
+  view.dispatch({ changes: { from: 0, insert: '---\ntitle: 문서 제목\n---\n\n' }, selection: EditorSelection.cursor(11), userEvent: 'input' });
+  view.focus();
+}
+
+function insertTOC() {
+  if (!canEdit()) return;
+  const source = view.state.doc.toString();
+  const toc = `## 목차\n\n${tableOfContentsMarkdown(source)}\n`;
+  insert(toc);
+}
+
+function insertFootnote() {
+  if (!canEdit()) return;
+  const source = view.state.doc.toString(), label = nextFootnoteLabel(source);
+  const selection = view.state.selection.main, selected = view.state.sliceDoc(selection.from, selection.to);
+  const reference = `[^${label}]`;
+  const definition = `\n\n[^${label}]: ${selected || '각주 내용'}`;
+  view.dispatch({ changes: [{ from: selection.from, to: selection.to, insert: reference }, { from: view.state.doc.length, insert: definition }],
+    selection: EditorSelection.cursor(selection.from + reference.length), userEvent: 'input' }); view.focus();
+}
+
 const view = new EditorView({
   parent: document.querySelector('#editor')!,
   state: makeState(welcome),
@@ -78,7 +109,7 @@ function makeState(text: string, anchor = 0, head = anchor) {
     }),
     history(), drawSelection(), dropCursor(), bracketMatching(),
     markdown({ codeLanguages: languages, extensions: GFM }),
-    syntaxHighlighting(defaultHighlightStyle),
+    syntaxHighlighting(defaultHighlightStyle), syntaxHighlighting(classHighlighter),
     search({ top: true }), readOnly.of(EditorState.readOnly.of(false)),
     theme.of(EditorView.theme({}, { dark: settings.theme !== 'light' })),
     previewOptions, livePreview, highlightActiveLine(), EditorView.lineWrapping,
@@ -130,6 +161,7 @@ function makeState(text: string, anchor = 0, head = anchor) {
       if (update.selectionSet) {
         if (navigationAnchor !== update.state.selection.main.head) navigationAnchor = null;
         position();
+        if (update.docChanged) requestAnimationFrame(keepCaretCentered);
       }
     }),
   ] });
@@ -146,7 +178,16 @@ async function insertFiles(files: File[]) {
   }
 }
 
+let pendingTableSettings: Partial<Settings> | undefined;
+view.dom.addEventListener('compositionend', () => {
+  if (pendingTableSettings) requestAnimationFrame(() => {
+    if (!pendingTableSettings || isTableComposing()) return;
+    const next = pendingTableSettings; pendingTableSettings = undefined; applySettings(next);
+  });
+});
 function applySettings(next: Partial<Settings>) {
+  if (isTableComposing()) { pendingTableSettings = { ...pendingTableSettings, ...next }; return; }
+  flushTableDraft();
   settings = { ...settings, ...next };
   document.documentElement.dataset.theme = settings.theme;
   const style = document.documentElement.style;
@@ -158,14 +199,46 @@ function applySettings(next: Partial<Settings>) {
     serif: '"AppleMyungjo", "Georgia", serif', mono: '"SF Mono", Menlo, monospace',
   };
   style.setProperty('--font-family', fonts[settings.fontFamily] ?? fonts.system);
+  view.dom.dataset.focusMode = String(Boolean(settings.focusMode));
+  view.dom.dataset.typewriterMode = String(Boolean(settings.typewriterMode));
   view.dispatch({ effects: [updateSettings.of(settings), theme.reconfigure(EditorView.theme({}, { dark: settings.theme !== 'light' }))] });
 }
 
+function keepCaretCentered() {
+  if (!settings.typewriterMode || !view.hasFocus || view.composing || view.state.field(previewOptions).composing) return;
+  const coords = view.coordsAtPos(view.state.selection.main.head);
+  const box = view.scrollDOM.getBoundingClientRect();
+  if (!coords || coords.top < box.top || coords.bottom > box.bottom) return;
+  const distance = coords.top - box.top - box.height / 2;
+  if (Math.abs(distance) > 6) view.scrollDOM.scrollTop += distance;
+}
+
 function canEdit() {
-  return !view.state.readOnly && !view.composing && !view.state.field(previewOptions).composing;
+  return !view.state.readOnly && !view.composing && !view.state.field(previewOptions).composing && !isTableComposing();
+}
+
+function flushTableDraft() {
+  const input = document.activeElement;
+  if (!isTableComposing() && input instanceof HTMLInputElement && input.classList.contains('table-cell-input')) input.blur();
 }
 
 function command(name: string) {
+  const tableInput = document.activeElement;
+  if (tableInput instanceof HTMLInputElement && tableInput.classList.contains('table-cell-input')) {
+    if (isTableComposing()) return;
+    if (name === 'selectAll') { tableInput.select(); return; }
+    if (!canEdit() && name !== 'find') return;
+    const inline: Record<string, [string, string]> = { bold: ['**', '**'], italic: ['*', '*'], code: ['`', '`'], strike: ['~~', '~~'], link: ['[', '](https://)'] };
+    if (inline[name]) {
+      const [left, right] = inline[name], from = tableInput.selectionStart ?? 0, to = tableInput.selectionEnd ?? from;
+      tableInput.setRangeText(left + tableInput.value.slice(from, to) + right, from, to, 'select');
+      tableInput.setSelectionRange(from + left.length, to + left.length);
+      return;
+    }
+    if (['source', 'undo', 'redo', 'find', 'replace'].includes(name)) flushTableDraft();
+    else { post('error', { message: '표 셀에서는 글자 서식을 사용할 수 있습니다. 블록을 삽입하려면 표 밖의 문단을 선택하세요.' }); return; }
+  }
+  if (name === 'source') flushTableDraft();
   if (!canEdit() && !['find', 'copy', 'selectAll'].includes(name)) return;
   switch (name) {
     case 'undo': undo(view); break;
@@ -180,7 +253,15 @@ function command(name: string) {
     case 'heading': prefix('## '); break;
     case 'quote': prefix('> '); break;
     case 'list': prefix('- '); break;
+    case 'orderedList': prefix('1. '); break;
     case 'task': prefix('- [ ] '); break;
+    case 'strike': wrap('~~'); break;
+    case 'horizontalRule': insert('\n---\n'); break;
+    case 'mathBlock': wrap('\n$$\n', '\n$$\n'); break;
+    case 'table': insert('\n| 제목 | 내용 |\n| :--- | ---: |\n|  |  |\n'); break;
+    case 'toc': insertTOC(); break;
+    case 'footnote': insertFootnote(); break;
+    case 'frontMatter': insertFrontMatter(); break;
     case 'source': sourceMode = !sourceMode; view.dispatch({ effects: setSourceMode.of(sourceMode) }); post('sourceMode', { enabled: sourceMode }); break;
     case 'selectAll': view.dispatch({ selection: EditorSelection.range(0, view.state.doc.length) }); break;
   }
@@ -189,7 +270,9 @@ function command(name: string) {
 const host = {
   receive(message: any) {
     if (message.type === 'open') {
+      pendingTableSettings = undefined;
       loading = true;
+      clearTableComposition();
       navigationAnchor = null;
       setSession({ documentID: message.documentID, sessionID: message.sessionID, revision: message.revision ?? 0, baseURL: message.baseURL ?? '' });
       sourceMode = message.sourceMode ?? false;
@@ -224,14 +307,15 @@ const host = {
       if (!canEdit()) return;
       view.dispatch(view.state.replaceSelection(String(message.text))); view.focus();
     }
-    if (message.type === 'lock') view.dispatch({ effects: readOnly.reconfigure(EditorState.readOnly.of(message.locked)) });
+    if (message.type === 'lock') view.dispatch({ effects: [readOnly.reconfigure(EditorState.readOnly.of(message.locked)), updateSettings.of(settings)] });
   },
-  snapshot() { return { ...session, text: view.state.doc.toString(), anchor: view.state.selection.main.anchor, head: view.state.selection.main.head, scrollTop: view.scrollDOM.scrollTop, visibleFrom: visibleFrom(), composing: view.composing || view.state.field(previewOptions).composing }; },
+  snapshot() { flushTableDraft(); return { ...session, text: view.state.doc.toString(), anchor: view.state.selection.main.anchor, head: view.state.selection.main.head, scrollTop: view.scrollDOM.scrollTop, visibleFrom: visibleFrom(), composing: view.composing || view.state.field(previewOptions).composing || isTableComposing() }; },
   prepareSaveAs(newBase: string) { return { ...host.snapshot(), text: rebaseMarkdown(view.state.doc.toString(), session.baseURL, newBase) }; },
   rebaseMoved(text: string, oldBase: string, newBase: string, source: string, destination: string, directory: boolean) {
     return rebaseMarkdown(text, oldBase, newBase, { source, destination, directory });
   },
   focus() { view.focus(); },
+  exportHTML(embedLocalAssets = true) { flushTableDraft(); return renderStandaloneHTML(view.state.doc.toString(), settings, embedLocalAssets); },
 };
 Object.defineProperty(window, 'MarkdownHost', { value: host, writable: false });
 if (!window.webkit) window.__editorTest = {
@@ -241,6 +325,7 @@ if (!window.webkit) window.__editorTest = {
   select: (anchor: number, head = anchor) => view.dispatch({ selection: EditorSelection.range(anchor, head) }),
   command,
   settings: applySettings,
+  exportHTML: host.exportHTML,
   usesDarkTheme: () => view.state.facet(EditorView.darkTheme),
   compose: (active: boolean) => view.dispatch({ effects: setComposition.of(active) }),
 };

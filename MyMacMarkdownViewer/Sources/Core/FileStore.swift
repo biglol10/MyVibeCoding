@@ -48,8 +48,12 @@ public actor FileStore {
                     guard DocumentCodec.hash(before) == expectedHash else { throw DocumentError.conflict }
                     try backup(before, for: target)
                 } else if expectedHash != nil { throw DocumentError.deleted }
-                let temp = target.deletingLastPathComponent().appendingPathComponent(".mymarkdown-\(UUID().uuidString).tmp")
-                defer { try? fm.removeItem(at: temp) }
+                // A user-selected file grants access to that file, not arbitrary
+                // siblings. Foundation provides a writable staging directory on
+                // the destination volume for a coordinated atomic replacement.
+                let staging = try fm.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: target, create: true)
+                let temp = staging.appendingPathComponent("document.tmp")
+                defer { try? fm.removeItem(at: staging) }
                 try bytes.write(to: temp, options: .withoutOverwriting)
                 // Recheck after writing the temporary file to narrow races with uncoordinated writers.
                 if exists {

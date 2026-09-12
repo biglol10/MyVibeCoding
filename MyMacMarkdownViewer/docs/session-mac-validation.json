@@ -1,0 +1,77 @@
+{
+  "stages": [
+    {
+      "anchor": 1500,
+      "dirty": false,
+      "folder": "$HOME/Library/Application Support/MyMarkdownViewer/QA/Session-20260912",
+      "lastDocument": "$HOME/Library/Application Support/MyMarkdownViewer/QA/Session-20260912/document.md",
+      "notice": "",
+      "passed": true,
+      "path": "$HOME/Library/Application Support/MyMarkdownViewer/QA/Session-20260912/document.md",
+      "scrollTop": 1200,
+      "stage": "seed"
+    },
+    {
+      "anchor": 1500,
+      "dirty": false,
+      "folder": "$HOME/Library/Application Support/MyMarkdownViewer/QA/Session-20260912",
+      "lastDocument": "$HOME/Library/Application Support/MyMarkdownViewer/QA/Session-20260912/document.md",
+      "notice": "",
+      "passed": true,
+      "path": "$HOME/Library/Application Support/MyMarkdownViewer/QA/Session-20260912/document.md",
+      "scrollTop": 1205,
+      "stage": "check"
+    },
+    {
+      "anchor": 0,
+      "dirty": false,
+      "folder": "$HOME/Library/Application Support/MyMarkdownViewer/QA/Session-20260912",
+      "lastDocument": "$HOME/Library/Application Support/MyMarkdownViewer/QA/Session-20260912/explicit.md",
+      "notice": "",
+      "passed": true,
+      "path": "$HOME/Library/Application Support/MyMarkdownViewer/QA/Session-20260912/explicit.md",
+      "scrollTop": 0,
+      "stage": "explicit"
+    },
+    {
+      "anchor": 0,
+      "dirty": false,
+      "folder": "$HOME/Library/Application Support/MyMarkdownViewer/QA/Session-20260912",
+      "lastDocument": "$HOME/Library/Application Support/MyMarkdownViewer/QA/Session-20260912/explicit.md",
+      "notice": "마지막 문서 ‘explicit.md’를 열 수 없습니다. 삭제·이동되었거나 접근 권한이 바뀌었을 수 있습니다. 문서를 다시 선택해 주세요.",
+      "passed": true,
+      "path": null,
+      "scrollTop": 0,
+      "stage": "missing"
+    },
+    {
+      "anchor": 0,
+      "dirty": false,
+      "folder": "$HOME/Library/Application Support/MyMarkdownViewer/QA/Session-20260912",
+      "lastDocument": null,
+      "notice": "",
+      "passed": true,
+      "path": null,
+      "scrollTop": 0,
+      "stage": "blank"
+    }
+  ],
+  "normalExit": true,
+  "sourceBytesUnchanged": true,
+  "environment": {
+    "platform": "macOS 26.6.2 Apple Silicon",
+    "binaryArchitectures": [
+      "arm64",
+      "x86_64"
+    ],
+    "actualExecution": "arm64 native WKWebView",
+    "version": "0.3.1",
+    "build": 7
+  },
+  "visualReview": [
+    "Native WKWebView screenshot at restored section 10",
+    "Night rendering, body spacing and stable reading position"
+  ],
+  "regression": "session-mac-regression.json",
+  "regressionCompleted": true
+}

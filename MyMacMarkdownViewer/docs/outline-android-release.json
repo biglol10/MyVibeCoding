@@ -1,0 +1,85 @@
+{
+  "release": {
+    "versionName": "1.2.0",
+    "versionCode": 6,
+    "apkPath": "dist/android/MarkdownReader-1.2.0-Android.apk",
+    "sha256": "ee65974c1e8f5287065fc5d72b1f75f66eaa85edf47fa561d1e75e9d0af40be0",
+    "sizeBytes": 3740297,
+    "debuggable": false
+  },
+  "packaging": {
+    "command": "python3 Android/scripts/package-apk.py",
+    "result": "passed",
+    "logPath": "build/outline-apk-package.log",
+    "signatureVerification": {
+      "result": "passed",
+      "schemes": [
+        "v2",
+        "v3"
+      ],
+      "releaseAndTestCertificateMatch": true
+    },
+    "assets": {
+      "result": "passed",
+      "sourceDirectory": "Android/app/src/main/assets/reader",
+      "comparedFiles": 122,
+      "missingFromApk": 0,
+      "extraInApk": 0,
+      "hashMismatches": 0,
+      "initialOutlineControlsDisabled": true,
+      "buttonTagChecks": {
+        "collapse-outline": {
+          "source": true,
+          "generatedAssets": true,
+          "apk": true
+        },
+        "expand-outline": {
+          "source": true,
+          "generatedAssets": true,
+          "apk": true
+        }
+      }
+    }
+  },
+  "emulator": {
+    "avd": "MarkdownReader_QA",
+    "serial": "emulator-5580",
+    "androidRelease": "15",
+    "apiLevel": 35,
+    "abi": "arm64-v8a",
+    "model": "sdk_gphone64_arm64",
+    "releaseUpdateInstall": "passed on final APK",
+    "installedVersionName": "1.2.0",
+    "installedVersionCode": 6
+  },
+  "safInstrumentation": {
+    "testApk": "build/outline-saf-tests-signed.apk",
+    "testApkInstall": "passed",
+    "testCount": 5,
+    "result": "passed on final APK",
+    "summary": "OK (5 tests)",
+    "tests": [
+      {
+        "name": "testChildRowNameSurvivesBrokenIndividualMetadataQuery",
+        "result": "passed"
+      },
+      {
+        "name": "testNullCursorIsFailureInsteadOfEmptyDirectory",
+        "result": "passed"
+      },
+      {
+        "name": "testLoadingCursorIsFailureInsteadOfEmptyDirectory",
+        "result": "passed"
+      },
+      {
+        "name": "testProviderRuntimeFailureIsReportedAsIOException",
+        "result": "passed"
+      },
+      {
+        "name": "testNestedFolderQueriesItsDocumentIdAndBuildsChildWithinOriginalTree",
+        "result": "passed"
+      }
+    ],
+    "testOnlyProcessCleanup": "passed; test package force-stopped and no test process remained"
+  }
+}

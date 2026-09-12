@@ -1,0 +1,56 @@
+{
+  "version": "0.2.1",
+  "date": "2026-09-12",
+  "scope": "Mac and Windows basic context menu enrichment; excludes new-window/list-view features and Android",
+  "host": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "macTests": 37,
+  "windowsTests": 16,
+  "electronContextMenu": true,
+  "electronSmoke": true,
+  "actualWindowsExecution": false,
+  "macUI": [
+    "11 actions present on file/folder context menus",
+    "file duplicate and numbered collision preserve original copy",
+    "latest edited content present in second copy",
+    "create new document in selected file parent",
+    "copy path targets right-clicked file rather than open document",
+    "metadata path size dates render with wrapping",
+    "selected subfolder search excludes root-only text",
+    "selected subfolder replacement applies to exactly one fixture",
+    "installed 0.2.1 build4 launches and restores 131-document workspace; updated menu confirmed"
+  ],
+  "macInstall": {
+    "version": "0.2.1",
+    "build": "4",
+    "installed": "/Applications/MyMarkdownViewer.app",
+    "backup": "$HOME/Desktop/practice/MyMacMarkdownViewer/build/installed-backups/MyMarkdownViewer-0.2.0-20260912-125710.app",
+    "sourceMatch": true,
+    "signatureVerified": true
+  },
+  "artifacts": [
+    {
+      "file": "dist/MyMarkdownViewer-0.2.1-macOS.zip",
+      "bytes": 6579756,
+      "sha256": "acc7939b044eb115bf2451599b10650c7d998d9d672fd7aa14dce3f797a65326",
+      "zipIntegrity": true
+    },
+    {
+      "file": "dist/windows/MyMarkdownViewer-0.2.1-Windows-x64.zip",
+      "bytes": 161287198,
+      "sha256": "c51df67f39b8bb18b7ca3f2d83a351e244692a41480ec5a34cd66ae8762819d0",
+      "zipIntegrity": true
+    }
+  ],
+  "reviewFindingsResolved": [
+    "missing file-parent create actions",
+    "scoped search reset and replacement root validation",
+    "existing-directory collision must not merge children",
+    "dirty document within copied directory preserved",
+    "directory copy avoids double full-tree IO",
+    "reset scope disabled during active operation"
+  ],
+  "limits": [
+    "Physical Windows PC and physical Korean IME not verified",
+    "Mac personal ad-hoc signature; Windows unsigned"
+  ]
+}

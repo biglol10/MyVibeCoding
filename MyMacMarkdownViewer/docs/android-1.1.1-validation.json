@@ -1,0 +1,57 @@
+{
+  "date": "2026-09-12",
+  "versionName": "1.1.1",
+  "versionCode": 4,
+  "artifact": "dist/android/MarkdownReader-1.1.1-Android.apk",
+  "bytes": 3736201,
+  "sha256": "a51a34d236739afb4549fb93a9d8064d3f6a36133d2790e0dc695ffed63ebec6",
+  "changes": [
+    "SAF child-row name/type query without separate metadata lookups",
+    "query errors and loading distinguished from empty folders",
+    "refresh current folder including failed initial query",
+    "one-time Night migration preserving later choices and typography",
+    "Night native system bars and background"
+  ],
+  "checks": {
+    "signedV2V3": true,
+    "zipalign": true,
+    "nonDebuggable": true,
+    "zipIntegrity": true,
+    "matchingReaderAssets": 122,
+    "readerBrowserRegression": true,
+    "readerSettingsMigrationAndRefreshRegression": true,
+    "safInstrumentationTests": 5,
+    "instrumentationAgainstFinalSignedRelease": true,
+    "nativeDownloadSubfolderPickerAndConsent": true,
+    "nativeMdAndSubfolderListing": true,
+    "nativeNestedDocumentOpen": true,
+    "nativeNightScreenshot": "Android/test-results/android-111-download-folder.png",
+    "originalDownloadFixtureHashesPreserved": 5,
+    "testComponentsExcludedFromRelease": true,
+    "qaProviderProcessesStopped": true
+  },
+  "environment": "Dedicated emulator-5580 Android 15 API 35 arm64; Chromium phone/tablet browser tests on macOS",
+  "limitations": [
+    "Exact Samsung device/provider cause not reproduced on user device",
+    "Download root selection restriction belongs to Android; select a child folder",
+    "Existing personal APK signing certificate retained"
+  ],
+  "delivery": {
+    "recipient": "nba2005kings@naver.com",
+    "status": "sent and received attachment verified",
+    "earlierBodyOnlySelfMail": {
+      "messageId": "50911",
+      "time": "10:32",
+      "attachment": false
+    },
+    "time": "2026-09-12 10:36 KST",
+    "messageId": "50913",
+    "subject": "Markdown Reader 1.1.1 APK 첨부 — 폴더 표시 수정 · Night",
+    "attachment": "MarkdownReader-1.1.1-Android.apk",
+    "recipientVerified": true,
+    "mailFoldersVerified": [
+      "받은메일함",
+      "보낸메일함"
+    ]
+  }
+}

@@ -3,6 +3,50 @@ import Testing
 @testable import MyMarkdownCore
 
 struct WorkspaceFilesTests {
+    @Test func duplicatesFilesAndFoldersWithoutOverwriting() async throws {
+        let root = try temporaryDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let service = WorkspaceFiles()
+        let folder = root.appendingPathComponent("자료.v1")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        let file = folder.appendingPathComponent("한글.MD")
+        let data = Data([0xef, 0xbb, 0xbf]) + Data("# 내용\r\n".utf8)
+        try data.write(to: file)
+        let first = try await service.duplicate(root: root, source: file)
+        let second = try await service.duplicate(root: root, source: file)
+        #expect(first.lastPathComponent == "한글 복사본.MD")
+        #expect(second.lastPathComponent == "한글 복사본 2.MD")
+        #expect(try Data(contentsOf: first) == data)
+        #expect(try Data(contentsOf: file) == data)
+        let copy = try await service.duplicate(root: root, source: folder)
+        #expect(copy.lastPathComponent == "자료.v1 복사본")
+        #expect(try Data(contentsOf: copy.appendingPathComponent("한글.MD")) == data)
+        await #expect(throws: WorkspaceFileError.rootProtected) { try await service.duplicate(root: root, source: root) }
+    }
+
+    @Test func duplicateDoesNotMergeIntoExistingFolder() async throws {
+        let root = try temporaryDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("Folder")
+        let existing = root.appendingPathComponent("FOLDER 복사본")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: false)
+        try FileManager.default.createDirectory(at: existing, withIntermediateDirectories: false)
+        try Data("new".utf8).write(to: source.appendingPathComponent("new.md"))
+        try Data("keep".utf8).write(to: existing.appendingPathComponent("keep.md"))
+        let result = try await WorkspaceFiles().duplicate(root: root, source: source)
+        #expect(result.lastPathComponent == "Folder 복사본 2")
+        #expect(try FileManager.default.contentsOfDirectory(atPath: existing.path) == ["keep.md"])
+        #expect(try Data(contentsOf: result.appendingPathComponent("new.md")) == Data("new".utf8))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: root.path).allSatisfy { !$0.hasPrefix(".mymarkdown-copy-") })
+    }
+
+    @Test func duplicateRejectsSymlinkSource() async throws {
+        let root = try temporaryDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("real.md")
+        try Data("keep".utf8).write(to: file)
+        let link = root.appendingPathComponent("link.md")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: file)
+        await #expect(throws: WorkspaceFileError.unsafePath) { try await WorkspaceFiles().duplicate(root: root, source: link) }
+    }
+
     @Test func createsMarkdownDocumentAndFolderInsideWorkspace() async throws {
         let root = try temporaryDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let service = WorkspaceFiles()
@@ -11,6 +55,13 @@ struct WorkspaceFilesTests {
         #expect(folder.lastPathComponent == "자료 모음")
         #expect(document.lastPathComponent == "오늘의 기록.md")
         #expect(FileManager.default.fileExists(atPath: document.path))
+    }
+
+    @Test func createsExplicitMarkdownExtensionWithoutAppendingAnotherSuffix() async throws {
+        let root = try temporaryDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let document = try await WorkspaceFiles().createDocument(root: root, directory: root, name: "guide.MARKDOWN")
+        #expect(document.lastPathComponent == "guide.MARKDOWN")
+        #expect(try Data(contentsOf: document) == Data())
     }
 
     @Test func rejectsDuplicateNamesWithoutReplacingExistingItem() async throws {
@@ -107,6 +158,21 @@ struct WorkspaceFilesTests {
 
         let documents = try await WorkspaceFiles().markdownDocuments(root: root, source: folder)
         #expect(documents.map(\.lastPathComponent) == [".draft.md", "note.md"])
+    }
+
+    @Test func relocationDocumentsIncludeMarkdownVariantsAndSkipSymlinks() async throws {
+        let root = try temporaryDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let folder = root.appendingPathComponent("folder")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        for name in ["guide.markdown", "README.MARKDOWN", "notes.MD"] {
+            try Data(name.utf8).write(to: folder.appendingPathComponent(name))
+        }
+        let outside = try temporaryDirectory(); defer { try? FileManager.default.removeItem(at: outside) }
+        try Data("outside".utf8).write(to: outside.appendingPathComponent("outside.markdown"))
+        try FileManager.default.createSymbolicLink(at: folder.appendingPathComponent("linked.markdown"), withDestinationURL: outside.appendingPathComponent("outside.markdown"))
+
+        let documents = try await WorkspaceFiles().markdownDocuments(root: root, source: folder)
+        #expect(documents.map(\.lastPathComponent) == ["guide.markdown", "notes.MD", "README.MARKDOWN"])
     }
 
     private func temporaryDirectory() throws -> URL {

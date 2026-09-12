@@ -28,6 +28,10 @@ struct MyMarkdownViewerApp: App {
                 Button("저장") { Task { _ = await model.save() } }.keyboardShortcut("s")
                 Button("다른 이름으로 저장…") { Task { _ = await model.saveAs() } }.keyboardShortcut("s", modifiers: [.command, .shift])
                 Divider()
+                Button("HTML로 내보내기…") { Task { await model.exportHTML() } }
+                Button("PDF로 내보내기…") { Task { await model.exportPDF() } }
+                Button("프린트…") { Task { await model.printDocument() } }.keyboardShortcut("p", modifiers: [.command, .option])
+                Divider()
                 Button("Finder에서 보기") { model.reveal() }
                 Button("복구할 문서 보기…") { model.openRecoveryList() }
                 Divider()
@@ -54,11 +58,25 @@ struct MyMarkdownViewerApp: App {
                 Button("목록") { model.command("list") }
                 Button("체크리스트") { model.command("task") }
                 Button("코드 블록") { model.command("codeBlock") }
+                Divider()
+                Menu("삽입") {
+                    Button("표 삽입") { model.command("table") }
+                    Button("목차") { model.command("toc") }
+                    Button("각주") { model.command("footnote") }
+                    Button("문서 속성") { model.command("frontMatter") }
+                    Button("번호 목록") { model.command("orderedList") }
+                    Button("취소선") { model.command("strike") }
+                    Button("가로선") { model.command("horizontalRule") }
+                    Button("수식 블록") { model.command("mathBlock") }
+                }
                 Button("이미지 삽입…") { model.chooseImage() }
             }
             CommandGroup(after: .sidebar) {
                 Button("빠른 파일 열기…") { model.quickQuery = ""; model.quickOpen = true }.keyboardShortcut("p")
                 Button(model.sourceMode ? "라이브 편집" : "원문 모드") { model.command("source") }.keyboardShortcut("m", modifiers: [.command, .shift])
+                Divider()
+                Toggle("집중 모드", isOn: $model.settings.focusMode)
+                Toggle("타자기 모드", isOn: $model.settings.typewriterMode)
             }
         }
         Settings { SettingsView(model: model) }
@@ -76,6 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     @objc private func themeChanged() { AppModel.shared.systemAppearanceChanged() }
     func applicationDidBecomeActive(_ notification: Notification) { AppModel.shared.didBecomeActive() }
+    func applicationWillResignActive(_ notification: Notification) { AppModel.shared.persistReadingPosition() }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if closeAuthorized { return .terminateNow }
         Task { let allowed = await AppModel.shared.canClose(); sender.reply(toApplicationShouldTerminate: allowed) }

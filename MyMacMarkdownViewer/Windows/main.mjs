@@ -6,6 +6,7 @@ import {
   net,
   dialog,
   shell,
+  clipboard,
   Menu,
   nativeTheme,
 } from "electron";
@@ -26,9 +27,13 @@ import {
   applyPlan,
   listTree,
   create,
+  duplicate,
   move,
+  isMarkdownPath,
 } from "./core.mjs";
-import { rebaseMarkdown } from "./editor/rebase.mjs";
+import { readingPosition, lastSession, documentArgument } from "./session.mjs";
+import { outputDocument } from "./export.mjs";
+import { outlineFor, rebaseMarkdown } from "./editor/rebase.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 protocol.registerSchemesAsPrivileged([
@@ -71,7 +76,24 @@ let status = "",
   searchController,
   searchReport,
   review;
+let searchGeneration = 0;
 let recoveryChain = Promise.resolve();
+let savedSession = lastSession({}), sessionTimer, settingsChain = Promise.resolve();
+let pendingExternalFile = documentArgument(process.argv), openingExternal = false;
+function rememberSession() {
+  savedSession = {documentPath: doc.path, position: readingPosition(doc.position, doc.text.length), blank: !doc.path};
+}
+function scheduleSessionSave() {
+  clearTimeout(sessionTimer);
+  sessionTimer = setTimeout(() => persistSettings().catch(error => announce(error.message)), 700);
+}
+async function openPendingExternal() {
+  if (!editorReady || busy || openingExternal || !pendingExternalFile) return;
+  const file = pendingExternalFile; pendingExternalFile = null; openingExternal = true;
+  try { await run("openExternal", {path:file}); }
+  catch { /* run reports the failure and preserves the current document. */ }
+  finally { openingExternal = false; if (pendingExternalFile) void openPendingExternal(); }
+}
 let externalCheckInFlight = false,
   externalCheckPending = false,
   externalCheckForce = false,
@@ -87,6 +109,8 @@ let settings = {
   fontFamily: "system",
   remoteImages: false,
   autosave: true,
+  focusMode: false,
+  typewriterMode: false,
 };
 const requests = new Map();
 const welcome =
@@ -104,6 +128,22 @@ const inside = (p, dir) => {
   );
 };
 const base = (p) => pathToFileURL(path.dirname(p) + path.sep).href;
+const imageExtensions = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".heic"]);
+function validImageBytes(ext, bytes) {
+  if (ext === ".png") return bytes.length >= 24 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  if ([".jpg", ".jpeg"].includes(ext)) return bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  if (ext === ".gif") return bytes.length >= 13 && (bytes.subarray(0, 6).equals(Buffer.from("GIF87a")) || bytes.subarray(0, 6).equals(Buffer.from("GIF89a")));
+  if (ext === ".webp") return bytes.length >= 16 && bytes.subarray(0, 4).equals(Buffer.from("RIFF")) && bytes.subarray(8, 12).equals(Buffer.from("WEBP"));
+  if (ext === ".bmp") return bytes.length >= 26 && bytes.subarray(0, 2).equals(Buffer.from("BM"));
+  if (ext === ".tiff") return bytes.length >= 8 && (bytes.subarray(0, 4).equals(Buffer.from([0x49, 0x49, 0x2a, 0])) || bytes.subarray(0, 4).equals(Buffer.from([0x4d, 0x4d, 0, 0x2a])));
+  return ext === ".heic" && bytes.length >= 12 && bytes.subarray(4, 8).equals(Buffer.from("ftyp"));
+}
+function headingOffset(text, fragment) {
+  const wanted = fragment.trim().toLocaleLowerCase();
+  return outlineFor(text).find(({ title }) =>
+    wanted === title.toLocaleLowerCase() || wanted === title.replace(/\s+/g, "-").toLocaleLowerCase(),
+  )?.from ?? -1;
+}
 function send(type, payload) {
   if (win && !win.isDestroyed())
     win.webContents.send("desktop-event", { type, payload });
@@ -130,10 +170,22 @@ function state({ includeEntries = true } = {}) {
     root,
     ...(includeEntries ? { entries } : {}),
     settings,
+    resolvedTheme: resolvedTheme(),
     recoveryCount,
     status,
     busy,
   };
+}
+function resolvedTheme() {
+  if (settings.theme === "system")
+    return nativeTheme.shouldUseDarkColors ? "dark" : "light";
+  return settings.theme;
+}
+function editorSettings() {
+  return { ...settings, theme: resolvedTheme() };
+}
+function nativeThemeSource() {
+  return settings.theme === "night" ? "dark" : settings.theme;
 }
 function publish() {
   const includesEntries = treeVersion !== publishedTreeVersion;
@@ -163,6 +215,7 @@ function newDoc(text = "", loaded = null) {
     dirty: false,
     conflict: null,
     composing: false,
+    position: readingPosition(),
   };
 }
 function openEditor() {
@@ -172,8 +225,9 @@ function openEditor() {
       text: doc.text,
       revision: doc.revision,
       baseURL: doc.path ? base(doc.path) : "",
-      settings,
+      settings: editorSettings(),
       sourceMode: false,
+      ...readingPosition(doc.position, doc.text.length),
     });
 }
 function askEditor(method, ...args) {
@@ -184,7 +238,7 @@ function askEditor(method, ...args) {
     const timer = setTimeout(() => {
       requests.delete(requestID);
       reject(Error("편집기 응답을 받지 못했습니다. 복구본을 유지합니다."));
-    }, 10000);
+    }, method === "exportHTML" ? 60000 : 10000);
     requests.set(requestID, { resolve, reject, timer });
     send("editorRequest", { requestID, method, args });
   });
@@ -264,6 +318,7 @@ async function synchronize() {
     await persistRecovery();
   }
   doc.composing = false;
+  doc.position = readingPosition(snap, doc.text.length);
 }
 async function allowedFile(file, allowMissing = false) {
   file = normalized(file);
@@ -298,7 +353,7 @@ async function saveCurrent(saveAs = false) {
     const chosen = await dialog.showSaveDialog(win, {
       title: "Markdown 저장",
       defaultPath: dest || "새 문서.md",
-      filters: [{ name: "Markdown", extensions: ["md"] }],
+      filters: [{ name: "Markdown", extensions: ["md", "markdown"] }],
     });
     if (chosen.canceled || !chosen.filePath) return false;
     dest = chosen.filePath;
@@ -497,7 +552,7 @@ function resetWatchers() {
       .then((stat) => {
         // Atomic saves replace a known Markdown file and report `rename`, but
         // do not change the visible tree. New/deleted files and folders do.
-        if (known && !known.directory && stat.isFile() && /\.md$/i.test(full))
+        if (known && !known.directory && stat.isFile() && isMarkdownPath(full))
           return;
         queueRefresh();
       })
@@ -519,9 +574,15 @@ async function editorEvent(message) {
     editorReady = true;
     openEditor();
     publish();
+    if (pendingExternalFile) void openPendingExternal();
     return;
   }
   if (!sessionMatches(message)) return;
+  if (message.type === "position") {
+    doc.position = readingPosition(message, doc.text.length);
+    if (doc.path && savedSession.documentPath === doc.path) { rememberSession(); scheduleSessionSave(); }
+    return;
+  }
   if (message.type === "changed") {
     if (message.baseRevision !== doc.revision) {
       doc.conflict = "편집 순서가 일치하지 않아 저장을 중지했습니다.";
@@ -560,6 +621,36 @@ async function editorEvent(message) {
   } else if (message.type === "error") announce(message.message);
 }
 async function doAction(action, p = {}) {
+  if (["exportHTML", "exportPDF", "print"].includes(action)) {
+    const snapshot = await askEditor("snapshot");
+    if (snapshot.composing) throw Error("한글 입력을 마친 뒤 내보내 주세요.");
+    const sessionID = doc.sessionID;
+    const format = action === "exportHTML" ? "html" : "pdf";
+    let target;
+    if (action !== "print") {
+      const picked = await dialog.showSaveDialog(win, {
+        title: format === "html" ? "HTML로 내보내기" : "PDF로 내보내기",
+        defaultPath: path.basename(doc.path || "새 문서", path.extname(doc.path || "")) + "." + format,
+        filters: [{ name: format.toUpperCase(), extensions: [format] }],
+      });
+      if (picked.canceled || !picked.filePath) return;
+      target = picked.filePath;
+      if (path.extname(target).toLowerCase() !== "." + format || (doc.path && normalized(target) === normalized(doc.path)))
+        throw Error("원본 문서와 다른 이름의 ." + format + " 파일을 선택해 주세요.");
+    }
+    const html = await askEditor("exportHTML");
+    const after = await askEditor("snapshot");
+    if (after.composing || after.revision !== snapshot.revision) throw Error("문서 내용이 바뀌었습니다. 입력을 마친 뒤 다시 내보내 주세요.");
+    if (sessionID !== doc.sessionID) throw Error("문서가 바뀌었습니다. 다시 내보내 주세요.");
+    const data = action === "exportHTML" ? html : await outputDocument(html, action === "print" ? "print" : "pdf", win);
+    if (target) {
+      const temporary = path.join(path.dirname(target), ".markdown-export-" + randomUUID());
+      try { await fs.writeFile(temporary, data, { flag: "wx" }); await fs.rename(temporary, target); }
+      finally { await fs.rm(temporary, { force: true }); }
+      announce(format.toUpperCase() + " 파일을 저장했습니다.");
+    }
+    return { exported: target || null };
+  }
   switch (action) {
     case "new":
       if (await beforeLeave()) {
@@ -572,7 +663,7 @@ async function doAction(action, p = {}) {
     case "openDialog": {
       const result = await dialog.showOpenDialog(win, {
         properties: ["openFile"],
-        filters: [{ name: "Markdown", extensions: ["md"] }],
+        filters: [{ name: "Markdown", extensions: ["md", "markdown"] }],
       });
       if (!result.canceled) {
         const f = normalized(result.filePaths[0]);
@@ -581,6 +672,11 @@ async function doAction(action, p = {}) {
       }
       break;
     }
+    case "openExternal":
+      if (!isMarkdownPath(p.path)) throw Error("Markdown 문서를 선택해 주세요.");
+      fileGrants.add(normalized(p.path));
+      await openFile(p.path);
+      break;
     case "open":
       await openFile(p.path, p);
       break;
@@ -594,6 +690,8 @@ async function doAction(action, p = {}) {
         root = f;
         folderGrants.add(f);
         resetWatchers();
+        searchGeneration++;
+        searchController?.abort();
         searchReport = review = null;
         await refresh();
         await persistSettings();
@@ -637,6 +735,33 @@ async function doAction(action, p = {}) {
       if (!p.directory) await openFile(f);
       return f;
     }
+    case "duplicate": {
+      if (!root) throw Error("먼저 폴더를 열어 주세요.");
+      const source = await validateWithin(root, p.path);
+      if (same(root, source)) throw Error("작업 폴더 자체는 복제할 수 없습니다.");
+      const sourceStat = await fs.lstat(source);
+      const activeDocument = doc?.path &&
+        (same(doc.path, source) || (sourceStat.isDirectory() && inside(doc.path, source)))
+        ? doc
+        : null;
+      // Keep the current edit recoverable before producing a separate copy.
+      if (activeDocument) await synchronize();
+      const copied = await duplicate(root, source);
+      if (activeDocument && activeDocument.dirty) {
+        const copiedPath = sourceStat.isDirectory()
+          ? path.join(copied, path.relative(source, activeDocument.path))
+          : copied;
+        try {
+          const copiedDocument = await store.read(copiedPath);
+          await store.save(copiedPath, activeDocument.text, activeDocument.codec, copiedDocument.hash);
+        } catch (error) {
+          await persistRecovery(activeDocument);
+          throw Error(`복제본에 최신 편집 내용을 반영하지 못했습니다. 원본 편집본은 복구 목록에 보존했습니다. 복제본 위치: ${copiedPath}`);
+        }
+      }
+      await refresh();
+      return copied;
+    }
     case "move": {
       if (!root) throw Error("먼저 폴더를 열어 주세요.");
       await validateWithin(root, p.source);
@@ -651,12 +776,13 @@ async function doAction(action, p = {}) {
         !(await saveCurrent())
       )
         return;
-      const dest = path.join(p.parent, p.name),
-        source = normalized(p.source);
+      const source = normalized(p.source);
       const isDirectory = (await fs.lstat(source)).isDirectory();
+      const name = !isDirectory && !isMarkdownPath(p.name) ? `${p.name}.md` : p.name;
+      const dest = path.join(p.parent, name);
       const affected = isDirectory
         ? await markdownFilesIncludingHidden(source)
-        : /\.md$/i.test(source)
+        : isMarkdownPath(source)
           ? [source]
           : [];
       const originals = await Promise.all(affected.map((f) => store.read(f)));
@@ -752,21 +878,35 @@ async function doAction(action, p = {}) {
     }
     case "search": {
       if (!root || !p.query) throw Error("폴더와 검색어를 선택해 주세요.");
+      searchController?.abort();
+      const generation = ++searchGeneration;
+      const controller = new AbortController();
+      const searchRoot = root;
+      searchController = controller;
+      // A new query makes any former plan unsafe before its path checks finish.
+      searchReport = review = null;
+      const stale = () =>
+        generation !== searchGeneration || searchController !== controller || !same(root, searchRoot);
+      const scope = await validateWithin(searchRoot, p.root || searchRoot);
+      if (stale()) return { files: [], issues: [], truncated: false, cancelled: true, complete: false };
+      if (!(await fs.lstat(scope)).isDirectory()) throw Error("검색할 폴더를 선택해 주세요.");
+      if (stale()) return { files: [], issues: [], truncated: false, cancelled: true, complete: false };
       if (
         doc.dirty &&
         doc.path &&
-        inside(doc.path, root) &&
+        inside(doc.path, scope) &&
         !(await saveCurrent())
       )
         return;
-      searchController?.abort();
-      searchController = new AbortController();
-      const result = await scan(root, {
+      if (stale()) return { files: [], issues: [], truncated: false, cancelled: true, complete: false };
+      const result = await scan(scope, {
         query: String(p.query),
         caseSensitive: Boolean(p.caseSensitive),
-        signal: searchController.signal,
+        signal: controller.signal,
       });
-      searchReport = { ...result, id: randomUUID(), query: p.query, root };
+      if (stale())
+        return { files: [], issues: [], truncated: false, cancelled: true, complete: false };
+      searchReport = { ...result, id: randomUUID(), query: p.query, root: scope };
       review = null;
       return {
         ...searchReport,
@@ -795,7 +935,10 @@ async function doAction(action, p = {}) {
       };
     }
     case "applyReplace": {
-      if (!review || p.reviewID !== review.id || !same(root, review.root))
+      if (!review || p.reviewID !== review.id)
+        throw Error("변경 미리보기를 다시 만들어 주세요.");
+      const reviewRoot = await validateWithin(root, review.root);
+      if (!(await fs.lstat(reviewRoot)).isDirectory())
         throw Error("변경 미리보기를 다시 만들어 주세요.");
       const frozen = review;
       const selected = Array.isArray(p.selected) ? p.selected : [];
@@ -808,7 +951,7 @@ async function doAction(action, p = {}) {
         frozen.files,
         frozen.replacement,
         selected,
-        frozen.root,
+        reviewRoot,
         store,
       );
       if (
@@ -868,7 +1011,7 @@ async function doAction(action, p = {}) {
     }
     case "settings": {
       const patch = p.patch || {};
-      if (["dark", "night", "light"].includes(patch.theme))
+      if (["dark", "night", "light", "system"].includes(patch.theme))
         settings.theme = patch.theme;
       for (const [key, min, max] of [
         ["fontSize", 12, 30],
@@ -879,10 +1022,10 @@ async function doAction(action, p = {}) {
           settings[key] = Math.max(min, Math.min(max, Number(patch[key])));
       if (["system", "serif", "mono"].includes(patch.fontFamily))
         settings.fontFamily = patch.fontFamily;
-      for (const k of ["autosave", "remoteImages"])
+      for (const k of ["autosave", "remoteImages", "focusMode", "typewriterMode"])
         if (typeof patch[k] === "boolean") settings[k] = patch[k];
-      nativeTheme.themeSource = settings.theme === "light" ? "light" : "dark";
-      editor({ type: "settings", settings });
+      nativeTheme.themeSource = nativeThemeSource();
+      editor({ type: "settings", settings: editorSettings() });
       await persistSettings();
       if (doc.dirty) schedule();
       publish();
@@ -897,7 +1040,7 @@ async function doAction(action, p = {}) {
       });
       if (answer.response === 1) {
         settings.remoteImages = true;
-        editor({ type: "settings", settings });
+        editor({ type: "settings", settings: editorSettings() });
         publish();
       }
       break;
@@ -909,7 +1052,7 @@ async function doAction(action, p = {}) {
       });
       if (!selected.canceled) {
         folderGrants.add(normalized(selected.filePaths[0]));
-        editor({ type: "settings", settings });
+        editor({ type: "settings", settings: editorSettings() });
       }
       break;
     }
@@ -920,9 +1063,11 @@ async function doAction(action, p = {}) {
         break;
       }
       if (p.href.startsWith("#")) {
+        let fragment;
+        try { fragment = decodeURIComponent(p.href.slice(1)); }
+        catch { throw Error("문서 내 링크 주소가 올바르지 않습니다."); }
         const headings = await askEditor("snapshot");
-        const needle = p.href.slice(1).replaceAll("-", " ");
-        const at = headings.text.toLowerCase().indexOf(needle.toLowerCase());
+        const at = headingOffset(headings.text, fragment);
         if (at >= 0) editor({ type: "jump", from: at });
         break;
       }
@@ -931,7 +1076,7 @@ async function doAction(action, p = {}) {
       const url = new URL(p.href, base(doc.path));
       if (url.protocol !== "file:") throw Error("지원하지 않는 링크입니다.");
       const target = fileURLToPath(url);
-      if (!/\.md$/i.test(target))
+      if (!isMarkdownPath(target))
         throw Error("Markdown 문서 링크만 앱 안에서 열 수 있습니다.");
       // Explicitly opened folders may contain sibling links. Other locations
       // remain unavailable until the user selects them through a file dialog.
@@ -944,36 +1089,62 @@ async function doAction(action, p = {}) {
       await openFile(target);
       break;
     }
+    case "reveal": {
+      let target = p.path;
+      if (target) {
+        if (!root) throw Error("먼저 폴더를 열어 주세요.");
+        target = await validateWithin(root, target);
+      } else if (doc?.path) target = await allowedFile(doc.path);
+      else if (root) target = await validateWithin(root, root);
+      else throw Error("표시할 문서 또는 폴더를 열어 주세요.");
+      const stat = await fs.stat(target);
+      if (stat.isDirectory()) {
+        const error = await shell.openPath(target);
+        if (error) throw Error(error);
+      }
+      else shell.showItemInFolder(target);
+      break;
+    }
+    case "openFolder": {
+      if (!root) throw Error("먼저 폴더를 열어 주세요.");
+      const target = await validateWithin(root, p.path);
+      if (!(await fs.lstat(target)).isDirectory()) throw Error("폴더를 선택해 주세요.");
+      const error = await shell.openPath(target);
+      if (error) throw Error(error);
+      break;
+    }
+    case "copyPath": {
+      if (!root) throw Error("먼저 폴더를 열어 주세요.");
+      const target = await validateWithin(root, p.path);
+      await fs.lstat(target);
+      clipboard.writeText(target);
+      announce("경로를 클립보드에 복사했습니다.");
+      break;
+    }
+    case "info": {
+      if (!root) throw Error("먼저 폴더를 열어 주세요.");
+      const target = await validateWithin(root, p.path);
+      const stat = await fs.lstat(target);
+      if (stat.isSymbolicLink()) throw Error("링크를 지나는 경로에는 접근할 수 없습니다.");
+      return { path: target, name: path.basename(target), directory: stat.isDirectory(), size: stat.isDirectory() ? null : stat.size, modified: stat.mtime.toISOString(), created: stat.birthtime.toISOString() };
+    }
+    case "insertImage": {
+      const selected = await dialog.showOpenDialog(win, {
+        title: "이미지 삽입",
+        properties: ["openFile"],
+        filters: [{ name: "이미지", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "heic"] }],
+      });
+      if (selected.canceled || !selected.filePaths[0]) break;
+      const source = normalized(selected.filePaths[0]);
+      fileGrants.add(source);
+      await allowedFile(source);
+      await insertImage(path.basename(source), await readImageFile(source));
+      break;
+    }
     case "insertImageData": {
-      if (!doc.path && !(await saveCurrent())) return;
-      const ext = path.extname(String(p.name)).toLowerCase();
-      if (
-        ![
-          ".png",
-          ".jpg",
-          ".jpeg",
-          ".gif",
-          ".webp",
-          ".bmp",
-          ".tiff",
-          ".heic",
-        ].includes(ext)
-      )
-        throw Error("지원하지 않는 이미지입니다.");
       if (typeof p.data !== "string" || p.data.length > 28 * 1024 * 1024)
         throw Error("이미지는 20MB 이하만 삽입할 수 있습니다.");
-      const bytes = Buffer.from(p.data, "base64");
-      if (bytes.length > 20 * 1024 * 1024) throw Error("이미지가 너무 큽니다.");
-      const assets = path.join(path.dirname(doc.path), "assets");
-      await validateWithin(path.dirname(doc.path), assets, {
-        allowMissing: true,
-      });
-      await fs.mkdir(assets, { recursive: true });
-      await validateWithin(path.dirname(doc.path), assets);
-      const name = `image-${randomUUID()}${ext}`;
-      await fs.writeFile(path.join(assets, name), bytes, { flag: "wx" });
-      editor({ type: "lock", locked: false });
-      editor({ type: "insert", text: `![이미지](assets/${name})` });
+      await insertImage(p.name, Buffer.from(p.data, "base64"), p.sessionID);
       break;
     }
     case "command":
@@ -981,6 +1152,51 @@ async function doAction(action, p = {}) {
       break;
     default:
       throw Error("지원하지 않는 작업입니다.");
+  }
+}
+async function insertImage(name, bytes, expectedSessionID = null) {
+  const ext = path.extname(String(name)).toLowerCase();
+  if (!imageExtensions.has(ext))
+    throw Error("지원하지 않는 이미지입니다.");
+  if (!Buffer.isBuffer(bytes) || bytes.length > 20 * 1024 * 1024)
+    throw Error("이미지는 20MB 이하만 삽입할 수 있습니다.");
+  if (!validImageBytes(ext, bytes))
+    throw Error("손상되었거나 지원하지 않는 이미지입니다.");
+  if (expectedSessionID && expectedSessionID !== doc?.sessionID) return;
+  if (!doc.path && !(await saveCurrent())) return;
+  const sessionID = doc.sessionID;
+  const assets = path.join(path.dirname(doc.path), "assets");
+  await validateWithin(path.dirname(doc.path), assets, { allowMissing: true });
+  await fs.mkdir(assets, { recursive: true });
+  await validateWithin(path.dirname(doc.path), assets);
+  if (sessionID !== doc.sessionID) return;
+  const assetName = `image-${randomUUID()}${ext}`;
+  await fs.writeFile(path.join(assets, assetName), bytes, { flag: "wx" });
+  if (sessionID !== doc.sessionID) {
+    await fs.unlink(path.join(assets, assetName)).catch(() => {});
+    return;
+  }
+  editor({ type: "lock", locked: false });
+  editor({ type: "insert", text: `![이미지](assets/${assetName})` });
+}
+async function readImageFile(source) {
+  const handle = await fs.open(source, "r");
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.size > 20 * 1024 * 1024)
+      throw Error("이미지는 20MB 이하만 삽입할 수 있습니다.");
+    const bytes = Buffer.allocUnsafe(Math.min(20 * 1024 * 1024 + 1, stat.size + 1));
+    let bytesRead = 0;
+    while (bytesRead < bytes.length) {
+      const result = await handle.read(bytes, bytesRead, bytes.length - bytesRead, bytesRead);
+      if (!result.bytesRead) break;
+      bytesRead += result.bytesRead;
+    }
+    if (bytesRead > 20 * 1024 * 1024 || (await handle.stat()).size !== bytesRead)
+      throw Error("이미지는 20MB 이하만 삽입할 수 있습니다.");
+    return bytes.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
   }
 }
 async function run(action, payload = {}) {
@@ -994,8 +1210,13 @@ async function run(action, payload = {}) {
   clearTimeout(autoTimer);
   editor({ type: "lock", locked: true });
   publish();
+  const previousDocument = doc, previousPath = doc?.path;
   try {
-    return await doAction(action, payload);
+    const result = await doAction(action, payload);
+    if (!closing && (doc !== previousDocument || doc?.path !== previousPath || ["save", "saveAs", "new"].includes(action))) {
+      rememberSession(); await persistSettings();
+    }
+    return result;
   } catch (e) {
     announce(e.message || String(e));
     throw e;
@@ -1003,15 +1224,21 @@ async function run(action, payload = {}) {
     busy = false;
     if (externalCheckPending && !closing) requestExternalDocumentCheck();
     editor({ type: "lock", locked: false });
+    if (["exportHTML", "exportPDF", "print"].includes(action) && doc?.dirty) schedule();
     publish();
+    if (pendingExternalFile) void openPendingExternal();
   }
 }
 async function persistSettings() {
-  await fs.writeFile(
-    path.join(app.getPath("userData"), "settings.json"),
-    JSON.stringify({ settings, root }),
-    "utf8",
-  );
+  clearTimeout(sessionTimer);
+  const payload = JSON.stringify({ settings, root, session: savedSession });
+  const destination = path.join(app.getPath("userData"), "settings.json");
+  const job = settingsChain.catch(() => {}).then(async () => {
+    await fs.writeFile(destination + ".tmp", payload, "utf8");
+    await fs.rename(destination + ".tmp", destination);
+  });
+  settingsChain = job;
+  await job;
 }
 async function markdownFilesIncludingHidden(dir) {
   const result = [];
@@ -1026,7 +1253,7 @@ async function markdownFilesIncludingHidden(dir) {
       )
         continue;
       if (entry.isDirectory()) await visit(f, depth + 1);
-      else if (entry.isFile() && /\.md$/i.test(f)) result.push(f);
+      else if (entry.isFile() && isMarkdownPath(f)) result.push(f);
     }
   }
   await visit(dir);
@@ -1107,7 +1334,9 @@ async function serve(request) {
     return new Response("Not found", { status: 404 });
   }
 }
-app.on("second-instance", () => {
+app.on("second-instance", (_event, argv) => {
+  const file = documentArgument(argv);
+  if (file) { pendingExternalFile = file; void openPendingExternal(); }
   win?.show();
   win?.focus();
 });
@@ -1116,23 +1345,38 @@ app
   .then(async () => {
     await fs.mkdir(app.getPath("userData"), { recursive: true });
     store = new Store(app.getPath("userData"));
+    let startupNotice = [], saved = {};
     try {
-      const saved = JSON.parse(
-        await fs.readFile(
-          path.join(app.getPath("userData"), "settings.json"),
-          "utf8",
-        ),
-      );
+      saved = JSON.parse(await fs.readFile(path.join(app.getPath("userData"), "settings.json"), "utf8"));
       settings = { ...settings, ...saved.settings };
-      if (saved.root) {
+      if (!["dark", "night", "light", "system"].includes(settings.theme)) settings.theme = "dark";
+      savedSession = lastSession(saved);
+    } catch (error) { if (error.code !== "ENOENT") startupNotice.push("이전 읽기 설정을 불러오지 못했습니다. 기본 설정으로 시작합니다."); }
+    if (typeof saved.root === "string") {
+      try {
         await validateWithin(saved.root, saved.root);
-        root = saved.root;
-        folderGrants.add(root);
-        entries = await listTree(root);
-        treeVersion++;
+        const restoredEntries = await listTree(saved.root);
+        root = saved.root; folderGrants.add(root); entries = restoredEntries; treeVersion++;
+      } catch { startupNotice.push("마지막 폴더를 열 수 없습니다. 삭제되었거나 접근 권한이 바뀌었을 수 있습니다. 폴더를 다시 선택해 주세요."); }
+    }
+    doc = newDoc(savedSession.blank ? "" : welcome);
+    const explicit = pendingExternalFile;
+    const target = explicit || savedSession.documentPath;
+    if (target) {
+      try {
+        if (!isMarkdownPath(target)) throw Error("Markdown 문서가 아닙니다.");
+        fileGrants.add(normalized(target));
+        const loaded = await store.read(await allowedFile(target));
+        doc = newDoc(loaded.text, loaded);
+        doc.position = explicit ? readingPosition() : readingPosition(savedSession.position, doc.text.length);
+        if (explicit === pendingExternalFile) pendingExternalFile = null;
+        rememberSession();
+      } catch {
+        if (explicit === pendingExternalFile) pendingExternalFile = null;
+        startupNotice.push(`마지막으로 열려던 문서 ‘${path.basename(target)}’를 열 수 없습니다. 삭제·이동되었거나 접근 권한이 바뀌었을 수 있습니다. 문서를 다시 선택해 주세요.`);
       }
-    } catch {}
-    doc = newDoc(welcome);
+    }
+    status = startupNotice.join("\n");
     recoveryCount = (await store.recoveries()).length;
     resetWatchers();
     if (qaMode)
@@ -1145,12 +1389,20 @@ app
           await validateWithin(app.getPath("userData"), folder);
           root = folder;
           folderGrants.add(folder);
+          searchGeneration++;
+          searchController?.abort();
+          searchReport = review = null;
           resetWatchers();
           await refresh();
           publish();
         },
       };
-    nativeTheme.themeSource = settings.theme === "light" ? "light" : "dark";
+    nativeTheme.themeSource = nativeThemeSource();
+    nativeTheme.on("updated", () => {
+      if (settings.theme !== "system") return;
+      editor({ type: "settings", settings: editorSettings() });
+      publish();
+    });
     protocol.handle("app", serve);
     win = new BrowserWindow({
       width: 1180,
@@ -1208,7 +1460,9 @@ app
           return { ok: true };
         }
         if (action === "cancelSearch") {
+          searchGeneration++;
           searchController?.abort();
+          searchReport = review = null;
           return { ok: true };
         }
         return { ok: true, value: await run(action, payload) };
@@ -1234,6 +1488,10 @@ app
             { type: "separator" },
             item("저장", "CmdOrCtrl+S", "save"),
             item("다른 이름으로 저장…", "CmdOrCtrl+Shift+S", "saveAs"),
+            item("탐색기에서 보기", undefined, "reveal"),
+            item("HTML로 내보내기…", undefined, "exportHTML"),
+            item("PDF로 내보내기…", undefined, "exportPDF"),
+            item("인쇄…", "CmdOrCtrl+Alt+P", "print"),
             { type: "separator" },
             item("복구할 문서 보기", undefined, "recoveries"),
             { role: "quit", label: "종료" },
@@ -1250,6 +1508,7 @@ app
             { role: "paste", label: "붙여넣기" },
             { type: "separator" },
             item("문서 검색", "CmdOrCtrl+F", "command:search"),
+            item("찾아 바꾸기", "CmdOrCtrl+H", "command:replace"),
             item("폴더 전체 검색", "CmdOrCtrl+Shift+F", "folderSearch"),
           ],
         },
@@ -1260,6 +1519,8 @@ app
             item("목차", "CmdOrCtrl+Shift+1", "showOutline"),
             item("파일", "CmdOrCtrl+Shift+3", "showFiles"),
             item("원문 모드", "CmdOrCtrl+/", "command:source"),
+            item("집중 모드", "F8", "focusMode"),
+            item("타자기 모드", "F9", "typewriterMode"),
             item("설정", undefined, "settings"),
             { role: "togglefullscreen", label: "전체 화면" },
           ],
@@ -1270,11 +1531,22 @@ app
             item("굵게", "CmdOrCtrl+B", "command:bold"),
             item("기울임", "CmdOrCtrl+I", "command:italic"),
             item("링크", "CmdOrCtrl+K", "command:link"),
+            item("인라인 코드", undefined, "command:code"),
             item("제목", undefined, "command:heading"),
             item("목록", undefined, "command:list"),
             item("할 일", undefined, "command:task"),
             item("인용문", undefined, "command:quote"),
             item("코드 블록", undefined, "command:codeBlock"),
+            item("이미지 삽입…", undefined, "insertImage"),
+            item("표 삽입", undefined, "command:table"),
+            item("본문 목차", undefined, "command:toc"),
+            item("각주", undefined, "command:footnote"),
+            item("문서 메타데이터", undefined, "command:frontMatter"),
+            item("순서 목록", undefined, "command:orderedList"),
+            item("취소선", undefined, "command:strike"),
+            item("구분선", undefined, "command:horizontalRule"),
+            item("수식 블록", undefined, "command:mathBlock"),
+
           ],
         },
       ]),
@@ -1291,6 +1563,7 @@ app
       if (action !== "saveOnClose") return originalAction(action, payload);
       if (await beforeLeave()) {
         await persistRecovery();
+        rememberSession(); await persistSettings();
         closing = true;
         clearInterval(watchTimer);
         clearTimeout(refreshTimer);
@@ -1300,6 +1573,7 @@ app
     };
     await win.loadURL("app://host/index.html");
     win.show();
+    if (startupNotice.length) announce(startupNotice.join("\n"));
     let watching = false,
       ticks = 0;
     watchTimer = setInterval(async () => {

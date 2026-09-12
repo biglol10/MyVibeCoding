@@ -1,0 +1,28 @@
+{
+  "status": "installed_and_verified",
+  "version": "0.3.3",
+  "build": 9,
+  "installedApp": "/Applications/MyMarkdownViewer.app",
+  "backup": "build/code-preview-install-backup-20260912-231359",
+  "fileManifestCount": 242,
+  "fileManifestMatch": true,
+  "signatureVerified": true,
+  "zipIntegrity": true,
+  "archive": "dist/MyMarkdownViewer-0.3.3-macOS.zip",
+  "archiveSHA256": "f4867fc0e50ae7a680ebec959d0ffde977c1c5124392fe00dc73f0a17d248a4e",
+  "originalDocumentsUnchanged": 131,
+  "environment": "macOS 26.6.2 / Apple Silicon",
+  "installedAt": "2026-09-12T23:13:59.856317+09:00",
+  "verifiedAt": "2026-09-12T23:14:55.612188+09:00",
+  "installedProcessCount": 1,
+  "sharedEditorAssetsMatched": 235,
+  "actualUI": {
+    "lastDocumentRestored": true,
+    "folderRestored": true,
+    "nightThemePreserved": true,
+    "sidebarWidthPreserved": true,
+    "sidebarRoundTripScroll": true,
+    "cleanSavedStatus": true,
+    "leftRunningForUser": true
+  }
+}

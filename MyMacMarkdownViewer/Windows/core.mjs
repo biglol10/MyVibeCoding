@@ -7,6 +7,10 @@ const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
 const PACKAGES = new Set([".app", ".bundle", ".framework", ".pkg"]);
 const locks = new Map();
 
+export function isMarkdownPath(file) {
+  return [".md", ".markdown"].includes(path.extname(String(file)).toLowerCase());
+}
+
 export class CoreError extends Error {
   constructor(code, message) {
     super(message);
@@ -30,6 +34,7 @@ const korean = {
   alreadyExists: "같은 이름의 파일 또는 폴더가 이미 있습니다.",
   rootProtected: "작업 폴더 자체는 이동할 수 없습니다.",
   invalidMove: "폴더를 자기 자신 또는 그 안으로 옮길 수 없습니다.",
+  duplicateIncomplete: "복제본을 완성하지 못했습니다. 원본 편집본은 변경하지 않았습니다.",
   unavailable:
     "파일 작업을 완료할 수 없습니다. 접근 권한과 동기화 상태를 확인해 주세요.",
 };
@@ -473,7 +478,7 @@ export async function scan(
       safeRoot,
       async (file, entry) => {
         if (entry.isDirectory()) return;
-        if (path.extname(file).toLowerCase() !== ".md") return;
+        if (!isMarkdownPath(file)) return;
         try {
           await regular(file);
           const stat = await fs.stat(file);
@@ -611,7 +616,7 @@ export async function listTree(root) {
   const safeRoot = await validateWithin(root, root),
     tree = [];
   await directoryEntries(safeRoot, async (full, entry, depth) => {
-    if (entry.isDirectory() || path.extname(entry.name).toLowerCase() === ".md")
+    if (entry.isDirectory() || isMarkdownPath(entry.name))
       tree.push({
         path: full,
         name: entry.name,
@@ -634,6 +639,8 @@ async function collision(parent, name, source = null) {
 }
 export async function create(root, parent, name, directory) {
   validateName(name);
+  if (!directory && !isMarkdownPath(name)) name += ".md";
+  validateName(name);
   const safeParent = await validateWithin(root, parent);
   if (!(await fs.lstat(safeParent)).isDirectory()) err("unsafePath");
   const target = await validateWithin(root, path.join(safeParent, name), {
@@ -643,6 +650,46 @@ export async function create(root, parent, name, directory) {
   if (directory) await fs.mkdir(target);
   else await fs.writeFile(target, "", { flag: "wx" });
   return target;
+}
+export async function duplicate(root, source) {
+  const safeRoot = await validateWithin(root, root);
+  const from = await validateWithin(safeRoot, source);
+  if (from === safeRoot) err("rootProtected");
+  const stat = await fs.lstat(from);
+  if (stat.isSymbolicLink() || (!stat.isFile() && !stat.isDirectory())) err("unsafePath");
+  const parent = await validateWithin(safeRoot, path.dirname(from));
+  const ext = stat.isDirectory() ? "" : path.extname(from);
+  const stem = stat.isDirectory() ? path.basename(from) : path.basename(from, ext);
+  for (let index = 0; index < 100; index += 1) {
+    const suffix = index ? ` 복사본 (${index + 1})` : " 복사본";
+    const name = `${stem}${suffix}${ext}`;
+    const target = await validateWithin(safeRoot, path.join(parent, name), { allowMissing: true });
+    try { await collision(parent, name); }
+    catch (error) { if (error.code === "alreadyExists") continue; throw error; }
+    let ownsTarget = false;
+    try {
+      if (stat.isDirectory()) {
+        // mkdir is exclusive: we only ever copy children into a directory this
+        // operation created, so an existing directory can never be merged.
+        await fs.mkdir(target);
+        ownsTarget = true;
+        for (const child of await fs.readdir(from))
+          await fs.cp(path.join(from, child), path.join(target, child), { recursive: true, force: false, errorOnExist: true, verbatimSymlinks: true });
+      } else {
+        await fs.copyFile(from, target, fs.constants.COPYFILE_EXCL);
+      }
+      return target;
+    } catch (error) {
+      if (ownsTarget) {
+        try { await fs.rm(target, { recursive: true, force: true }); }
+        catch { fail("duplicateIncomplete", `${korean.duplicateIncomplete} 새 복제본 위치: ${target}`); }
+        throw error;
+      }
+      if (["EEXIST", "ENOTEMPTY", "ERR_FS_CP_EEXIST"].includes(error.code)) continue;
+      throw error;
+    }
+  }
+  err("alreadyExists");
 }
 export async function move(root, source, destination) {
   const safeRoot = await validateWithin(root, root),

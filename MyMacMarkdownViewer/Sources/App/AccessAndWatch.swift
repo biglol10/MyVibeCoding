@@ -67,22 +67,70 @@ final class FileObservation: NSObject, NSFilePresenter, @unchecked Sendable {
     func accommodatePresentedItemDeletion(completionHandler: @escaping @Sendable (Error?) -> Void) { changed(); completionHandler(nil) }
 }
 
-@MainActor
 final class FolderObservation {
-    private var stream: FSEventStreamRef?
-    private let changed: @MainActor () -> Void
+    private final class Backend: @unchecked Sendable {
+        private let lock = NSLock()
+        private var active = true
+        private let queue = DispatchQueue(label: "com.personal.MyMarkdownViewer.folder-observation")
+        private var stream: FSEventStreamRef?
+        private let changed: @MainActor () -> Void
+
+        init(url: URL, changed: @escaping @MainActor () -> Void) {
+            self.changed = changed
+            queue.async { [self] in
+                var context = FSEventStreamContext(
+                    version: 0,
+                    info: Unmanaged.passUnretained(self).toOpaque(),
+                    retain: { info in
+                        guard let info else { return nil }
+                        _ = Unmanaged<Backend>.fromOpaque(info).retain()
+                        return info
+                    },
+                    release: { info in
+                        guard let info else { return }
+                        Unmanaged<Backend>.fromOpaque(info).release()
+                    },
+                    copyDescription: nil
+                )
+                stream = FSEventStreamCreate(nil, { _, info, _, _, _, _ in
+                    guard let info else { return }
+                    let backend = Unmanaged<Backend>.fromOpaque(info).takeUnretainedValue()
+                    guard backend.isActive else { return }
+                    Task { @MainActor in
+                        guard backend.isActive else { return }
+                        backend.changed()
+                    }
+                }, &context, [url.path] as CFArray, FSEventStreamEventId(kFSEventStreamEventIdSinceNow), 0.3,
+                FSEventStreamCreateFlags(kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagWatchRoot | kFSEventStreamCreateFlagUseCFTypes))
+                if let stream {
+                    guard isActive else { cleanup(stream); return }
+                    FSEventStreamSetDispatchQueue(stream, queue)
+                    guard FSEventStreamStart(stream) else { cleanup(stream); return }
+                }
+            }
+        }
+
+        private var isActive: Bool { lock.withLock { active } }
+
+        func stop() {
+            lock.withLock { active = false }
+            queue.async { [self] in
+                if let stream { cleanup(stream) }
+            }
+        }
+
+        private func cleanup(_ stream: FSEventStreamRef) {
+            FSEventStreamStop(stream)
+            FSEventStreamInvalidate(stream)
+            FSEventStreamRelease(stream)
+            self.stream = nil
+        }
+    }
+
+    private let backend: Backend
     init(url: URL, changed: @escaping @MainActor () -> Void) {
-        self.changed = changed
-        var context = FSEventStreamContext(version: 0, info: Unmanaged.passUnretained(self).toOpaque(), retain: nil, release: nil, copyDescription: nil)
-        stream = FSEventStreamCreate(nil, { _, info, _, _, _, _ in
-            guard let info else { return }
-            let watcher = Unmanaged<FolderObservation>.fromOpaque(info).takeUnretainedValue()
-            MainActor.assumeIsolated { watcher.changed() }
-        }, &context, [url.path] as CFArray, FSEventStreamEventId(kFSEventStreamEventIdSinceNow), 0.3,
-        FSEventStreamCreateFlags(kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagWatchRoot | kFSEventStreamCreateFlagUseCFTypes))
-        if let stream { FSEventStreamSetDispatchQueue(stream, .main); FSEventStreamStart(stream) }
+        backend = Backend(url: url, changed: changed)
     }
-    func stop() {
-        if let stream { FSEventStreamStop(stream); FSEventStreamInvalidate(stream); FSEventStreamRelease(stream); self.stream = nil }
-    }
+    func stop() { backend.stop() }
+    deinit { backend.stop() }
 }

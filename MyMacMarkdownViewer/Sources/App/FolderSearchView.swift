@@ -17,6 +17,10 @@ struct FolderSearchView: View {
                 } else {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("본문 찾기").font(.headline)
+                        if let scope = model.folderSearchScope {
+                            Text("검색 위치: " + scope.lastPathComponent).font(.caption).textSelection(.enabled).help(scope.path)
+                            Button("작업 폴더 전체에서 검색") { model.clearFolderSearchScope() }.disabled(model.workspaceBusy)
+                        }
                         TextField("찾을 글자", text: $model.folderQuery).textFieldStyle(.roundedBorder).controlSize(.large)
                             .onSubmit { model.runFolderSearch() }.accessibilityIdentifier("folder-query")
                         Toggle("대소문자 구분", isOn: $model.folderCaseSensitive)
@@ -112,7 +116,8 @@ struct FolderReplaceView: View {
     @State private var applying = false
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text(result == nil ? "폴더 전체 바꾸기 검토" : "바꾸기 결과").font(.title2.bold())
+            Text(result == nil ? "검색 범위 바꾸기 검토" : "바꾸기 결과").font(.title2.bold())
+            Text("대상: " + review.root.lastPathComponent).font(.subheadline).help(review.root.path)
             Text("‘\(review.query)’ → \(review.replacement.isEmpty ? "삭제" : "‘" + review.replacement + "’")").textSelection(.enabled)
             Text("선택한 파일만 저장합니다. 적용 직전 원본을 다시 확인하며, 파일별 저장 전 백업을 남깁니다. 여러 파일의 변경은 한 번의 실행 취소로 되돌릴 수 없습니다.")
                 .font(.system(size: 13)).foregroundStyle(.secondary).lineSpacing(4).fixedSize(horizontal: false, vertical: true)

@@ -12,6 +12,28 @@ export function blocksFor(text: string, tree: Tree = markdownParser.parse(text))
     blocks.push({ from: node.from, to: node.to, kind: node.name, source: text.slice(node.from, node.to), node });
     node = node.nextSibling;
   }
+  // YAML-style front matter is document metadata, not a horizontal rule plus
+  // prose. Keep it as one non-editing preview block while preserving source.
+  if (text.startsWith('---\n')) {
+    const closing = /^---\s*$/m.exec(text.slice(4));
+    if (closing?.index !== undefined) {
+      const end = 4 + closing.index + closing[0].length;
+      const bodyFrom = end + (text[end] === '\n' ? 1 : 0);
+      const retained = blocks.filter(block => block.from >= bodyFrom);
+      retained.unshift({ from: 0, to: end, kind: 'FrontMatter', source: text.slice(0, end) });
+      blocks.splice(0, blocks.length, ...retained);
+    }
+  }
+  // A footnote's indented continuation belongs to its definition, even when
+  // Lezer represents it as a separate code block after a blank source line.
+  for (let i = 0; i < blocks.length; i++) {
+    if (!/^ {0,3}\[\^[^\] \n]+\]:/.test(blocks[i].source)) continue;
+    while (blocks[i + 1]?.kind === 'CodeBlock'
+      && /^\s*$/.test(text.slice(blocks[i].to, blocks[i + 1].from))) {
+      const from = blocks[i].from, to = blocks[i + 1].to;
+      blocks.splice(i, 2, { from, to, kind: 'FootnoteDefinition', source: text.slice(from, to) });
+    }
+  }
   // The CommonMark parser sees multiline display math as adjacent paragraphs. Merge only complete $$ pairs.
   for (let i = 0; i < blocks.length; i++) {
     if (!/^\$\$(?:\s|$)/.test(blocks[i].source)) continue;
@@ -35,6 +57,13 @@ export function outlineFor(text: string, tree: Tree = markdownParser.parse(text)
     headings.push({ from: node.from, level: Number(match[1]),
       title: source.replace(/^#{1,6}\s*/, '').replace(/\n[=-]+\s*$/, '').replace(/\s+#+\s*$/, '').replace(/[*_`]/g, '').trim() });
   }});
+  if (text.startsWith('---\n')) {
+    const closing = /^---\s*$/m.exec(text.slice(4));
+    if (closing?.index !== undefined) {
+      const end = 4 + closing.index + closing[0].length;
+      return headings.filter(heading => heading.from > end);
+    }
+  }
   return headings;
 }
 

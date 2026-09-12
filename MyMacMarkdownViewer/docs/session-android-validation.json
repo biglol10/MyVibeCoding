@@ -1,0 +1,31 @@
+{
+  "date": "2026-09-12",
+  "versionName": "1.2.1",
+  "versionCode": 7,
+  "emulator": "MarkdownReader_QA / emulator-5580 / Android 15 API 35 arm64",
+  "releaseUpdateInstall": true,
+  "debuggable": false,
+  "nativeTests": 9,
+  "nativePassed": true,
+  "cases": [
+    "SAF child metadata fallback",
+    "SAF null and loading cursor errors",
+    "provider failure handling",
+    "nested folder restoration",
+    "document plus independent folder plus 78 percent position after Activity restart",
+    "stale session position ignored",
+    "unavailable browse folder keeps readable document",
+    "malformed browse tree keeps readable document"
+  ],
+  "browserSuites": [
+    "reader-session",
+    "reader-navigation",
+    "reader-browser",
+    "reader-settings"
+  ],
+  "physicalDeviceVerified": false,
+  "initialValidationIssues": [
+    "Unfiltered instrumentation startup ANR before tests; explicit class run completed.",
+    "Test compared equivalent tree URI strings; changed to stable tree document id."
+  ]
+}

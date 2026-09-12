@@ -1,0 +1,25 @@
+{
+  "fixtureRoot": "Android/tests/fixtures",
+  "files": [
+    {
+      "path": "nestedfolder/long-filename-for-reader-layout-and-safe-read-only-verification-한글-문서.md",
+      "sha256": "a39be8687f9eaa69d259821fcddac29e6b2f077dde272539122e3507aea8b411"
+    },
+    {
+      "path": "nestedfolder/relative-target.md",
+      "sha256": "d32f574d880fd3ea9dba5a2881d16468f33f7ed660dccb128ea6e296119d0071"
+    },
+    {
+      "path": "nestedfolder/simplecodegenerated.png",
+      "sha256": "e28f1c4294bb0751e814196f31b2b2fd90ddde86a1513133516966c94b41e7ce"
+    },
+    {
+      "path": "reader-fixture.md",
+      "sha256": "62f165283b62f677f9f644a48d0772b8ece683144d7051e3c77ef09eb6dcc416"
+    },
+    {
+      "path": "reader-semantics-fixture.md",
+      "sha256": "b6b756e8e89127cde8c3567fdd3441acf49b5995e2e7b8c2ac8493164e3de7a1"
+    }
+  ]
+}

@@ -1,3 +1,5 @@
+import { buildOutline, normalizeOutlineQuery, outlineSignature, visibleOutline } from "./outline.mjs";
+
 const $ = (s) => document.querySelector(s);
 const frame = $("#editor-frame");
 const api = window.desktop;
@@ -12,7 +14,7 @@ let state = {
   },
   root: null,
   entries: [],
-  settings: {
+    settings: {
     theme: "dark",
     fontSize: 17,
     lineHeight: 1.7,
@@ -20,15 +22,25 @@ let state = {
     fontFamily: "system",
     remoteImages: false,
     autosave: true,
-  },
+    },
+  resolvedTheme: "dark",
   recoveryCount: 0,
   status: "",
 };
 let selectedPath = null,
   expanded = new Set(),
   metadata = { headings: [], characters: 0, words: 0, lines: 0 },
-  currentHeading = -1;
+  currentHeading = -1,
+  contextMenuPath = null;
+let outlineState = {
+  query: "",
+  collapsed: new Set(),
+  headingSignature: "",
+};
+let outlineNodes = [];
 let searchState = null,
+  searchScope = null,
+  searchRequest = 0,
   reviewState = null,
   reviewApplied = false,
   pendingActions = 0,
@@ -98,7 +110,7 @@ async function perform(action, payload = {}, { quiet = false } = {}) {
 function setBusy() {
   const blocked = pendingActions > 0 || mainBusy;
   document
-    .querySelectorAll("[data-action],[data-file-action],#apply-replace")
+    .querySelectorAll("[data-action],[data-file-action],[data-theme],#apply-replace,#reset-search-scope")
     .forEach((b) => {
       if (b.dataset.action !== "settings") b.disabled = blocked;
     });
@@ -119,7 +131,12 @@ function sendEditor(message) {
     );
 }
 function renderHeader() {
-  document.documentElement.dataset.theme = state.settings.theme;
+  for (const key of ["focusMode", "typewriterMode"]) {
+    document.querySelectorAll(`[data-action="${key}"]`).forEach(button => button.setAttribute("aria-checked", String(!!state.settings[key])));
+  }
+  document.documentElement.dataset.theme = state.resolvedTheme || state.settings.theme;
+  for (const button of document.querySelectorAll("[data-theme]"))
+    button.setAttribute("aria-checked", String(button.dataset.theme === state.settings.theme));
   $("#doc-title").title = state.doc.path || "새 문서";
   text($("#doc-title"), basename(state.doc.path));
   text(
@@ -186,9 +203,8 @@ function renderTree() {
     );
     item.addEventListener("click", () => { selectEntry(entry); if (!entry.directory) openPath(entry.path); });
     item.addEventListener("contextmenu", (event) => {
-      event.preventDefault(); selectedPath = entry.path; renderTree();
-      const menu = $(".folder-menu"); menu.open = true;
-      menu.querySelector("[data-file-action=rename]").focus();
+      event.preventDefault();
+      selectContextEntry(entry, event.clientX, event.clientY);
     });
 
     tree.append(item);
@@ -208,36 +224,146 @@ function selectEntry(entry) {
   }
   renderTree();
 }
+function contextMenu() { return $("#item-context-menu"); }
+function closeContextMenu({ restoreFocus = false } = {}) {
+  const menu = contextMenu();
+  if (menu.hidden) return;
+  const path = contextMenuPath;
+  menu.hidden = true;
+  menu.replaceChildren();
+  contextMenuPath = null;
+  if (restoreFocus && path)
+    document.querySelector(`.tree-item[data-path="${CSS.escape(path)}"]`)?.focus();
+}
+function addContextAction(menu, label, action, { destructive = false } = {}) {
+  const button = el("button", { text: label, type: "button", "data-file-action": action, role: "menuitem" });
+  if (destructive) button.classList.add("destructive");
+  menu.append(button);
+}
+function addContextDivider(menu) { menu.append(el("hr", { role: "separator" })); }
+function showContextMenu(entry, clientX, clientY) {
+  const menu = contextMenu();
+  for (const dropdown of document.querySelectorAll("details.dropdown[open]")) dropdown.open = false;
+  menu.replaceChildren();
+  contextMenuPath = entry.path;
+  if (entry.directory) {
+    addContextAction(menu, "폴더 열기", "openFolder");
+    addContextAction(menu, "여기에 새 문서…", "createFile");
+    addContextAction(menu, "여기에 새 폴더…", "createFolder");
+    addContextDivider(menu);
+  } else {
+    addContextAction(menu, "열기", "open");
+    addContextAction(menu, "여기에 새 문서…", "createFile");
+    addContextAction(menu, "여기에 새 폴더…", "createFolder");
+  }
+  addContextAction(menu, "복제", "duplicate");
+  addContextAction(menu, "이름 변경…", "rename");
+  addContextAction(menu, "이동…", "move");
+  addContextAction(menu, "이 폴더에서 검색", "searchScope");
+  addContextAction(menu, "탐색기에서 보기", "reveal");
+  addContextAction(menu, "경로 복사", "copyPath");
+  addContextAction(menu, "정보", "info");
+  addContextDivider(menu);
+  addContextAction(menu, "휴지통으로 보내기…", "trash", { destructive: true });
+  menu.hidden = false;
+  const padding = 8;
+  const { width, height } = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(padding, Math.min(clientX, innerWidth - width - padding))}px`;
+  menu.style.top = `${Math.max(padding, Math.min(clientY, innerHeight - height - padding))}px`;
+  setBusy();
+  menu.querySelector("button:not(:disabled)")?.focus();
+}
+function selectContextEntry(entry, clientX, clientY) {
+  selectedPath = entry.path;
+  renderTree();
+  showContextMenu(entry, clientX, clientY);
+}
 async function openPath(path) {
   const r = await perform("open", { path });
   if (r.ok && r.value) applyState(r.value);
 }
-function renderOutline() {
+function resetOutlineState() {
+  outlineState = { query: "", collapsed: new Set(), headingSignature: "" };
+  outlineNodes = [];
+  const input = $("#outline-query");
+  if (input) input.value = "";
+}
+function jumpToHeading(heading) {
+  sendEditor({
+    type: "jump",
+    documentID: state.doc.path || "untitled",
+    sessionID: state.doc.sessionID,
+    from: heading.from,
+    to: heading.from,
+  });
+}
+function updateOutlineCurrent(previousHeading = -1) {
+  if (previousHeading === currentHeading) return;
+  for (const index of [previousHeading, currentHeading]) {
+    if (index < 0) continue;
+    const button = document.querySelector(`#outline [data-outline-index="${index}"]`);
+    if (!button) continue;
+    const active = index === currentHeading;
+    button.classList.toggle("current", active);
+    if (active) button.setAttribute("aria-current", "location");
+    else button.removeAttribute("aria-current");
+  }
+}
+function renderOutline({ restoreToggleID = null } = {}) {
   const target = $("#outline");
   target.replaceChildren();
+  const query = normalizeOutlineQuery(outlineState.query);
+  const canCollapse = !query && outlineNodes.some(node => node.children.length);
+  $("#clear-outline-search").hidden = !query;
+  $("#collapse-outline").disabled = !canCollapse;
+  $("#expand-outline").disabled = !canCollapse;
   if (!metadata.headings?.length) {
     target.append(
       el("p", { text: "문서의 제목이 여기에 표시됩니다.", class: "empty" }),
     );
     return;
   }
-  metadata.headings.forEach((h, index) => {
-    const b = el("button", {
-      class: index === currentHeading ? "current" : "",
-      style: `--indent:${Math.max(0, (h.level || 1) - 1)}`,
-      text: h.title || "제목 없음",
+  const visible = visibleOutline(outlineNodes, outlineState);
+  if (!visible.length) {
+    target.append(el("p", { text: "일치하는 제목이 없습니다.", class: "empty" }));
+    return;
+  }
+  for (const heading of visible) {
+    const row = el("div", { class: "outline-row", style: `--indent:${heading.depth}` });
+    if (heading.children.length) {
+      const expanded = !!query || !outlineState.collapsed.has(heading.id);
+      const control = el("button", {
+        class: "outline-toggle",
+        type: "button",
+        "data-outline-toggle-id": heading.id,
+        "aria-label": `${heading.title || "제목 없음"} ${expanded ? "접기" : "펼치기"}`,
+        "aria-expanded": String(expanded),
+        text: expanded ? "⌄" : "›",
+      });
+      control.disabled = !!query;
+      control.addEventListener("click", () => {
+        if (outlineState.collapsed.has(heading.id)) outlineState.collapsed.delete(heading.id);
+        else outlineState.collapsed.add(heading.id);
+        renderOutline({ restoreToggleID: heading.id });
+      });
+      row.append(control);
+    } else row.append(el("span", { class: "outline-toggle-spacer", "aria-hidden": "true" }));
+    const button = el("button", {
+      class: `outline-link ${heading.index === currentHeading ? "current" : ""}`,
+      type: "button",
+      "data-outline-index": heading.index,
+      "data-outline-from": heading.from,
+      "aria-current": heading.index === currentHeading ? "location" : null,
+      title: heading.title || "제목 없음",
+      text: heading.title || "제목 없음",
     });
-    b.addEventListener("click", () =>
-      sendEditor({
-        type: "jump",
-        documentID: state.doc.path || "untitled",
-        sessionID: state.doc.sessionID,
-        from: h.from,
-        to: h.from,
-      }),
-    );
-    target.append(b);
-  });
+    button.addEventListener("click", () => jumpToHeading(heading));
+    row.append(button);
+    target.append(row);
+  }
+  if (restoreToggleID)
+    queueMicrotask(() => [...target.querySelectorAll("[data-outline-toggle-id]")]
+      .find(node => node.dataset.outlineToggleId === restoreToggleID)?.focus());
 }
 function renderStatus() {
   text(
@@ -270,7 +396,7 @@ function sameTree(left = [], right = []) {
 function applyState(next) {
   if (!isState(next)) return;
   if (typeof next.busy === "boolean") mainBusy = next.busy;
-  const previousPath = state.doc.path;
+  const previousPath = state.doc.path, previousSessionID = state.doc.sessionID, previousRoot = state.root;
   const entriesChanged = Array.isArray(next.entries) && !sameTree(state.entries, next.entries);
   state = {
     ...state,
@@ -278,15 +404,27 @@ function applyState(next) {
     doc: { ...state.doc, ...(next.doc || {}) },
     settings: { ...state.settings, ...(next.settings || {}) },
   };
+  if (next.root !== undefined && next.root !== previousRoot) resetSearchScope({ silent: true });
+  if (contextMenuPath && !(state.entries || []).some((entry) => entry.path === contextMenuPath))
+    closeContextMenu();
   if (next.doc?.path && next.doc.path !== previousPath) {
     selectedPath = next.doc.path;
     revealPath(next.doc.path);
+  }
+  if (state.doc.path !== previousPath || state.doc.sessionID !== previousSessionID) {
+    metadata = { headings: [], characters: 0, words: 0, lines: 0 };
+    currentHeading = -1;
+    resetOutlineState();
+    renderOutline();
+    renderStatus();
   }
   setBusy();
   renderHeader();
   // Main-state updates also arrive for keystrokes, metadata, and notices.
   // Keep the focused tree and its nodes intact unless its contents or selection changed.
   if (entriesChanged || state.doc.path !== previousPath) renderTree();
+  renderSearchScope();
+  if ($("#quick-open-dialog")?.open) $("#quick-open-dialog")._quickDraw?.();
 }
 function revealPath(path) {
   const directories = new Set((state.entries || []).filter((entry) => entry.directory).map((entry) => entry.path));
@@ -378,56 +516,171 @@ function quickOpen() {
   let dialog = $("#quick-open-dialog");
   if (!dialog) {
     dialog = el("dialog", { id: "quick-open-dialog" });
-    const form = el("form", { method: "dialog" }),
+    const form = el("form"),
       input = el("input", {
         type: "search",
+        role: "combobox",
+        "aria-controls": "quick-open-results",
+        "aria-expanded": "false",
         placeholder: "파일 이름 또는 경로 검색",
         "aria-label": "빠른 열기 검색",
+        autocomplete: "off",
       }),
-      list = el("div", { class: "quick-list" });
+      list = el("div", { id: "quick-open-results", class: "quick-list", role: "listbox", "aria-label": "빠른 열기 결과" }),
+      close = el("button", { type: "button", text: "닫기" });
     form.append(
       el("h2", { text: "빠른 열기" }),
       input,
       list,
-      el("menu", {}, [el("button", { text: "닫기" })]),
+      el("menu", {}, [close]),
     );
     dialog.append(form);
     document.body.append(dialog);
-    const draw = () => {
+    let matches = [], selected = 0, quickSelectedPath = null;
+    const relativePath = (item) => {
+      const root = state.root;
+      if (!root || !item.path.startsWith(root)) return item.path;
+      return item.path.slice(root.length).replace(/^[\\/]+/, "") || item.name;
+    };
+    const openSelected = () => {
+      const item = matches[selected];
+      if (!item) return;
+      dialog.close();
+      void openPath(item.path);
+    };
+    const draw = ({ reveal = false, resetScroll = false } = {}) => {
+      const scrollTop = resetScroll ? 0 : list.scrollTop;
       list.replaceChildren();
       const q = input.value.toLocaleLowerCase();
-      for (const item of (state.entries || [])
+      matches = (state.entries || [])
         .filter(
           (x) =>
             !x.directory &&
-            `${x.name} ${x.path}`.toLocaleLowerCase().includes(q),
+            `${x.name} ${relativePath(x)}`.toLocaleLowerCase().includes(q),
         )
-        .slice(0, 30)) {
-        const b = el("button", { type: "button", text: item.path });
+        .slice(0, 30);
+      const selectedIndex = matches.findIndex(item => item.path === quickSelectedPath);
+      selected = selectedIndex >= 0 ? selectedIndex : 0;
+      quickSelectedPath = matches[selected]?.path || null;
+      for (const [index, item] of matches.entries()) {
+        const b = el("button", {
+          id: `quick-open-option-${index}`,
+          type: "button",
+          class: "quick-result",
+          role: "option",
+          "aria-selected": String(index === selected),
+        }, [el("strong", { text: item.name }), el("span", { text: relativePath(item) })]);
         b.addEventListener("click", () => {
-          dialog.close();
-          openPath(item.path);
+          selected = index;
+          quickSelectedPath = item.path;
+          openSelected();
         });
         list.append(b);
       }
       if (!list.childElementCount)
         list.append(el("p", { text: "일치하는 파일이 없습니다." }));
+      list.scrollTop = scrollTop;
+      const activeID = matches[selected] ? `quick-open-option-${selected}` : null;
+      if (activeID) input.setAttribute("aria-activedescendant", activeID);
+      else input.removeAttribute("aria-activedescendant");
+      if (reveal && activeID) document.getElementById(activeID)?.scrollIntoView({ block: "nearest" });
     };
-    input.addEventListener("input", draw);
-    dialog.addEventListener("close", () => (input.value = ""));
+    input.addEventListener("input", () => { selected = 0; quickSelectedPath = null; draw({ resetScroll: true }); });
+    let composing = false, lastCompositionKey = false;
+    input.addEventListener("compositionstart", () => { composing = true; });
+    input.addEventListener("compositionend", () => { composing = false; });
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (composing || lastCompositionKey) return;
+      openSelected();
+    });
+    close.addEventListener("click", () => dialog.close());
+    input.addEventListener("keydown", (event) => {
+      if (composing || event.isComposing || event.keyCode === 229) {
+        lastCompositionKey = true;
+        return;
+      }
+      lastCompositionKey = false;
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      event.preventDefault();
+      if (!matches.length) return;
+      selected = (selected + (event.key === "ArrowDown" ? 1 : matches.length - 1)) % matches.length;
+      quickSelectedPath = matches[selected]?.path || null;
+      draw({ reveal: true });
+    });
+    dialog.addEventListener("close", () => {
+      input.value = "";
+      selected = 0;
+      quickSelectedPath = null;
+      composing = false;
+      lastCompositionKey = false;
+      draw();
+      input.setAttribute("aria-expanded", "false");
+    });
+    dialog._quickReset = () => { input.value = ""; selected = 0; quickSelectedPath = null; composing = false; lastCompositionKey = false; draw({ resetScroll: true }); };
     dialog._quickDraw = draw;
   }
-  dialog._quickDraw();
+  dialog._quickReset();
   dialog.showModal();
+  dialog.querySelector("input").setAttribute("aria-expanded", "true");
   dialog.querySelector("input").focus();
 }
-async function fileAction(action) {
-  const entry = (state.entries || []).find((x) => x.path === selectedPath);
+async function fileAction(action, targetPath = selectedPath) {
+  const entry = (state.entries || []).find((x) => x.path === targetPath);
+  if (action === "open") {
+    if (entry && !entry.directory) await openPath(entry.path);
+    return;
+  }
+  if (action === "reveal") {
+    await perform("reveal", { path: targetPath });
+    return;
+  }
+  if (action === "openFolder") {
+    await perform("openFolder", { path: targetPath });
+    return;
+  }
+  if (action === "copyPath") {
+    await perform("copyPath", { path: targetPath });
+    return;
+  }
+  if (action === "info") {
+    const r = await perform("info", { path: targetPath });
+    if (!r.ok) return;
+    const item = r.value;
+    const lines = [
+      ["이름", item.name], ["위치", item.path], ["종류", item.directory ? "폴더" : "Markdown 문서"],
+      ...(item.size == null ? [] : [["크기", new Intl.NumberFormat("ko-KR").format(item.size) + " 바이트"]]),
+      ["수정", new Date(item.modified).toLocaleString("ko-KR")], ["생성", new Date(item.created).toLocaleString("ko-KR")],
+    ];
+    $("#item-info").replaceChildren(...lines.map(([label, value]) => el("p", { text: `${label}: ${value}` })));
+    $("#item-info-dialog").showModal();
+    return;
+  }
+  if (action === "searchScope") {
+    const nextScope = entry?.directory ? entry.path : targetPath ? String(targetPath).replace(/[\\/][^\\/]+$/, "") : state.root;
+    if (nextScope !== searchScope) {
+      searchScope = nextScope;
+      invalidateSearch();
+    }
+    switchTab("search");
+    $("#search-query").focus();
+    renderSearchScope();
+    showNotice(`검색 범위: ${searchScope}`, false);
+    return;
+  }
+  if (action === "duplicate") {
+    const r = await perform("duplicate", { path: targetPath });
+    if (r.ok) {
+      selectedPath = r.value;
+      await perform("refresh", {}, { quiet: true });
+    }
+    return;
+  }
   if (action === "createFile" || action === "createFolder") {
     const parent = entry?.directory
       ? entry.path
-      : selectedPath
-        ? String(selectedPath).replace(/[\\/][^\\/]+$/, "")
+      : targetPath
+        ? String(targetPath).replace(/[\\/][^\\/]+$/, "")
         : state.root;
     await requestItem({
       title: action === "createFile" ? "새 Markdown 문서" : "새 폴더",
@@ -470,14 +723,38 @@ async function runSearch(event) {
   event?.preventDefault();
   const query = $("#search-query").value;
   if (!query) return;
+  invalidateSearch();
+  const request = ++searchRequest;
+  const scope = searchScope || state.root;
+  const caseSensitive = $("#case-sensitive").checked;
   const r = await perform("search", {
     query,
-    caseSensitive: $("#case-sensitive").checked,
+    caseSensitive,
+    root: scope,
   });
-  if (r.ok) {
+  if (r.ok && r.value && request === searchRequest && scope === (searchScope || state.root) && query === $("#search-query").value && caseSensitive === $("#case-sensitive").checked) {
     searchState = r.value;
     renderSearch();
   }
+}
+function invalidateSearch() {
+  searchRequest++;
+  searchState = reviewState = null;
+  if ($("#replace-dialog")?.open) $("#replace-dialog").close();
+  renderSearch();
+}
+function resetSearchScope({ silent = false } = {}) {
+  searchScope = null;
+  invalidateSearch();
+  renderSearchScope();
+  if (!silent) showNotice("검색 범위를 전체 작업 폴더로 바꿨습니다.", false);
+}
+function renderSearchScope() {
+  const label = $("#search-scope"), reset = $("#reset-search-scope");
+  if (!label || !reset) return;
+  const scope = searchScope || state.root;
+  text(label, scope ? (searchScope ? `검색 범위: ${scope}` : "검색 범위: 전체 작업 폴더") : "폴더를 열어 검색할 수 있습니다.");
+  reset.hidden = !searchScope;
 }
 function renderSearch() {
   const target = $("#search-results");
@@ -672,6 +949,8 @@ function settingsDialog() {
   $("#set-font-family").value = s.fontFamily;
   $("#set-remote-images").checked = !!s.remoteImages;
   $("#set-autosave").checked = !!s.autosave;
+  $("#set-focus-mode").checked = !!s.focusMode;
+  $("#set-typewriter-mode").checked = !!s.typewriterMode;
   $("#settings-dialog").showModal();
 }
 async function saveSettings() {
@@ -683,11 +962,12 @@ async function saveSettings() {
     fontFamily: $("#set-font-family").value,
     remoteImages: $("#set-remote-images").checked,
     autosave: $("#set-autosave").checked,
+    focusMode: $("#set-focus-mode").checked,
+    typewriterMode: $("#set-typewriter-mode").checked,
   };
   const r = await perform("settings", { patch });
   if (r.ok) {
     state.settings = { ...state.settings, ...patch };
-    sendEditor({ type: "settings", settings: state.settings });
     renderHeader();
     $("#settings-dialog").close();
   }
@@ -707,16 +987,24 @@ window.addEventListener("message", async (event) => {
     const message = data.message || {};
     if (message.type === "ready") frameReady = true;
     if (message.type === "metadata") {
+      const nextSignature = outlineSignature(message.headings || []);
+      const headingsChanged = nextSignature !== outlineState.headingSignature;
+      if (headingsChanged) {
+        outlineState.collapsed.clear();
+        outlineState.headingSignature = nextSignature;
+        outlineNodes = buildOutline(message.headings || []);
+      }
       metadata = { ...metadata, ...message };
-      renderOutline();
+      if (headingsChanged) renderOutline();
       renderStatus();
     } else if (message.type === "position") {
       const from = message.visibleFrom ?? 0;
+      const previousHeading = currentHeading;
       currentHeading = (metadata.headings || []).reduce(
         (found, h, index) => (h.from <= from ? index : found),
         -1,
       );
-      renderOutline();
+      updateOutlineCurrent(previousHeading);
     } else if (message.type === "sourceMode") {
       state.sourceMode = !!message.enabled;
       renderHeader();
@@ -756,6 +1044,8 @@ api?.onEvent?.(({ type, payload }) => {
       "save",
       "saveAs",
       "refresh",
+      "reveal",
+      "insertImage",
       "source",
       "settings",
       "recovery",
@@ -765,6 +1055,12 @@ api?.onEvent?.(({ type, payload }) => {
   else if (type === "error") showNotice(payload?.message || String(payload));
 });
 async function action(name) {
+  if (["focusMode", "typewriterMode"].includes(name)) {
+    const patch = { [name]: !state.settings[name] };
+    const r = await perform("settings", { patch });
+    if (r.ok) { state.settings = { ...state.settings, ...patch }; renderHeader(); }
+    return;
+  }
   if (typeof name === 'string' && name.startsWith('command:'))
     return perform('command', { command: name.slice(8) === 'search' ? 'find' : name.slice(8) }, { quiet: true });
   if (name === "toggleSidebar") return toggleSidebar();
@@ -786,7 +1082,10 @@ async function action(name) {
     name === "chooseFolder" ||
     name === "save" ||
     name === "saveAs" ||
-    name === "refresh"
+    name === "refresh" ||
+    name === "reveal" ||
+    name === "insertImage" ||
+    name === "exportHTML" || name === "exportPDF" || name === "print"
   ) {
     const r = await perform(name);
     if (r.ok && isState(r.value)) applyState(r.value);
@@ -798,13 +1097,40 @@ document.addEventListener("click", (event) => {
   const menu = button.closest("details.dropdown");
   if (menu) menu.open = false;
   if (button.dataset.action) action(button.dataset.action);
-  if (button.dataset.fileAction) fileAction(button.dataset.fileAction);
+  if (button.dataset.fileAction) {
+    const targetPath = button.closest("#item-context-menu") ? contextMenuPath : selectedPath;
+    closeContextMenu();
+    fileAction(button.dataset.fileAction, targetPath);
+  }
+  if (button.dataset.theme) setTheme(button.dataset.theme);
   if (button.dataset.tab) switchTab(button.dataset.tab);
 });
 $("#search-form").addEventListener("submit", runSearch);
-$("#cancel-search").addEventListener("click", () =>
-  perform("cancelSearch", {}, { quiet: true }),
-);
+$("#outline-query").addEventListener("input", (event) => {
+  outlineState.query = event.target.value;
+  renderOutline();
+});
+$("#clear-outline-search").addEventListener("click", () => {
+  outlineState.query = "";
+  $("#outline-query").value = "";
+  renderOutline();
+  $("#outline-query").focus();
+});
+$("#collapse-outline").addEventListener("click", () => {
+  outlineState.collapsed = new Set(outlineNodes.filter(node => node.children.length).map(node => node.id));
+  renderOutline();
+});
+$("#expand-outline").addEventListener("click", () => {
+  outlineState.collapsed.clear();
+  renderOutline();
+});
+$("#search-query").addEventListener("input", invalidateSearch);
+$("#case-sensitive").addEventListener("change", invalidateSearch);
+$("#reset-search-scope").addEventListener("click", () => resetSearchScope());
+$("#cancel-search").addEventListener("click", () => {
+  invalidateSearch();
+  void perform("cancelSearch", {}, { quiet: true });
+});
 $("#apply-replace").addEventListener("click", (event) => {
   event.preventDefault();
   applyReview();
@@ -838,7 +1164,26 @@ for (const dialog of document.querySelectorAll("dialog"))
     if (pendingActions > 0 || mainBusy) event.preventDefault();
   });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") return;
+  if (e.key === "Escape") {
+    if (!contextMenu().hidden) {
+      e.preventDefault();
+      closeContextMenu({ restoreFocus: true });
+    } else if ($("#quick-open-dialog")?.open) {
+      e.preventDefault();
+      $("#quick-open-dialog").close();
+    }
+    return;
+  }
+  if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+    const item = document.activeElement?.closest?.(".tree-item");
+    const entry = (state.entries || []).find((x) => x.path === item?.dataset.path);
+    if (entry) {
+      e.preventDefault();
+      const bounds = item.getBoundingClientRect();
+      selectContextEntry(entry, bounds.left + Math.min(24, bounds.width / 2), bounds.bottom);
+      return;
+    }
+  }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
     e.preventDefault();
     action("save");
@@ -850,11 +1195,22 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     perform("command", { command: "find" }, { quiet: true });
   }
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "p") {
+    e.preventDefault();
+    quickOpen();
+  }
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "m") {
     e.preventDefault();
     action("source");
   }
 });
+async function setTheme(theme) {
+  if (!['dark', 'night', 'light', 'system'].includes(theme) || theme === state.settings.theme) return;
+  const r = await perform("settings", { patch: { theme } });
+  if (!r.ok) return;
+  state.settings = { ...state.settings, theme };
+  renderHeader();
+}
 (async () => {
   const r = await perform("bootstrap", {}, { quiet: true });
   if (r.ok && r.value) applyState(r.value);
@@ -863,9 +1219,25 @@ document.addEventListener("keydown", (e) => {
 
 // Native details keep the menus usable by mouse and keyboard without a UI runtime.
 document.addEventListener("pointerdown", event => {
+  if (!contextMenu().hidden && !contextMenu().contains(event.target)) closeContextMenu();
   for (const menu of document.querySelectorAll("details.dropdown[open]"))
     if (!menu.contains(event.target)) menu.open = false;
 });
+contextMenu().addEventListener("keydown", event => {
+  const buttons = [...contextMenu().querySelectorAll("button:not(:disabled)")];
+  const index = buttons.indexOf(document.activeElement);
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    buttons[(index + (event.key === "ArrowDown" ? 1 : buttons.length - 1)) % buttons.length]?.focus();
+  }
+  if (event.key === "Home" || event.key === "End") {
+    event.preventDefault();
+    buttons[event.key === "Home" ? 0 : buttons.length - 1]?.focus();
+  }
+  if (event.key === "Tab") closeContextMenu();
+});
+window.addEventListener("resize", () => closeContextMenu());
+window.addEventListener("scroll", () => closeContextMenu(), true);
 for (const menu of document.querySelectorAll("details.dropdown")) {
   menu.addEventListener("toggle", () => {
     if (menu.open) for (const other of document.querySelectorAll("details.dropdown[open]")) if (other !== menu) other.open = false;
@@ -894,5 +1266,12 @@ for (const input of document.querySelectorAll("#settings-dialog input[type=range
 $("#settings-dialog").addEventListener("beforetoggle", updateSettingValues);
 
 window.addEventListener("blur", () => {
-  if (document.activeElement === frame) for (const menu of document.querySelectorAll("details.dropdown[open]")) menu.open = false;
+  if (document.activeElement === frame) {
+    closeContextMenu();
+    for (const menu of document.querySelectorAll("details.dropdown[open]")) menu.open = false;
+  }
 });
+frame.addEventListener("focus", () => closeContextMenu());
+
+// Register both bridge directions before the child can emit its one-time ready event.
+frame.src = "app://editor/index.html";

@@ -12,7 +12,25 @@ public struct ReadingSettings: Codable, Equatable, Sendable {
     public var contentWidth: Double = 800
     public var fontFamily: String = "system"
     public var autosave: Bool = true
+    public var focusMode: Bool = false
+    public var typewriterMode: Bool = false
     public init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case theme, fontSize, lineHeight, contentWidth, fontFamily, autosave, focusMode, typewriterMode
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        theme = try values.decodeIfPresent(ThemeChoice.self, forKey: .theme) ?? .dark
+        fontSize = try values.decodeIfPresent(Double.self, forKey: .fontSize) ?? 17
+        lineHeight = try values.decodeIfPresent(Double.self, forKey: .lineHeight) ?? 1.7
+        contentWidth = try values.decodeIfPresent(Double.self, forKey: .contentWidth) ?? 800
+        fontFamily = try values.decodeIfPresent(String.self, forKey: .fontFamily) ?? "system"
+        autosave = try values.decodeIfPresent(Bool.self, forKey: .autosave) ?? true
+        focusMode = try values.decodeIfPresent(Bool.self, forKey: .focusMode) ?? false
+        typewriterMode = try values.decodeIfPresent(Bool.self, forKey: .typewriterMode) ?? false
+    }
 }
 
 public struct FileEntry: Identifiable, Sendable, Equatable {
@@ -23,6 +41,14 @@ public struct FileEntry: Identifiable, Sendable, Equatable {
     public init(url: URL, isDirectory: Bool) { self.url = url; self.isDirectory = isDirectory }
 }
 
+public enum MarkdownFileSupport {
+    public static let extensions: Set<String> = ["md", "markdown"]
+
+    public static func isMarkdownFile(_ url: URL) -> Bool {
+        extensions.contains(url.pathExtension.lowercased())
+    }
+}
+
 public enum FolderScanner {
     public static func children(of folder: URL) throws -> [FileEntry] {
         try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isPackageKey], options: [.skipsHiddenFiles])
@@ -30,7 +56,7 @@ public enum FolderScanner {
                 let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isPackageKey])
                 guard values.isSymbolicLink != true, values.isPackage != true else { return nil }
                 let isDirectory = values.isDirectory == true
-                guard isDirectory || url.pathExtension.lowercased() == "md" else { return nil }
+                guard isDirectory || MarkdownFileSupport.isMarkdownFile(url) else { return nil }
                 return FileEntry(url: url, isDirectory: isDirectory)
             }
             .sorted { a, b in
@@ -47,7 +73,7 @@ public enum FolderScanner {
             if Task.isCancelled { break }
             guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]) else { continue }
             if values.isSymbolicLink == true { enumerator.skipDescendants(); continue }
-            if values.isDirectory != true, url.pathExtension.lowercased() == "md" { files.append(url) }
+            if values.isDirectory != true, MarkdownFileSupport.isMarkdownFile(url) { files.append(url) }
         }
         return files.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
     }

@@ -1,0 +1,59 @@
+{
+  "date": "2026-09-12",
+  "scope": "Approved Typora core feature bundle; not full feature parity",
+  "artifacts": [
+    {
+      "platform": "macOS",
+      "version": "0.2.0 (3)",
+      "path": "dist/MyMarkdownViewer-0.2.0-macOS.zip",
+      "bytes": 6553555,
+      "sha256": "9949a0b0d704d0aa73ebb5daf4e2eaed07c6bde9129cc20b75e6bd8f0f72641b"
+    },
+    {
+      "platform": "Windows x64",
+      "version": "0.2.0",
+      "path": "dist/windows/MyMarkdownViewer-0.2.0-Windows-x64.zip",
+      "bytes": 161285286,
+      "sha256": "d6729abdfe0d840c24ed0c51447718d8d1b1c863199df73b91c00641b3d3dac5"
+    },
+    {
+      "platform": "Android",
+      "version": "1.1.0 (3)",
+      "path": "dist/android/MarkdownReader-1.1.0-Android.apk",
+      "bytes": 3736201,
+      "sha256": "2c8e15af457a12a7275433fc652f64886c09893ef03138cf42e1e7c59450bf78"
+    }
+  ],
+  "checks": {
+    "swiftTests": 34,
+    "sharedUnitTests": 16,
+    "webKitBrowserTests": 45,
+    "windowsCoreTests": 15,
+    "windowsPackagedASARFeatures": 7,
+    "windowsPackagedASARSmoke": 17,
+    "androidBrowserAndNativeQA": true,
+    "androidFixtureHashesUnchanged": 6,
+    "macSavePanelPDFQA3": true,
+    "macFinalQA": "QA5 actual folder/document open and HTML/PDF SavePanel passed; full automatic AppQA did not start",
+    "macValidationReport": "docs/typora-implementation-mac-validation.json",
+    "watcherHarness": true,
+    "macUniversalCodesignAndEditorResourceMatch": true
+  },
+  "environments": [
+    "macOS 26 Apple Silicon",
+    "WebKit",
+    "Electron 44.3.0 on macOS; Windows target x64",
+    "Android 15 API 35 arm64 emulator-5580"
+  ],
+  "limits": [
+    "Physical Windows PC not tested",
+    "Physical Korean IME not tested",
+    "Intel/macOS 14 not tested",
+    "Physical Android device not tested",
+    "Cloud sync folders not tested",
+    "macOS ad-hoc signature, no notarization",
+    "Windows unsigned personal ZIP"
+  ],
+  "installedApplicationReplaced": false,
+  "externalDeliveryPerformed": false
+}

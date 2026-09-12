@@ -7,7 +7,7 @@ window.addEventListener('message', async event => {
   const data = event.data;
   if (data?.kind === 'host-receive') window.MarkdownHost?.receive(data.message);
   if (data?.kind === 'host-request') {
-    const allowed = ['snapshot', 'prepareSaveAs', 'rebaseMoved', 'focus'];
+    const allowed = ['snapshot', 'prepareSaveAs', 'rebaseMoved', 'focus', 'exportHTML'];
     try {
       if (!allowed.includes(data.method) || !window.MarkdownHost) throw Error('편집기가 준비되지 않았습니다.');
       const result = await window.MarkdownHost[data.method](...(data.args || []));

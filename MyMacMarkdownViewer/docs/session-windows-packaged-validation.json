@@ -1,0 +1,101 @@
+{
+  "passed": true,
+  "debuggerAttached": false,
+  "applicationQuitEvent": true,
+  "teardown": [
+    {
+      "stage": "seed",
+      "forcedOSCleanup": true
+    },
+    {
+      "stage": "restore",
+      "forcedOSCleanup": true
+    },
+    {
+      "stage": "renamed",
+      "forcedOSCleanup": true
+    },
+    {
+      "stage": "explicit",
+      "forcedOSCleanup": true
+    },
+    {
+      "stage": "missing",
+      "forcedOSCleanup": true
+    },
+    {
+      "stage": "blank",
+      "forcedOSCleanup": true
+    },
+    {
+      "stage": "check-blank",
+      "forcedOSCleanup": true
+    }
+  ],
+  "sourceBytesUnchanged": true,
+  "stages": [
+    {
+      "passed": true,
+      "stage": "seed",
+      "path": "/var/folders/6_/0tkhlljj7jbfp_07hkxv0k900000gn/T/mymarkdown-session-mL6eCJ/문서/last.md",
+      "root": "/var/folders/6_/0tkhlljj7jbfp_07hkxv0k900000gn/T/mymarkdown-session-mL6eCJ/문서",
+      "anchor": 1500,
+      "scrollTop": 1214,
+      "notice": "저장됨"
+    },
+    {
+      "passed": true,
+      "stage": "restore",
+      "path": "/var/folders/6_/0tkhlljj7jbfp_07hkxv0k900000gn/T/mymarkdown-session-mL6eCJ/문서/last.md",
+      "root": "/var/folders/6_/0tkhlljj7jbfp_07hkxv0k900000gn/T/mymarkdown-session-mL6eCJ/문서",
+      "anchor": 1500,
+      "scrollTop": 1218.5,
+      "notice": ""
+    },
+    {
+      "passed": true,
+      "stage": "renamed",
+      "path": "/var/folders/6_/0tkhlljj7jbfp_07hkxv0k900000gn/T/mymarkdown-session-mL6eCJ/문서/renamed.md",
+      "root": "/var/folders/6_/0tkhlljj7jbfp_07hkxv0k900000gn/T/mymarkdown-session-mL6eCJ/문서",
+      "anchor": 1500,
+      "scrollTop": 1218.5,
+      "notice": ""
+    },
+    {
+      "passed": true,
+      "stage": "explicit",
+      "path": "/var/folders/6_/0tkhlljj7jbfp_07hkxv0k900000gn/T/mymarkdown-session-mL6eCJ/문서/explicit.md",
+      "root": "/var/folders/6_/0tkhlljj7jbfp_07hkxv0k900000gn/T/mymarkdown-session-mL6eCJ/문서",
+      "anchor": 0,
+      "scrollTop": 0,
+      "notice": ""
+    },
+    {
+      "passed": true,
+      "stage": "missing",
+      "path": null,
+      "root": "/var/folders/6_/0tkhlljj7jbfp_07hkxv0k900000gn/T/mymarkdown-session-mL6eCJ/문서",
+      "anchor": 0,
+      "scrollTop": 0,
+      "notice": "마지막으로 열려던 문서 ‘explicit.md’를 열 수 없습니다. 삭제·이동되었거나 접근 권한이 바뀌었을 수 있습니다. 문서를 다시 선택해 주세요."
+    },
+    {
+      "passed": true,
+      "stage": "blank",
+      "path": null,
+      "root": "/var/folders/6_/0tkhlljj7jbfp_07hkxv0k900000gn/T/mymarkdown-session-mL6eCJ/문서",
+      "anchor": 0,
+      "scrollTop": 0,
+      "notice": ""
+    },
+    {
+      "passed": true,
+      "stage": "check-blank",
+      "path": null,
+      "root": "/var/folders/6_/0tkhlljj7jbfp_07hkxv0k900000gn/T/mymarkdown-session-mL6eCJ/문서",
+      "anchor": 0,
+      "scrollTop": 0,
+      "notice": ""
+    }
+  ]
+}

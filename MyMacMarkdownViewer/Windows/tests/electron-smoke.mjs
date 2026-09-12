@@ -22,20 +22,35 @@ try {
  const call = (action,payload={})=>page.evaluate(async([a,p])=>window.desktop.invoke(a,p),[action,payload]);
  let r=await call('open',{path:file}); assert.equal(r.ok,true,JSON.stringify(r));
  await frame.waitForFunction(s=>window.MarkdownHost.snapshot().text===s,source);
- await frame.evaluate(()=>window.MarkdownHost.receive({type:'insert',...window.MarkdownHost.snapshot(),text:'추가 '}));
+await frame.evaluate(()=>window.MarkdownHost.receive({type:'insert',...window.MarkdownHost.snapshot(),text:'추가 '}));
  await page.waitForTimeout(300);
  r=await call('save'); assert.equal(r.ok,true,JSON.stringify(r));
  assert.equal(await fs.readFile(file,'utf8'),'추가 '+source);
  await call('command',{command:'undo'}); await page.waitForTimeout(250);
- assert.equal(await frame.evaluate(()=>window.MarkdownHost.snapshot().text),source);
- await call('save');
- r=await call('search',{query:'찾을말',caseSensitive:false}); assert.equal(r.ok,true,JSON.stringify(r)); assert.equal(r.value.files.length,2);
+assert.equal(await frame.evaluate(()=>window.MarkdownHost.snapshot().text),source);
+await call('save');
+// A directory copy must include the active nested document's unsaved snapshot
+// without changing the original document.
+const nested=path.join(workspace,'중첩'); const nestedFile=path.join(nested,'초안.md'); await fs.mkdir(nested); await fs.writeFile(nestedFile,'디스크 원본\n');
+await call('settings',{patch:{autosave:false}}); r=await call('open',{path:nestedFile}); assert.equal(r.ok,true,JSON.stringify(r));
+await frame.evaluate(()=>window.MarkdownHost.receive({type:'insert',...window.MarkdownHost.snapshot(),text:'미저장 '})); await page.waitForTimeout(250);
+r=await call('duplicate',{path:nested}); assert.equal(r.ok,true,JSON.stringify(r));
+assert.equal(await fs.readFile(nestedFile,'utf8'),'디스크 원본\n');
+assert.equal(await fs.readFile(path.join(workspace,'중첩 복사본','초안.md'),'utf8'),'미저장 디스크 원본\n');
+await call('save');
+r=await call('search',{query:'찾을말',caseSensitive:false}); assert.equal(r.ok,true,JSON.stringify(r)); assert.equal(r.value.files.length,2);
  const report=r.value;
  r=await call('reviewReplace',{searchID:report.id,replacement:'바꾼말'}); assert.equal(r.ok,true,JSON.stringify(r));
  r=await call('applyReplace',{reviewID:r.value.id,selected:[file]});assert.equal(r.ok,true,JSON.stringify(r));assert.equal(r.value.savedCount,1);
- assert.ok((await fs.readFile(file,'utf8')).includes('바꾼말'));
- assert.equal(await fs.readFile(path.join(workspace,'두 번째.md'),'utf8'),'찾을말\n');
- await call('create',{parent:workspace,name:'새 폴더',directory:true});
+assert.ok((await fs.readFile(file,'utf8')).includes('바꾼말'));
+assert.equal(await fs.readFile(path.join(workspace,'두 번째.md'),'utf8'),'찾을말\n');
+const scoped=path.join(workspace,'범위'); const scopedFile=path.join(scoped,'범위 문서.md'); await fs.mkdir(scoped); await fs.writeFile(scopedFile,'범위말\n'); await fs.writeFile(path.join(workspace,'범위 밖.md'),'범위말\n');
+r=await call('search',{query:'범위말',root:scoped}); assert.equal(r.ok,true,JSON.stringify(r)); assert.equal(r.value.files.length,1);
+r=await call('reviewReplace',{searchID:r.value.id,replacement:'범위변경'}); assert.equal(r.ok,true,JSON.stringify(r));
+r=await call('applyReplace',{reviewID:r.value.id,selected:[scopedFile]}); assert.equal(r.ok,true,JSON.stringify(r)); assert.equal(r.value.savedCount,1);
+assert.equal(await fs.readFile(scopedFile,'utf8'),'범위변경\n'); assert.equal(await fs.readFile(path.join(workspace,'범위 밖.md'),'utf8'),'범위말\n');
+ r=await call('open',{path:file}); assert.equal(r.ok,true,JSON.stringify(r));
+await call('create',{parent:workspace,name:'새 폴더',directory:true});
  r=await call('move',{source:file,parent:path.join(workspace,'새 폴더'),name:'이름 변경.md'});assert.equal(r.ok,true,JSON.stringify(r));
  assert.equal((await app.evaluate(()=>globalThis.__qa.state())).doc.path,path.join(workspace,'새 폴더','이름 변경.md'));
  // Save As is a real main-process action; only the native destination picker is stubbed.
@@ -64,6 +79,10 @@ try {
  await frame.waitForFunction(()=>window.MarkdownHost.snapshot().documentID==='untitled');
  assert.equal((await app.evaluate(()=>globalThis.__qa.state())).doc.path,null);
  assert.ok((await frame.evaluate(()=>window.MarkdownHost.snapshot().text)).includes('미저장 복구'));
+ // Switching workspaces invalidates an old scoped replace review in the main process.
+ r=await call('search',{query:'범위변경',root:scoped}); const stale=await call('reviewReplace',{searchID:r.value.id,replacement:'다시'}); assert.equal(stale.ok,true,JSON.stringify(stale));
+ const otherWorkspace=path.join(data,'다른 폴더'); await fs.mkdir(otherWorkspace); await app.evaluate(async(_,folder)=>globalThis.__qa.grant(folder),otherWorkspace);
+ r=await call('applyReplace',{reviewID:stale.value.id,selected:[scopedFile]}); assert.equal(r.ok,false);
  // The renderer has no Node or unrestricted native API; stale asset grants are rejected.
  assert.equal(await page.evaluate(()=>typeof window.require),'undefined');
  assert.equal(await frame.evaluate(()=>typeof window.desktop),'undefined');
@@ -71,5 +90,5 @@ try {
  await call('command',{command:'source'}); await page.waitForFunction(()=>document.querySelector('#mode').textContent==='원문 모드');
  await call('settings',{patch:{theme:'night'}}); await page.waitForTimeout(100);
  await fs.mkdir('Windows/test-results',{recursive:true}); await page.screenshot({path:'Windows/test-results/electron-desktop.png'});
- console.log(JSON.stringify({passed:true,data,checks:['open','edit','save','undo','folder search','review replace','selected apply','create folder','rename rebind','save as + subsequent save','clean external reload','dirty external conflict refuses overwrite','recovery as untitled','renderer isolation','stale assets','source mode','night theme']},null,2));
+ console.log(JSON.stringify({passed:true,data,checks:['open','edit','save','undo','dirty nested directory duplicate','folder search','scoped search and replace','root switch invalidates review','create folder','rename rebind','save as + subsequent save','clean external reload','dirty external conflict refuses overwrite','recovery as untitled','renderer isolation','stale assets','source mode','night theme']},null,2));
 } finally { await app.evaluate(({app})=>app.exit(0)).catch(()=>{}); await app.close().catch(()=>{}); }

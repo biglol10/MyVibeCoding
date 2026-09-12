@@ -1,0 +1,56 @@
+{
+  "date": "2026-09-12",
+  "artifacts": [
+    {
+      "platform": "Windows",
+      "version": "0.1.2",
+      "path": "dist/windows/MyMarkdownViewer-0.1.2-Windows-x64.zip",
+      "bytes": 161005245,
+      "sha256": "cd6122a2a9e060050b470bc6576d1b49ac62cb4ff0d98ee1fcee4593db6f4dac"
+    },
+    {
+      "platform": "macOS",
+      "version": "0.1.1",
+      "path": "dist/MyMarkdownViewer-0.1.1-macOS.zip",
+      "bytes": 6131368,
+      "sha256": "b74b90345a718b5b76267c0939d85b79839a94132cbe7defef35f12747ab7124"
+    },
+    {
+      "platform": "Android",
+      "version": "1.0.1",
+      "path": "dist/android/MarkdownReader-1.0.1-Android.apk",
+      "bytes": 3732105,
+      "sha256": "3fa0ddcf2e9183595d4bf57857f003ad6880940e92ffb62c46f84d3ba110b6b4"
+    }
+  ],
+  "validation": {
+    "sharedEditorUnit": 7,
+    "sharedEditorWebKit": 27,
+    "swiftUnit": 34,
+    "macNativeChecks": 30,
+    "windowsCore": 15,
+    "windowsPackaged": {
+      "parity": 6,
+      "contextMenu": 7,
+      "design": 8,
+      "smoke": 17,
+      "ui": 9
+    },
+    "androidBrowser": 13,
+    "androidNativeRelease": 9,
+    "androidAssetMatches": 122
+  },
+  "environments": {
+    "mac": "macOS arm64, universal release contains x86_64 and arm64",
+    "windowsUI": "macOS arm64 Electron44.3.0 loading final app.asar",
+    "android": "Android15 API35 arm64 emulator-5580 final signed release1.0.1"
+  },
+  "unverified": [
+    "physical Korean IME",
+    "actual Windows PC and Explorer integration",
+    "actual Intel Mac/macOS14",
+    "user Android device",
+    "live cloud sync folders"
+  ],
+  "scope": "Prior Windows parity audit five gaps and discovered bugs; Android remains read-only; broader original roadmap awaits clarification."
+}

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, mkdir, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, mkdir, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { applyChanges, applyPlan, create, decode, encode, hash, listTree, move, preview, scan, Store, validateName, validateWithin } from '../core.mjs';
+import { applyChanges, applyPlan, create, decode, duplicate, encode, hash, isMarkdownPath, listTree, move, preview, scan, Store, validateName, validateWithin } from '../core.mjs';
 
 async function temp() { return mkdtemp(path.join(os.tmpdir(), 'mymarkdown-core-')); }
 async function use(fn) { const root = await temp(); try { await fn(root); } finally { await rm(root, { recursive: true, force: true }); } }
@@ -43,16 +43,55 @@ test('Windows names and unsafe paths are rejected', async () => {
   for (const name of ['CON', 'com1.txt', 'x:stream', 'x.', 'x ', 'a/b', 'bad<name', 'bad|name', 'bad?name', '']) assert.throws(() => validateName(name), error => error.code === 'invalidName');
   await use(async root => { const outside = path.dirname(root); await rejectsCode(validateWithin(root, outside), 'unsafePath'); await mkdir(path.join(root, 'real')); await symlink(outside, path.join(root, 'link')); await rejectsCode(validateWithin(root, path.join(root, 'link', 'x'), { allowMissing: true }), 'unsafePath'); });
 });
+test('document creation rejects empty and dot-only names before normalizing extensions', () => use(async root => {
+  await rejectsCode(create(root, root, '', false), 'invalidName');
+  await rejectsCode(create(root, root, '.', false), 'invalidName');
+  await rejectsCode(create(root, root, '..', false), 'invalidName');
+}));
 test('create and move use case-insensitive collision checks and protect workspace root', () => use(async root => {
   await create(root, root, 'Draft.md', false); await rejectsCode(create(root, root, 'draft.md', false), 'alreadyExists');
   await rejectsCode(move(root, root, path.join(root, 'other')), 'rootProtected'); await mkdir(path.join(root, 'folder'));
   await rejectsCode(move(root, path.join(root, 'folder'), path.join(root, 'folder', 'nested')), 'invalidMove');
   assert.equal(await move(root, path.join(root, 'Draft.md'), path.join(root, 'DRAFT.md')), path.join(root, 'DRAFT.md'));
 }));
+test('Markdown paths include .markdown and new extensionless documents default to .md', () => use(async root => {
+  const explicit = await create(root, root, 'guide.markdown', false);
+  const implicit = await create(root, root, 'draft', false);
+  const converted = await create(root, root, 'legacy.txt', false);
+  await writeFile(path.join(root, 'notes.MARKDOWN'), 'find me');
+  await writeFile(path.join(root, 'ignore.txt'), 'find me');
+  assert.equal(explicit, path.join(root, 'guide.markdown'));
+  assert.equal(implicit, path.join(root, 'draft.md'));
+  assert.equal(converted, path.join(root, 'legacy.txt.md'));
+  assert.equal(isMarkdownPath('notes.MARKDOWN'), true);
+  assert.equal(isMarkdownPath('ignore.txt'), false);
+  const tree = await listTree(root);
+  assert.deepEqual(tree.filter(entry => !entry.directory).map(entry => entry.name).sort(), ['draft.md', 'guide.markdown', 'legacy.txt.md', 'notes.MARKDOWN']);
+  const report = await scan(root, { query: 'find me' });
+  assert.deepEqual(report.files.map(file => path.basename(file.path)), ['notes.MARKDOWN']);
+}));
 test('create-only saves cannot overwrite a concurrently created path', () => use(async root => {
   const file = path.join(root, 'new.md'), codec = decode(Buffer.alloc(0)), store = new Store(path.join(root, 'data'));
   const results = await Promise.allSettled([store.save(file, 'first', codec, null), store.save(file, 'second', codec, null)]);
   assert.equal(results.filter(result => result.status === 'fulfilled').length, 1); assert.equal(results.filter(result => result.status === 'rejected' && result.reason.code === 'conflict').length, 1);
+}));
+test('duplicate uses non-overwriting copy names for files and folders', () => use(async root => {
+  const file = path.join(root, 'draft.md'), folder = path.join(root, 'notes');
+  await writeFile(file, 'original'); await mkdir(folder); await writeFile(path.join(folder, 'inside.md'), 'inside');
+  assert.equal(path.basename(await duplicate(root, file)), 'draft 복사본.md');
+  assert.equal(path.basename(await duplicate(root, file)), 'draft 복사본 (2).md');
+  const existing = path.join(root, 'NOTES 복사본');
+  await mkdir(existing); await writeFile(path.join(existing, 'keep.md'), 'must not merge');
+  const copiedFolder = await duplicate(root, folder);
+  assert.equal(path.basename(copiedFolder), 'notes 복사본 (2)');
+  assert.equal(await readFile(path.join(copiedFolder, 'inside.md'), 'utf8'), 'inside');
+  assert.equal(await readFile(path.join(existing, 'keep.md'), 'utf8'), 'must not merge');
+  assert.equal(await readFile(path.join(existing, 'inside.md')).catch(() => null), null);
+  await symlink(path.dirname(root), path.join(folder, 'outside-link'));
+  const linkedFolder = await duplicate(root, folder);
+  assert.equal((await lstat(path.join(linkedFolder, 'outside-link'))).isSymbolicLink(), true);
+  await rejectsCode(duplicate(root, root), 'rootProtected');
+  await rejectsCode(duplicate(root, path.dirname(root)), 'unsafePath');
 }));
 test('scan reports UTF-16 matches, partial limits, and replacement preflight', () => use(async root => {
   const a = path.join(root, 'a.md'), b = path.join(root, 'b.md'); await writeFile(a, '😀 needle\nneedle'); await writeFile(b, 'needle');

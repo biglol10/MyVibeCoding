@@ -1,0 +1,30 @@
+{
+  "result": "installed",
+  "targetVersion": "0.3.2",
+  "targetBuild": "8",
+  "checks": {
+    "bundleSignature": "passed",
+    "archiveSHA256": "matched",
+    "fullFileManifest": "matched",
+    "fileCount": 242
+  },
+  "verifiedAt": "2026-09-12T19:16:04.840431+09:00",
+  "verifiedBy": "Astra",
+  "environment": "Apple Silicon / macOS 26.6.2",
+  "originalDocumentsUnchanged": 131,
+  "forceTerminationNeeded": false,
+  "actualInstalledUI": {
+    "launched": true,
+    "existingFolderRestored": true,
+    "sidebarWidthPreserved": true,
+    "nightThemePreserved": true,
+    "scrollActions": 10,
+    "reachedListBottom": true,
+    "returnedToTop": true,
+    "openedDocument": true,
+    "contextMenu": true,
+    "leftRunningForUser": true
+  },
+  "backupDirectory": "build/sidebar-install-backup-20260912-191006",
+  "uiToolNote": "Initial UI connection timed out; app main thread was idle. Resetting the UI tool connection restored inspection and all UI checks then passed."
+}

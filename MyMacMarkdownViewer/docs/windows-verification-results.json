@@ -1,9 +1,10 @@
 {
-  "date": "2026-09-10",
+  "date": "2026-09-12",
+  "packageVersion": "0.3.3",
   "target": "Windows 11 x64 Intel/AMD",
-  "artifact": "dist/windows/MyMarkdownViewer-0.1.0-Windows-x64.zip",
-  "bytes": 161002437,
-  "sha256": "8d5d3c57bcee5d23fa7ca396110ed66d6b852c446f692696211343501bdde547",
+  "artifact": "dist/windows/MyMarkdownViewer-0.3.3-Windows-x64.zip",
+  "bytes": 161293711,
+  "sha256": "9cd6bdd46e53f06cf78c041289a981900281ce512b7119885b4d3f28a92af80e",
   "zipEntryCount": 79,
   "zipIntegrity": true,
   "peMachine": "0x8664 AMD64",
@@ -11,13 +12,12 @@
   "actualWindowsExecution": false,
   "physicalWindowsIME": false,
   "signed": false,
-  "validationHost": "macOS 26.6.2 arm64 Electron 44.3.0",
-  "tests": {
-    "core": 13,
-    "markdown": 7,
-    "webkit": 27,
-    "electronIntegration": 17,
-    "electronUI": 9,
-    "electronDesign": 8
-  }
+  "validationHost": "darwin 25.6.0 arm64 Electron 44.3.0",
+  "checks": [
+    "zip integrity",
+    "required runtime entries",
+    "PE x64 header",
+    "ASAR source resource match",
+    "excluded development files"
+  ]
 }

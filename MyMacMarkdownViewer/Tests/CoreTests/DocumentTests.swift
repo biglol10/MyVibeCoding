@@ -62,11 +62,15 @@ struct DocumentTests {
     @Test func nightThemePersistsWithoutChangingExistingChoices() throws {
         for theme in ThemeChoice.allCases {
             var settings = ReadingSettings(); settings.theme = theme; settings.fontSize = 19
+            settings.focusMode = true; settings.typewriterMode = true
             let restored = try JSONDecoder().decode(ReadingSettings.self, from: JSONEncoder().encode(settings))
             #expect(restored == settings)
         }
         let previous = Data(#"{"theme":"dark","fontSize":17,"lineHeight":1.7,"contentWidth":800,"fontFamily":"system","autosave":true}"#.utf8)
-        #expect(try JSONDecoder().decode(ReadingSettings.self, from: previous).theme == .dark)
+        let migrated = try JSONDecoder().decode(ReadingSettings.self, from: previous)
+        #expect(migrated.theme == .dark)
+        #expect(!migrated.focusMode)
+        #expect(!migrated.typewriterMode)
         #expect(ReadingSettings().theme == .dark)
         #expect(ThemeChoice.allCases == [.dark, .night, .light, .system])
     }
@@ -115,6 +119,19 @@ struct DocumentTests {
         #expect(["first", "second"].contains(try String(contentsOf: file, encoding: .utf8)))
     }
 
+    @Test func initialSaveCreatesFileAndRefusesAnUnexpectedExistingTarget() async throws {
+        let root = try temporaryDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("new.md")
+        let store = FileStore(supportURL: root.appendingPathComponent("support"))
+        let codec = try DocumentCodec(data: Data())
+        let text = "# 새 문서\n\n```json\n{\"title\": \"한글 👋\"}\n```\n"
+        let saved = try await store.save(file, text: text, codec: codec, expectedHash: nil)
+        #expect(try Data(contentsOf: file) == Data(text.utf8))
+        #expect(saved.codec.originalText == text)
+        await #expect(throws: DocumentError.conflict) { try await store.save(file, text: "overwrite", codec: codec, expectedHash: nil) }
+        #expect(try Data(contentsOf: file) == Data(text.utf8))
+    }
+
     @Test func symlinkTargetsAreNotWrittenOrTraversed() async throws {
         let root = try temporaryDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let file = root.appendingPathComponent("real.md"), link = root.appendingPathComponent("link.md")
@@ -123,6 +140,18 @@ struct DocumentTests {
         let store = FileStore(supportURL: root.appendingPathComponent("support"))
         await #expect(throws: DocumentError.unsafePath) { try await store.read(link) }
         #expect(try FolderScanner.children(of: root).map(\.name) == ["real.md"])
+    }
+
+    @Test func scannerListsMarkdownExtensionVariantsButSkipsSymlinkFiles() throws {
+        let root = try temporaryDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        for name in ["guide.markdown", "README.MARKDOWN", "notes.MD"] {
+            try Data(name.utf8).write(to: root.appendingPathComponent(name))
+        }
+        let linked = root.appendingPathComponent("linked.MARKDOWN")
+        try FileManager.default.createSymbolicLink(at: linked, withDestinationURL: root.appendingPathComponent("guide.markdown"))
+
+        #expect(try FolderScanner.children(of: root).map(\.name) == ["guide.markdown", "notes.MD", "README.MARKDOWN"])
+        #expect(FolderScanner.index(root).map(\.lastPathComponent) == ["guide.markdown", "notes.MD", "README.MARKDOWN"])
     }
 
     @Test func recoverySurvivesStoreRecreation() async throws {

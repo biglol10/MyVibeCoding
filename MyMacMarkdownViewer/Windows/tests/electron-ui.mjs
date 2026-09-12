@@ -1,3 +1,4 @@
+import { editorFrame, closeElectron } from './electron-fixtures.mjs';
 import { _electron as electron } from '../../Editor/node_modules/playwright/index.mjs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -7,11 +8,11 @@ const data=await fs.mkdtemp(path.join(os.tmpdir(),'mymarkdown-ui-'));
 const workspace=path.join(data,'문서 작업 폴더');await fs.mkdir(workspace);
 await fs.writeFile(path.join(workspace,'기존 문서.md'),'# 기존 문서\n\n검토할 내용\n');
 await fs.mkdir(path.join(workspace,'이동할 폴더'));
-const app=await electron.launch({executablePath:path.resolve('Windows/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'),args:[path.resolve('Windows'),'--qa-data',data]});
+const app=await electron.launch({executablePath:path.resolve('Windows/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'),args:[path.resolve(process.env.PACKAGED_APP || 'Windows'),'--qa-data',data]});
 try{
  const page=await app.firstWindow();page.setDefaultTimeout(15000);
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
- const frame=page.frame({url:'app://editor/index.html'})||await page.waitForEvent('framenavigated',{predicate:f=>f.url()==='app://editor/index.html'});
+ const frame=await editorFrame(page);
  await frame.waitForFunction(()=>window.MarkdownHost?.snapshot);
  await app.evaluate(async(_,folder)=>globalThis.__qa.grant(folder),workspace);
  await page.getByLabel('파일 관리',{exact:true}).click();
@@ -48,10 +49,10 @@ try{
  await page.waitForTimeout(200);await page.screenshot({path:'Windows/test-results/electron-narrow.png'});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  const footer=await page.locator('.statusbar').boundingBox();assert.ok(footer.y+footer.height<=560);
- await page.locator('[data-action="settings"]').click();await page.screenshot({path:'Windows/test-results/settings-narrow.png'});
+ await page.locator('.statusbar [data-action="settings"]').click();await page.screenshot({path:'Windows/test-results/settings-narrow.png'});
  const apply=await page.locator('#save-settings').boundingBox();assert.ok(apply.y+apply.height<560);
  const settings=await page.locator('#settings-dialog').boundingBox();assert.ok(settings.x>=0 && settings.x+settings.width<=800);assert.ok(settings.y>=0 && settings.y+settings.height<=560);
  await page.keyboard.press('Escape');assert.equal(await page.locator('#settings-dialog').evaluate(d=>d.open),false);
  assert.deepEqual(errors,[]);
  console.log(JSON.stringify({passed:true,checks:['create dialog + duplicate error retention','rename through UI','move folder picker','active document visible','review before/after','result replaces preview','800x560 layout','settings keyboard escape','no renderer exceptions']},null,2));
-}finally{await app.evaluate(({app})=>app.exit(0)).catch(()=>{});await app.close().catch(()=>{});}
+}finally{await closeElectron(app);}

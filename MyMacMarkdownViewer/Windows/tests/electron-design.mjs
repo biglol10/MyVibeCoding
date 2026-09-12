@@ -1,3 +1,4 @@
+import { editorFrame, closeElectron } from './electron-fixtures.mjs';
 import {_electron as electron} from '../../Editor/node_modules/playwright/index.mjs';
 import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import assert from 'node:assert/strict';
 const data=await fs.mkdtemp(path.join(os.tmpdir(),'mymarkdown-design-'));
@@ -8,14 +9,14 @@ await fs.writeFile(path.join(folder,'아이디어와 메모.md'),'# 아이디어
 const app=await electron.launch({executablePath:path.resolve('Windows/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'),args:[path.resolve(process.env.PACKAGED_APP||'Windows'),'--qa-data',data]});
 try{
  const page=await app.firstWindow();page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
- const frame=page.frame({url:'app://editor/index.html'})||await page.waitForEvent('framenavigated',{predicate:f=>f.url()==='app://editor/index.html'});await frame.waitForFunction(()=>window.MarkdownHost?.snapshot);
+ const frame=await editorFrame(page);await frame.waitForFunction(()=>window.MarkdownHost?.snapshot);
  await app.evaluate(async(_,folder)=>globalThis.__qa.grant(folder),folder);
  await page.locator('.tree-item').filter({hasText:'글쓰기의 시작.md'}).click();
  await frame.waitForFunction(()=>window.MarkdownHost.snapshot().documentID.endsWith('글쓰기의 시작.md'));
  await page.waitForFunction(()=>!document.querySelector('#position').textContent.includes('0줄')) ;
  await fs.mkdir('Windows/test-results',{recursive:true});
  for(const theme of ['dark','light','night']){
-  await page.locator('[data-action=settings]').click();await page.locator('#set-theme').selectOption(theme);await page.locator('#save-settings').click();
+  await page.locator('.statusbar [data-action=settings]').click();await page.locator('#set-theme').selectOption(theme);await page.locator('#save-settings').click();
   await page.waitForFunction(t=>document.documentElement.dataset.theme===t,theme);await frame.waitForFunction(t=>document.documentElement.dataset.theme===t,theme);
   await page.mouse.move(1100,790);await page.screenshot({path:`Windows/test-results/design-${theme}.png`});
  }
@@ -24,14 +25,15 @@ try{
  const view=page.locator('.app-menus details').filter({has:page.locator('summary',{hasText:'보기'})});await view.locator('summary').click();await page.locator('[data-action=showOutline]').click();assert.equal(await page.locator('#outline-panel').isVisible(),true);
  await page.getByRole('tab',{name:'파일',exact:true}).click();
  const fileMenu=page.locator('.app-menus details').first();await fileMenu.locator('summary').focus();await page.keyboard.press('ArrowDown');assert.equal(await page.locator('[data-action=new]').evaluate(n=>n===document.activeElement),true);await page.keyboard.press('Escape');assert.equal(await fileMenu.getAttribute('open'),null);
- await page.locator('.tree-item').filter({hasText:'아이디어와 메모.md'}).click({button:'right'});assert.equal(await page.locator('.folder-menu').getAttribute('open'),'');await page.keyboard.press('Escape');
+ await page.locator('.tree-item').filter({hasText:'아이디어와 메모.md'}).click({button:'right'});assert.equal(await page.locator('.folder-menu').getAttribute('open'),null);assert.equal(await page.locator('#item-context-menu').isVisible(),true);await page.keyboard.press('Escape');
  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setContentSize(800,560));
- await page.locator('[data-action=settings]').click();await page.locator('#set-theme').selectOption('light');await page.locator('#save-settings').click();
+ await page.locator('.statusbar [data-action=settings]').click();await page.locator('#set-theme').selectOption('light');await page.locator('#save-settings').click();
  await page.getByRole('tab',{name:'찾기',exact:true}).click();await page.locator('#search-query').fill('문장');await page.locator('#search-query').press('Enter');await page.locator('[aria-label="바꿀 내용"]').waitFor();
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  const replace=await page.locator('[aria-label="바꿀 내용"]').boundingBox();const sidebar=await page.locator('#sidebar').boundingBox();assert.ok(replace.x+replace.width<=sidebar.x+sidebar.width);
  await page.screenshot({path:'Windows/test-results/design-search-light.png'});
  await page.getByRole('tab',{name:'파일',exact:true}).click();await page.getByLabel('파일 관리',{exact:true}).click();const popup=await page.locator('#file-tools').boundingBox();assert.ok(popup.x>=0&&popup.y+popup.height<=560);await page.screenshot({path:'Windows/test-results/design-menu.png'});await page.keyboard.press('Escape');
+ const documentMenu=page.locator('.document-menu');await documentMenu.locator('summary').click();const documentPopup=await documentMenu.locator('.popup').boundingBox();assert.ok(documentPopup.x>=0&&documentPopup.x+documentPopup.width<=800&&documentPopup.y+documentPopup.height<=560);await documentMenu.locator('[data-action=settings]').click();assert.equal(await page.locator('#settings-dialog').evaluate(dialog=>dialog.open),true);await page.keyboard.press('Escape');
  assert.deepEqual(errors,[]);
- console.log(JSON.stringify({passed:true,checks:['single-click file open','three matching editor and shell themes','sidebar collapse and outline restore','menu keyboard navigation and Escape','file context menu','narrow search inputs contained','narrow file menu contained','no renderer exceptions']},null,2));
-}finally{await app.evaluate(({app})=>app.exit(0)).catch(()=>{});await app.close().catch(()=>{});}
+ console.log(JSON.stringify({passed:true,checks:['single-click file open','three matching editor and shell themes','sidebar collapse and outline restore','menu keyboard navigation and Escape','separate file context menu','narrow search inputs contained','narrow file menu contained','no renderer exceptions']},null,2));
+}finally{await closeElectron(app);}

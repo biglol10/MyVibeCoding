@@ -1,0 +1,14 @@
+{
+  "date": "2026-09-12T22:56:43.299349+09:00",
+  "sharedAssetsMatched": {
+    "Sources/App/Resources/Editor": 235,
+    "Windows/editor": 235,
+    "build/CodePreviewQA.app/Contents/Resources/Editor": 235
+  },
+  "windowsIndexAdapterAccountedFor": true,
+  "sharedIndexSHA256": "233ddbe1981c16053dd870d295764cc8ddfe73d82a85645ae07e95dc21211f5f",
+  "qaAppTerminated": true,
+  "ownedPreviewServerTerminated": true,
+  "installedAppReplaced": false,
+  "installedVersion": "0.3.2 (8)"
+}

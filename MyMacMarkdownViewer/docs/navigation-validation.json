@@ -1,0 +1,35 @@
+{
+  "date": "2026-09-12",
+  "status": "Quick-open fixes verified; new-feature and packaging decisions pending",
+  "mac": {
+    "swiftBuild": true,
+    "releaseBuild": "arm64, macOS 26.6.2",
+    "actualUI": [
+      "Korean name filter and Enter open",
+      "no-result message, disabled open, empty Enter keeps dialog",
+      "external rename + refresh removes stale selected item",
+      "reopening refreshes filesystem listing",
+      "Close/Escape preserve document"
+    ],
+    "watcherInitializationDelay": "observed in separate QA app; cause unconfirmed; direct quick-open refresh verified",
+    "testAppsQuit": true
+  },
+  "windows": {
+    "environment": "Electron 44.3 on macOS arm64, not a Windows device",
+    "rootSuites": [
+      "electron-navigation (final)",
+      "electron-ui",
+      "electron-context-menu"
+    ],
+    "syntheticIMEOnly": true,
+    "screenshot": "../Windows/test-results/navigation-quick-open.png"
+  },
+  "android": {
+    "activity": "read-only code investigation; product source unchanged"
+  },
+  "delivery": {
+    "packagesRebuilt": false,
+    "installedMacChanged": false
+  },
+  "fixturesPreserved": true
+}

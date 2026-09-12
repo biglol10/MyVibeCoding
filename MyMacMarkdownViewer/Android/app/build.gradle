@@ -1,0 +1,22 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.personal.markdownreader'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.personal.markdownreader'
+        minSdk 26
+        targetSdk 35
+        versionCode 7
+        versionName '1.2.1'
+        testInstrumentationRunner 'android.test.InstrumentationTestRunner'
+    }
+}
+
+dependencies {
+    androidTestCompileOnly files("${android.sdkDirectory}/platforms/android-36/optional/android.test.base.jar", "${android.sdkDirectory}/platforms/android-36/optional/android.test.runner.jar")
+    implementation 'androidx.core:core:1.15.0'
+    implementation 'androidx.documentfile:documentfile:1.0.1'
+    implementation 'androidx.webkit:webkit:1.14.0'
+}

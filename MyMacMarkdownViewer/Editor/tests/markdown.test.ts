@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { blocksFor, outlineFor, rebaseMarkdown } from '../src/markdown';
+import { frontMatterFor, nextFootnoteLabel, tableOfContentsMarkdown } from '../src/semantic';
+import { parseTable, serializeTable, withTableAlignment, withTableColumn, withTableRow } from '../src/table';
 
 describe('source-preserving Markdown parsing', () => {
   it('does not treat code fence contents as headings', () => {
@@ -38,4 +40,31 @@ it('uses absolute file URLs across Windows drives and UNC shares', () => {
   expect(rebaseMarkdown('![그림](assets/a.png)', 'file:///C:/docs/', 'file:///D:/notes/')).toBe('![그림](file:///C:/docs/assets/a.png)');
   expect(rebaseMarkdown('[문서](a.md)', 'file://server/share/docs/', 'file://other/share/notes/')).toBe('[문서](file://server/share/docs/a.md)');
   expect(rebaseMarkdown('[문서](a.md)', 'file:///C:/docs/', 'file:///C:/docs/sub/')).toBe('[문서](../a.md)');
+});
+
+describe('document semantics', () => {
+  it('recognizes only an opening front matter fence and makes a safe unique TOC', () => {
+    const source = '---\ntitle: [안전]\n---\n\n# 같은 제목\n\n# 같은 제목\n';
+    expect(frontMatterFor(source)?.entries).toEqual([{ key: 'title', value: '[안전]' }]);
+    expect(tableOfContentsMarkdown(source)).toContain('[같은 제목](#같은-제목)');
+    expect(tableOfContentsMarkdown(source)).toContain('[같은 제목](#같은-제목-2)');
+  });
+  it('does not expose a front matter hash as a document outline heading', () => {
+    const source = '---\ntitle: "# metadata"\n---\n\n# 본문\n';
+    expect(outlineFor(source).map(heading => heading.title)).toEqual(['본문']);
+  });
+  it('does not reuse a referenced but not yet defined footnote label', () => {
+    expect(nextFootnoteLabel('본문[^1]\n\n[^2]: 정의')).toBe('3');
+  });
+});
+
+describe('table source operations', () => {
+  const source = '| 이름 | 값 |\n| :--- | ---: |\n| 한글 | 123 |';
+  it('keeps direct cell ranges and serializes structural changes', () => {
+    const table = parseTable(source, 10)!;
+    expect(table.cells[2][0]).toMatchObject({ from: source.indexOf('한글') + 10, text: '한글' });
+    const expanded = withTableColumn(withTableRow(table, 'add', 2), 'add', 0);
+    expect(serializeTable(expanded)).toContain('| 이름 |  | 값 |');
+    expect(serializeTable(withTableAlignment(table, 1, 'center'))).toContain('| :--- | :---: |');
+  });
 });

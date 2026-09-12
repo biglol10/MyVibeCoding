@@ -7,7 +7,7 @@ import { packager } from '@electron/packager';
 const windows = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const root = path.dirname(windows), pkg = JSON.parse(await fs.readFile(path.join(windows, 'package.json'), 'utf8'));
 const staging = await fs.mkdtemp(path.join(os.tmpdir(), 'mymarkdown-package-'));
-for (const name of ['main.mjs','core.mjs','preload.cjs','ui','editor','icon.ico','icon.png']) await fs.cp(path.join(windows,name), path.join(staging,name), { recursive: true });
+for (const name of ['main.mjs','session.mjs','core.mjs','export.mjs','preload.cjs','ui','editor','icon.ico','icon.png']) await fs.cp(path.join(windows,name), path.join(staging,name), { recursive: true });
 await fs.writeFile(path.join(staging,'package.json'), JSON.stringify({ name: pkg.name, version: pkg.version, main: pkg.main, type: 'module', dependencies: pkg.dependencies }));
 await fs.mkdir(path.join(staging,'node_modules'), { recursive:true });
 await fs.cp(path.join(windows,'node_modules/diff'),path.join(staging,'node_modules/diff'),{recursive:true});

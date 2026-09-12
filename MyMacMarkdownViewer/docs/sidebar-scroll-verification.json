@@ -1,0 +1,69 @@
+{
+  "date": "2026-09-12T19:01:25.209854+09:00",
+  "issue": "Native macOS file sidebar freezes during scroll",
+  "observedInstalledVersion": "0.2.2 (5)",
+  "evidence": {
+    "liveAppSample": "build/sidebar-installed-hang-sample.txt",
+    "sampledMainThread": "1081/1081 samples in SwiftUI update observer; LazySubviewPlacements and LazyStack placement dominate",
+    "installedAppCPUPercent": 99.1,
+    "userSymptom": "Window freezes/beachball in local Mac folder",
+    "fixtureReproduction": "Old QA copies did not consistently reproduce the live hang. The live user process sample is the direct hang evidence."
+  },
+  "change": [
+    "Single flat lazy list instead of recursive lazy stacks",
+    "Fixed-height row with stable path identity",
+    "Cache projection until roots, children, or expansion change",
+    "Iterative traversal with duplicate/cycle guard"
+  ],
+  "validation": {
+    "host": "Apple Silicon / macOS 26.6.2",
+    "coreTests": {
+      "swiftTesting": 46,
+      "xctest": 2,
+      "passed": true
+    },
+    "actualUI": {
+      "userShapeNodes": 68,
+      "expandedFolders": 10,
+      "additionalQADocument": 1,
+      "roundTripScrolls": 10,
+      "foldUnfold": true,
+      "openFileAfterScrolling": true,
+      "fileContextMenu": true,
+      "largeDocumentCount": 1261,
+      "largeExpandedFolderCount": 60,
+      "largeScrollPageSequence": [
+        2,
+        12,
+        24,
+        -20,
+        35,
+        -50
+      ],
+      "jumpToBottom": true,
+      "minimumSidebarWidth": 200,
+      "layoutInspected": true,
+      "postInteractionCPUPercentObserved": 0.0
+    },
+    "unverified": [
+      "Intel runtime and macOS 14"
+    ],
+    "qaProcessesRemaining": 0,
+    "zipBinaryMatchesApp": true,
+    "installedUIReport": "docs/sidebar-installation.json"
+  },
+  "artifact": {
+    "path": "dist/MyMarkdownViewer-0.3.2-macOS.zip",
+    "version": "0.3.2",
+    "build": "8",
+    "sha256": "0c6c33c97b3c68e66e58536978589361cbebddcd10f53c846c4cfcca127f0520",
+    "bytes": 6721929,
+    "architectures": [
+      "arm64",
+      "x86_64"
+    ],
+    "signature": "ad hoc; strict verification passed"
+  },
+  "review": "Astra reviewed changed source and Luna regression tests against surrounding model, menu, folder observation, and restore flows; no remaining blocker in reviewed fix",
+  "installed": true
+}

@@ -1,0 +1,94 @@
+{
+  "date": "2026-09-12",
+  "mac": {
+    "version": "0.3.1",
+    "build": 7,
+    "artifact": "dist/MyMarkdownViewer-0.3.1-macOS.zip",
+    "bytes": 6717216,
+    "sha256": "ee0b249f21fda7673f3aea17d97dce66a7d3e3a526bfce86dd2dda708544ba4a",
+    "zipIntegrity": true,
+    "architectures": [
+      "arm64",
+      "x86_64"
+    ],
+    "signature": "ad-hoc verified",
+    "installedVersion": "0.2.2",
+    "installedBuild": 5,
+    "installedAppReplaced": false,
+    "validation": "session-mac-validation.json",
+    "regression": "session-mac-regression.json"
+  },
+  "windows": {
+    "date": "2026-09-12",
+    "packageVersion": "0.3.1",
+    "target": "Windows 11 x64 Intel/AMD",
+    "artifact": "dist/windows/MyMarkdownViewer-0.3.1-Windows-x64.zip",
+    "bytes": 161293135,
+    "sha256": "25dd3478914f80ca21762c7ac1e7f1fb7db49b9386ea236e854297a5aa3ccc4c",
+    "zipEntryCount": 79,
+    "zipIntegrity": true,
+    "peMachine": "0x8664 AMD64",
+    "sourceResourceMatch": true,
+    "actualWindowsExecution": false,
+    "physicalWindowsIME": false,
+    "signed": false,
+    "validationHost": "darwin 25.6.0 arm64 Electron 44.3.0",
+    "checks": [
+      "zip integrity",
+      "required runtime entries",
+      "PE x64 header",
+      "ASAR source resource match",
+      "excluded development files"
+    ],
+    "sourceSessionTests": 7,
+    "packagedSessionTests": 7,
+    "applicationQuitEventVerified": true,
+    "forcedOSCleanupAfterQuit": true,
+    "processExitOnWindowsPCVerified": false,
+    "validation": "session-windows-packaged-validation.json"
+  },
+  "android": {
+    "versionName": "1.2.1",
+    "versionCode": 7,
+    "artifact": "dist/android/MarkdownReader-1.2.1-Android.apk",
+    "bytes": 3740297,
+    "sha256": "f9f409bdcf2373caf5901ac44046a2f45edae6db6b284cb103b2af285eb14128",
+    "zipIntegrity": true,
+    "signed": true,
+    "debuggable": false,
+    "assets": {
+      "compared": 122,
+      "match": true
+    },
+    "nativeTests": 9,
+    "browserSuites": 4,
+    "validation": "session-android-validation.json"
+  },
+  "validation": {
+    "swiftTests": 43,
+    "windowsUnitTests": 22,
+    "macSessionStages": 5,
+    "macSaveRecoveryRegressionPassed": true,
+    "androidNativeTests": 9,
+    "androidReaderSuites": [
+      "session",
+      "navigation",
+      "reader",
+      "settings"
+    ],
+    "visualReview": [
+      "Mac native WKWebView restored reading position and Night theme",
+      "Windows restored document file selection and reading position",
+      "Android phone and landscape navigation/rendering screenshots"
+    ],
+    "limits": [
+      "Windows PC execution and process exit unverified",
+      "Mac Electron quit event completed but OS process teardown required test cleanup",
+      "Android physical device unverified",
+      "Physical Korean IME unverified",
+      "Intel/macOS14 execution unverified"
+    ],
+    "externalActions": false,
+    "userInstalledMacReplaced": false
+  }
+}

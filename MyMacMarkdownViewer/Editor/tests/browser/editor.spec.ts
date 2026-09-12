@@ -17,6 +17,42 @@ test('first launch stays dark on a light system and renders specialized blocks',
   await page.screenshot({ path: 'test-results/editor-dark.png', fullPage: true });
 });
 
+test('table cells edit through undoable source transactions and controls change structure', async ({ page }) => {
+  const source = '| 이름 | 값 |\n| :--- | ---: |\n| 한글 | 123 |\n';
+  await page.evaluate(text => window.__editorTest!.load(text), source);
+  await expect(page.getByRole('button', { name: '표 편집' })).toBeVisible();
+  await page.getByRole('button', { name: '표 편집' }).click();
+  const cells = page.locator('.table-cell-input');
+  await cells.nth(2).fill('수정');
+  await cells.nth(2).press('Tab');
+  expect(await page.evaluate(() => window.__editorTest!.snapshot().text)).toContain('| 수정 | 123 |');
+  await page.getByRole('button', { name: '열 추가' }).click();
+  await expect.poll(() => page.evaluate(() => window.__editorTest!.snapshot().text)).toContain('| 이름 | 값 |  |');
+  await page.evaluate(() => window.__editorTest!.command('undo'));
+  expect(await page.evaluate(() => window.__editorTest!.snapshot().text)).toContain('| 수정 | 123 |');
+});
+
+test('semantic commands and standalone export use complete safe document source', async ({ page }) => {
+  await page.evaluate(() => window.__editorTest!.load('# 제목\n\n본문[^1]\n\n[^1]: 내용\n\n![remote](https://example.com/a.png)\n'));
+  await page.evaluate(() => { const t = window.__editorTest!; t.select(0); t.command('toc'); t.command('footnote'); t.command('frontMatter'); });
+  const text = await page.evaluate(() => window.__editorTest!.snapshot().text);
+  expect(text).toContain('---\ntitle: 문서 제목\n---');
+  expect(text).toContain('[^2]');
+  const html = await page.evaluate(() => { window.__editorTest!.load('# 제목\n\n본문[^1]\n\n[^1]: 내용\n\n![remote](https://example.com/a.png)\n'); return window.MarkdownHost.exportHTML(); });
+  expect(html).toContain('<!doctype html>');
+  expect(html).toContain('id="제목"');
+  expect(html).toContain('외부 이미지');
+  expect(html).not.toContain('https://example.com/a.png');
+});
+
+test('live preview resolves document-wide references and renders one rich footnote footer', async ({ page }) => {
+  const source = '# 시작\n\n[문서][guide]와 각주[^a]를 봅니다.\n\n[guide]: notes/guide.md "안내"\n\n[^a]: **굵은** 각주\n';
+  await page.evaluate(text => window.__editorTest!.load(text), source);
+  await expect(page.locator('a[href="notes/guide.md"]')).toHaveText('문서');
+  await expect(page.locator('.footnotes')).toHaveCount(1);
+  await expect(page.locator('.footnotes')).toContainText('굵은');
+});
+
 test('mode switches and formatting preserve source, selection and undo history', async ({ page }) => {
   await page.evaluate(text => window.__editorTest!.load(text), sample);
   await page.evaluate(() => { const t = window.__editorTest!; t.select(2, 4); t.command('bold'); });

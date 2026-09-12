@@ -180,7 +180,7 @@ public enum FolderSearch {
             if Task.isCancelled { return ScanReport(files: files, issues: issues, isTruncated: truncated, wasCancelled: true) }
             guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isPackageKey, .isRegularFileKey]) else { issues.append(Issue(url: url, message: "파일 정보를 읽을 수 없습니다.")); continue }
             if values.isSymbolicLink == true || values.isPackage == true { if values.isDirectory == true { enumerator.skipDescendants() }; continue }
-            guard values.isRegularFile == true, url.pathExtension.lowercased() == "md" else { continue }
+            guard values.isRegularFile == true, MarkdownFileSupport.isMarkdownFile(url) else { continue }
             do {
                 let handle = try FileHandle(forReadingFrom: url)
                 defer { try? handle.close() }

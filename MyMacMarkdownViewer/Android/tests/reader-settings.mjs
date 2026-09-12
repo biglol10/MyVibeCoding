@@ -1,0 +1,61 @@
+import { chromium } from '../../Editor/node_modules/playwright/index.mjs';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+const assets = path.resolve('Android/app/src/main/assets/reader');
+const browser = await chromium.launch({headless:true});
+try {
+  const context = await browser.newContext({viewport:{width:393,height:852}});
+  await context.addInitScript(() => { window.__requests=[]; window.AndroidBridge={postMessage(value){window.__requests.push(JSON.parse(value));}}; });
+  await context.route('**/*', async route => {
+    const url = new URL(route.request().url());
+    if (url.hostname !== 'appassets.androidplatform.net') return route.abort();
+    const relative = url.pathname.replace(/^\/reader\//,'');
+    try {
+      const body=await fs.readFile(path.join(assets,relative));
+      const contentType={'.html':'text/html','.js':'application/javascript','.css':'text/css','.woff2':'font/woff2'}[path.extname(relative)] || 'application/octet-stream';
+      await route.fulfill({body,contentType});
+    } catch { await route.fulfill({status:404,body:''}); }
+  });
+  const page = await context.newPage();
+  await page.goto('https://appassets.androidplatform.net/reader/index.html');
+  await page.waitForFunction(() => window.ReaderHost);
+  assert.equal(await page.evaluate(()=>window.ReaderHost.snapshot().theme),'night');
+  assert.equal(await page.evaluate(()=>getComputedStyle(document.body).backgroundColor),'rgb(55, 59, 64)');
+  assert.equal(await page.evaluate(()=>window.__requests.findLast(x=>x.type==='theme').theme),'night');
+  await page.evaluate(()=>localStorage.setItem('reader-settings',JSON.stringify({theme:'dark',fontSize:22,lineHeight:2})));
+  await page.reload(); await page.waitForFunction(()=>window.ReaderHost);
+  assert.equal(await page.evaluate(()=>window.ReaderHost.snapshot().theme),'night');
+  const migrated=await page.evaluate(()=>JSON.parse(localStorage.getItem('reader-settings')));
+  assert.equal(migrated.fontSize,22);assert.equal(migrated.lineHeight,2);assert.equal(migrated.nightDefaultVersion,1);
+  await page.locator('#preferences').click();
+  await page.getByRole('button',{name:'라이트',exact:true}).click();
+  await page.reload();await page.waitForFunction(()=>window.ReaderHost);
+  assert.equal(await page.evaluate(()=>window.ReaderHost.snapshot().theme),'light');
+  await page.locator('#preferences').click();
+  await page.getByRole('button',{name:'다크',exact:true}).click();
+  assert.deepEqual(await page.evaluate(()=>({theme:window.ReaderHost.snapshot().theme,bg:getComputedStyle(document.body).backgroundColor,pressed:document.querySelector('.theme-options [data-theme="dark"]').getAttribute('aria-pressed'),native:window.__requests.findLast(x=>x.type==='theme').theme})),{theme:'dark',bg:'rgb(25, 27, 30)',pressed:'true',native:'dark'});
+  await page.reload();await page.waitForFunction(()=>window.ReaderHost);
+  assert.deepEqual(await page.evaluate(()=>({theme:window.ReaderHost.snapshot().theme,bg:getComputedStyle(document.body).backgroundColor})),{theme:'dark',bg:'rgb(25, 27, 30)'});
+  await page.locator('#preferences').click();
+  await page.getByRole('button',{name:'나이트',exact:true}).click();
+  assert.deepEqual(await page.evaluate(()=>({theme:window.ReaderHost.snapshot().theme,bg:getComputedStyle(document.body).backgroundColor,pressed:document.querySelector('.theme-options [data-theme="night"]').getAttribute('aria-pressed'),native:window.__requests.findLast(x=>x.type==='theme').theme})),{theme:'night',bg:'rgb(55, 59, 64)',pressed:'true',native:'night'});
+  await page.reload();await page.waitForFunction(()=>window.ReaderHost);
+  assert.deepEqual(await page.evaluate(()=>({theme:window.ReaderHost.snapshot().theme,bg:getComputedStyle(document.body).backgroundColor})),{theme:'night',bg:'rgb(55, 59, 64)'});
+  await page.evaluate(()=>localStorage.setItem('reader-settings','{invalid'));
+  await page.reload();await page.waitForFunction(()=>window.ReaderHost);
+  assert.equal(await page.evaluate(()=>window.ReaderHost.snapshot().theme),'night');
+  await page.evaluate(()=>window.ReaderHost.receive({type:'folder',id:'download-folder',name:'Module_3_Claude_Code_MCP_Integration',parentId:null,entries:[{id:'nested',name:'06_Enterprise_Integration',directory:true},{id:'doc',name:'06-02_Watch_Out.md',directory:false}]}));
+  await page.getByRole('button',{name:'폴더 새로 고침',exact:true}).click();
+  assert.deepEqual(await page.evaluate(()=>window.__requests.at(-1)),{type:'listFolder',id:'download-folder'});
+  assert.equal(await page.locator('#files button').count(),2);
+  await page.evaluate(()=>window.ReaderHost.receive({type:'folder',id:'failed-folder',name:'Download',parentId:null,entries:[],error:'폴더 목록을 읽지 못했습니다.'}));
+  assert.equal(await page.locator('#files').innerText(),'폴더 목록을 읽지 못했습니다.');
+  await page.getByRole('button',{name:'폴더 새로 고침',exact:true}).click();
+  assert.deepEqual(await page.evaluate(()=>window.__requests.at(-1)),{type:'listFolder',id:'failed-folder'});
+  await page.evaluate(()=>window.ReaderHost.receive({type:'folder',id:'download-folder',name:'Module_3_Claude_Code_MCP_Integration',parentId:null,entries:[{id:'nested',name:'06_Enterprise_Integration',directory:true},{id:'doc',name:'06-02_Watch_Out.md',directory:false}]}));
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await fs.mkdir('Android/test-results',{recursive:true});
+  await page.screenshot({path:'Android/test-results/night-default-settings.png'});
+  console.log(JSON.stringify({passed:true,checks:['fresh Night default and blue-gray background','legacy Dark migrates once','font and line spacing preserved','Light, Dark and Night buttons select distinct palettes','Dark and Night choices persist after reload and update native theme','corrupt settings recover','folder refresh targets current folder','long folder name fits phone']},null,2));
+} finally { await browser.close(); }

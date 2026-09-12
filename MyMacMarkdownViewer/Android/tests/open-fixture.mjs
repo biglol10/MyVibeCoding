@@ -1,0 +1,3 @@
+import {_android} from '../../Editor/node_modules/playwright/index.mjs';
+const d=(await _android.devices()).find(d=>d.serial()==='emulator-5580');
+const page=await(await d.webView({pkg:'com.personal.markdownreader'})).page();console.log(await page.locator('#files').innerText());await page.locator('#files button').filter({hasText:'reader-fixture.md'}).click();await page.waitForFunction(()=>window.ReaderHost.snapshot().ready);console.log(await page.evaluate(()=>({state:window.ReaderHost.snapshot(),text:document.querySelector('#document').innerText.slice(0,400),images:[...document.images].map(i=>({src:i.src,loaded:i.complete&&i.naturalWidth>0}))})));await d.close();process.exit(0);

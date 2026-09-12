@@ -1,0 +1,57 @@
+{
+  "date": "2026-09-12",
+  "editorUnitTests": 16,
+  "editorWebKitTests": 49,
+  "swiftTests": 37,
+  "windowsUnitTests": 16,
+  "windowsSuites": [
+    "smoke",
+    "ui",
+    "context-menu",
+    "features",
+    "parity",
+    "design",
+    "performance"
+  ],
+  "androidBrowserSuites": [
+    "reader-browser",
+    "reader-settings"
+  ],
+  "finalAPKSAFTests": 5,
+  "androidLintErrors": 0,
+  "androidLintWarnings": 8,
+  "macNativeReport": "full-audit-mac-validation.json",
+  "macInstall": {
+    "version": "0.2.2",
+    "build": "5",
+    "installed": "/Applications/MyMarkdownViewer.app",
+    "backup": "$HOME/Desktop/practice/MyMacMarkdownViewer/build/installed-backups/MyMarkdownViewer-0.2.1-20260912-132027.app",
+    "sourceMatch": true,
+    "signatureVerified": true,
+    "launchVerified": true,
+    "restoredMarkdownDocumentCount": 131
+  },
+  "windowsActualDevice": false,
+  "macPhysicalIME": false,
+  "androidActualUserDevice": false,
+  "artifacts": [
+    {
+      "path": "dist/MyMarkdownViewer-0.2.2-macOS.zip",
+      "bytes": 6590740,
+      "sha256": "ca69457f24d22ecfab4a444d57e14c61af445421a3ed2f6b23d02b7b51b4f255",
+      "archiveIntegrity": true
+    },
+    {
+      "path": "dist/windows/MyMarkdownViewer-0.2.2-Windows-x64.zip",
+      "bytes": 161288567,
+      "sha256": "77f903419fe08019ee7c530764b7f14bc617e0e506573a00a2ad9529ca4d7b03",
+      "archiveIntegrity": true
+    },
+    {
+      "path": "dist/android/MarkdownReader-1.1.2-Android.apk",
+      "bytes": 3736201,
+      "sha256": "f254a71580f13837cc98901e594774804c3fc84b5fd733dd32f5c94ed7171625",
+      "archiveIntegrity": true
+    }
+  ]
+}

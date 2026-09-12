@@ -58,6 +58,52 @@ final class EditorBridge: NSObject, ObservableObject, WKScriptMessageHandler, WK
         return snapshot
     }
 
+    func exportHTML() async throws -> String {
+        guard isReady, let webView else { throw CocoaError(.coderReadCorrupt) }
+        await sendTask?.value
+        guard let model else { throw DocumentError.unavailable }
+        let exportSession = model.sessionID
+        let result = try await webView.callAsyncJavaScript(
+            "return await window.MarkdownHost.exportHTML(false)",
+            arguments: [:], in: nil, contentWorld: .page)
+        guard var html = result as? String, !html.isEmpty else { throw CocoaError(.coderReadCorrupt) }
+        let expression = try NSRegularExpression(pattern: #"(?i)<img\b[^>]*\bsrc="(app://assets/[^"]+)""#)
+        let matches = expression.matches(in: html, range: NSRange(html.startIndex..., in: html))
+        var replacements: [String: String] = [:]
+        for match in matches {
+            guard let range = Range(match.range(at: 1), in: html) else { throw DocumentError.unsafePath }
+            let raw = String(html[range])
+            if replacements[raw] != nil { continue }
+            guard let requestURL = URL(string: raw), let asset = resolvedAsset(requestURL) else { throw DocumentError.unsafePath }
+            let data = try await Task.detached(priority: .userInitiated) { try Data(contentsOf: asset.url) }.value
+            guard exportSession == model.sessionID else { throw DocumentError.invalidChange }
+            replacements[raw] = "data:\(asset.mime);base64,\(data.base64EncodedString())"
+        }
+        for match in matches.reversed() {
+            guard let range = Range(match.range(at: 1), in: html), let dataURI = replacements[String(html[range])] else {
+                throw DocumentError.invalidChange
+            }
+            html.replaceSubrange(range, with: dataURI)
+        }
+        guard exportSession == model.sessionID,
+              expression.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)) == nil else {
+            throw DocumentError.invalidChange
+        }
+        return html
+    }
+
+    private func resolvedAsset(_ requestURL: URL) -> (url: URL, mime: String)? {
+        guard requestURL.scheme == "app", requestURL.host == "assets", let model else { return nil }
+        let parts = URLComponents(url: requestURL, resolvingAgainstBaseURL: false)?.percentEncodedPath.split(separator: "/") ?? []
+        guard parts.count == 2, parts[0].removingPercentEncoding == model.sessionID,
+              let raw = parts[1].removingPercentEncoding,
+              let base = model.documentURL?.deletingLastPathComponent(),
+              let resolved = URL(string: raw, relativeTo: base)?.absoluteURL, resolved.isFileURL else { return nil }
+        let target = resolved.standardizedFileURL.resolvingSymlinksInPath()
+        guard model.access.canRead(target), let type = UTType(filenameExtension: target.pathExtension), type.conforms(to: .image) else { return nil }
+        return (target, type.preferredMIMEType ?? "application/octet-stream")
+    }
+
     func rebaseMoved(_ text: String, oldBase: URL, newBase: URL, source: URL, destination: URL, directory: Bool) async throws -> String {
         guard isReady, let webView else { throw DocumentError.unavailable }
         await sendTask?.value
@@ -106,19 +152,11 @@ final class EditorBridge: NSObject, ObservableObject, WKScriptMessageHandler, WK
             case "ttf": mime = "font/ttf"
             default: mime = UTType(filenameExtension: target.pathExtension)?.preferredMIMEType ?? mime
             }
-        } else if requestURL.host == "assets", let model {
-            let parts = URLComponents(url: requestURL, resolvingAgainstBaseURL: false)?.percentEncodedPath.split(separator: "/") ?? []
-            guard parts.count == 2, parts[0].removingPercentEncoding == model.sessionID,
-                  let raw = parts[1].removingPercentEncoding,
-                  let base = model.documentURL?.deletingLastPathComponent(),
-                  let resolved = URL(string: raw, relativeTo: base)?.absoluteURL, resolved.isFileURL else {
+        } else if requestURL.host == "assets" {
+            guard let asset = resolvedAsset(requestURL) else {
                 urlSchemeTask.didFailWithError(CocoaError(.fileReadNoPermission)); return
             }
-            target = resolved.standardizedFileURL.resolvingSymlinksInPath()
-            guard model.access.canRead(target), UTType(filenameExtension: target.pathExtension)?.conforms(to: .image) == true else {
-                urlSchemeTask.didFailWithError(CocoaError(.fileReadNoPermission)); return
-            }
-            mime = UTType(filenameExtension: target.pathExtension)?.preferredMIMEType ?? mime
+            target = asset.url; mime = asset.mime
         } else { urlSchemeTask.didFailWithError(CocoaError(.fileReadNoPermission)); return }
         let contentType = mime
         tasks[key] = Task { [weak self] in

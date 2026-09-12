@@ -23,6 +23,7 @@ else
     codesign --force --options runtime --entitlements Resources/MyMarkdownViewer.entitlements --sign - dist/MyMarkdownViewer.app
 fi
 codesign --verify --deep --strict dist/MyMarkdownViewer.app
-ditto -c -k --sequesterRsrc --keepParent dist/MyMarkdownViewer.app dist/MyMarkdownViewer-0.1.0-macOS.zip
+markdown_release_version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' dist/MyMarkdownViewer.app/Contents/Info.plist)
+ditto -c -k --sequesterRsrc --keepParent dist/MyMarkdownViewer.app "dist/MyMarkdownViewer-${markdown_release_version}-macOS.zip"
 printf 'Built: %s/dist/MyMarkdownViewer.app\n' "$PWD"
 lipo -archs dist/MyMarkdownViewer.app/Contents/MacOS/MyMarkdownViewer

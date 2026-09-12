@@ -14,3 +14,11 @@ Windows/node_modules/
 Windows/editor/
 Windows/.stage/
 Windows/test-results/
+Android/.gradle/
+Android/local.properties
+Android/app/src/main/assets/reader/
+Android/test-results/
+Android/**/build/
+Android/.idea/
+*.jks
+*.keystore

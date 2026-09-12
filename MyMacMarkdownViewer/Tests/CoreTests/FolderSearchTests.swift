@@ -34,6 +34,32 @@ struct FolderSearchTests {
         #expect(report.issues.map { $0.url.lastPathComponent } == ["bad.md"]); #expect(!report.isComplete)
     }
 
+    @Test func searchesMarkdownExtensionVariantsAndSkipsSymlinks() async throws {
+        let root = try temporaryDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        for name in ["guide.markdown", "README.MARKDOWN", "notes.MD"] {
+            try Data("needle".utf8).write(to: root.appendingPathComponent(name))
+        }
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("linked.markdown"), withDestinationURL: root.appendingPathComponent("guide.markdown"))
+
+        let report = await FolderSearch.scan(folder: root, options: .init(query: "needle"))
+        #expect(report.files.map { $0.url.lastPathComponent } == ["README.MARKDOWN", "guide.markdown", "notes.MD"])
+    }
+
+    @Test func appliesReplacementToMarkdownFileAndPreservesExtensionAndBytes() async throws {
+        let root = try temporaryDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("guide.markdown")
+        let original = Data([0xEF, 0xBB, 0xBF]) + Data("needle\r\n내용\r\n".utf8)
+        try original.write(to: file)
+        let report = await FolderSearch.scan(folder: root, options: .init(query: "needle"))
+        let plan = report.replacementPlan
+        let result = await FolderSearch.apply(plan: plan, replacement: "changed", store: FileStore(supportURL: root.appendingPathComponent("support")))
+
+        #expect(result.preflightPassed)
+        #expect(result.savedCount == 1)
+        #expect(file.pathExtension == "markdown")
+        #expect(try Data(contentsOf: file) == Data([0xEF, 0xBB, 0xBF]) + Data("changed\r\n내용\r\n".utf8))
+    }
+
     @Test func truncationAndCaseOptionAreExplicit() async throws {
         let root = try temporaryDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         try Data("Needle needle needle".utf8).write(to: root.appendingPathComponent("a.md"))
