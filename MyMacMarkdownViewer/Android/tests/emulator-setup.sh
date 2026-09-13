@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Isolated Markdown Reader QA setup. This script never selects or changes an OtFit AVD.
+# Isolated Markdown Reader QA setup. This script selects only its dedicated AVD.
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SDK_DIR="${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}"
 AVD_NAME="MarkdownReader_QA"

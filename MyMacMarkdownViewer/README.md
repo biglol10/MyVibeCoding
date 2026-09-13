@@ -2,21 +2,23 @@
 
 긴 Markdown 문서를 편하게 읽고, 필요한 블록만 자연스럽게 수정하는 개인용 macOS 앱입니다. **첫 실행은 시스템 설정과 무관하게 다크 모드**로 시작합니다.
 
-## 실행
+## 최신 다운로드
 
-배포본은 Mac 0.3.4 / Windows 0.3.5 / Android 1.2.3입니다. 코드 블록을 클릭해도 코드 서식을 유지하고, 다이어그램 편집 시 원문과 그림을 함께 표시합니다. 앱을 다시 열면 각 기기에서 마지막 문서·읽던 위치·폴더를 복원합니다. Windows의 링크·코드와 Android의 코드·표 가독성 보완도 새 ZIP·APK에 포함했습니다. [표시 수정과 검증 범위](docs/Code-Preview-Verification-2026-09-12.md), [가독성 검토](docs/Readability-Review-2026-09-13.md), [코드 언어 표시 검증](docs/Code-Language-Verification-2026-09-13.md)를 참고하세요. Mac 설치본은 0.3.3 (9)입니다.
-
-### 최신 설치 파일
-
-- [Mac Universal 0.3.4 ZIP](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacMarkdownViewer/MyMarkdownViewer-0.3.4-macOS.zip)
-- [Windows x64 0.3.5 ZIP](https://github.com/biglol10/MyVibeCoding/releases/download/mymarkdownviewer-2026-09-13/MyMarkdownViewer-0.3.5-Windows-x64.zip)
+- [Mac Universal 0.3.6 ZIP](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacMarkdownViewer/MyMarkdownViewer-0.3.6-macOS.zip)
+- [Windows x64 0.3.7 포터블 ZIP](https://github.com/biglol10/MyVibeCoding/releases/download/mymarkdownviewer-2026-09-14/MyMarkdownViewer-0.3.7-Windows-x64.zip)
 - [Android 1.2.3 APK](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacMarkdownViewer/MarkdownReader-1.2.3-Android.apk)
 
-현재 배포 파일은 `dist/MyMarkdownViewer.app`과 `dist/MyMarkdownViewer-0.3.4-macOS.zip`입니다. 앱을 원하는 위치에 복사해서 실행할 수 있습니다. macOS 14 이상을 대상으로 하며 Apple Silicon과 Intel 실행 파일을 함께 포함합니다.
+## 실행
+
+Mac 0.3.6 (빌드 12)와 Windows 0.3.7에는 현재 문서 찾기와 커서 위치 안정화가 포함됩니다. Android 1.2.3은 읽기 전용입니다. Mac 앱은 macOS 14 이상, Apple Silicon과 Intel을 지원합니다. 코드를 클릭해도 서식이 유지되며 다이어그램 편집에서는 원문과 미리보기를 함께 볼 수 있습니다. 앱을 다시 열면 마지막 문서와 읽던 위치를 복원합니다.
+
+Mac ZIP은 ad-hoc 서명본이며 Apple 공증은 포함되지 않았습니다. 다운로드한 파일을 압축 해제해 원하는 위치에서 실행하세요. 개발용 빌드는 `scripts/build.sh`를 사용합니다.
 
 현재 배포본은 개인 실행용 ad-hoc 서명입니다. Developer ID 서명과 Apple 공증은 포함되지 않았습니다. 다른 Mac으로 옮겼을 때 Gatekeeper의 배포 검증을 통과하는 공증된 배포본으로 간주하면 안 됩니다.
 
 ## 사용 방법
+
+Mac 0.3.6·Windows 0.3.7에는 **현재 문서 찾기** 버튼이 있습니다. 파일 탭 상단의 과녁 모양 버튼을 누르면 상위 폴더를 펼치고 현재 문서를 선택해 목록에 표시합니다. 본문 위치·커서·미저장 내용은 유지합니다.
 
 | 동작 | 단축키 / 위치 |
 |---|---|
@@ -108,7 +110,7 @@ npm --prefix Editor run test:browser
 
 ## Windows 버전
 
-Windows 11 Intel·AMD x64용 [포터블 ZIP 0.3.5 다운로드](https://github.com/biglol10/MyVibeCoding/releases/download/mymarkdownviewer-2026-09-13/MyMarkdownViewer-0.3.5-Windows-x64.zip)을 전체 압축 해제하고 `MyMarkdownViewer.exe`를 실행합니다. 별도 런타임 설치는 필요 없습니다. [사용·빌드 안내](Windows/README.md)와 [검증 범위](docs/Windows-Verification.md)를 확인하세요. 실제 Windows PC 실행과 Windows 두벌식 입력은 아직 미검증입니다.
+Windows 11 Intel·AMD x64용 [포터블 ZIP 0.3.7](https://github.com/biglol10/MyVibeCoding/releases/download/mymarkdownviewer-2026-09-14/MyMarkdownViewer-0.3.7-Windows-x64.zip)을 전체 압축 해제하고 `MyMarkdownViewer.exe`를 실행합니다. 별도 런타임 설치는 필요 없습니다. [사용·빌드 안내](Windows/README.md)를 확인하세요. 실제 Windows PC 실행과 Windows 두벌식 입력은 아직 미검증입니다.
 
 ## 성능 개선 배포본
 
@@ -125,7 +127,7 @@ Typora Windows의 문서 중심 구성을 참고해 큰 도구 버튼을 메뉴�
 
 ### 최종 리뷰 및 재빌드 (2026-09-12)
 
-Windows의 메뉴·테마와 Mac/Windows `.markdown` 확장자 처리를 보완했습니다. Android는 읽기 전용을 유지합니다. [변경 및 검증 기록](docs/Final-Review-2026-09-12.md)을 참고하세요. 최신 Android 설치 파일은 위의 APK 1.2.3 링크에서 받을 수 있습니다.
+Windows의 메뉴·테마와 Mac/Windows `.markdown` 확장자 처리를 보완했습니다. Android는 읽기 전용을 유지합니다. 최신 APK는 위 다운로드 링크를 이용하세요.
 
 ### 문서 기능 확장 (0.2.0)
 

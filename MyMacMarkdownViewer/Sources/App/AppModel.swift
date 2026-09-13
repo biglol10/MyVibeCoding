@@ -7,6 +7,11 @@ import MyMarkdownCore
 
 @MainActor
 final class AppModel: ObservableObject {
+    struct FileRevealRequest: Equatable {
+        let id = UUID()
+        let path: String
+        let sessionID: String
+    }
     static let shared = AppModel()
     let access = AccessManager()
     let bridge = EditorBridge()
@@ -48,6 +53,9 @@ final class AppModel: ObservableObject {
     @Published var rootEntries: [FileEntry] = [] { didSet { fileTreeRowsCache = nil } }
     @Published var children: [String: [FileEntry]] = [:] { didSet { fileTreeRowsCache = nil } }
     @Published var expanded: Set<String> = [] { didSet { fileTreeRowsCache = nil } }
+    @Published private(set) var revealingCurrentFile = false
+    @Published private(set) var fileRevealRequest: FileRevealRequest?
+    private var revealedFileSelection: (sessionID: String, path: String)?
     private var fileTreeRowsCache: [FileTreeRow]?
     var visibleFileRows: [FileTreeRow] {
         if let fileTreeRowsCache { return fileTreeRowsCache }
@@ -562,7 +570,13 @@ final class AppModel: ObservableObject {
                     return (try FolderScanner.children(of: folderURL), children)
                 }.value
                 guard generation == folderGeneration, !Task.isCancelled else { return }
-                rootEntries = result.0; children = result.1; startIndex()
+                // A reveal or folder expansion may have loaded more ancestors
+                // while this refresh was reading its earlier expansion set.
+                var refreshedChildren = result.1
+                for path in expanded.subtracting(expandedPaths) {
+                    refreshedChildren[path] = children[path]
+                }
+                rootEntries = result.0; children = refreshedChildren; startIndex()
             } catch is CancellationError {} catch { showError(error) }
         }
     }
@@ -586,6 +600,47 @@ final class AppModel: ObservableObject {
             }
         }
         if let folderURL { UserDefaults.standard.set(Array(expanded), forKey: "expanded:\(folderURL.path)") }
+    }
+    var currentFileRevealUnavailableReason: String? {
+        guard let documentURL else { return "문서를 열거나 저장한 뒤 찾을 수 있습니다" }
+        guard let folderURL else { return "파일 목록에 표시할 폴더를 먼저 열어 주세요" }
+        guard FileTreeReveal.directories(for: documentURL, inside: folderURL) != nil else { return "현재 문서는 열린 폴더에 없습니다" }
+        if workspaceBusy { return "파일 작업이 끝난 뒤 찾을 수 있습니다" }
+        if revealingCurrentFile { return "현재 문서를 찾는 중…" }
+        return nil
+    }
+
+    func revealCurrentFileInSidebar() async {
+        guard currentFileRevealUnavailableReason == nil, let documentURL, let folderURL else { return }
+        let generation = folderGeneration, session = sessionID
+        revealingCurrentFile = true
+        defer { revealingCurrentFile = false }
+        do {
+            let worker = Task.detached(priority: .userInitiated) { try FileTreeReveal.read(document: documentURL, inside: folderURL) }
+            let snapshot = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
+            guard !Task.isCancelled, generation == folderGeneration, session == sessionID,
+                  self.documentURL == documentURL, !workspaceBusy else { return }
+            rootEntries = snapshot.entries[folderURL.standardizedFileURL.path] ?? []
+            for directory in snapshot.directories.dropFirst() {
+                children[directory.path] = snapshot.entries[directory.path]
+                expanded.insert(directory.path)
+            }
+            UserDefaults.standard.set(Array(expanded), forKey: "expanded:\(folderURL.path)")
+            sidebarVisible = true; sidebarMode = "files"
+            revealedFileSelection = (session, snapshot.target.path)
+            fileRevealRequest = FileRevealRequest(path: snapshot.target.path, sessionID: session)
+        } catch is CancellationError {
+        } catch {
+            guard generation == folderGeneration, session == sessionID else { return }
+            errorMessage = "현재 문서를 파일 목록에서 찾을 수 없습니다. 파일이 이동·삭제되었거나 폴더에 접근할 수 없는지 확인해 주세요."
+        }
+    }
+    func completeSidebarReveal(_ requestID: UUID) {
+        if fileRevealRequest?.id == requestID { fileRevealRequest = nil }
+    }
+    func isCurrentSidebarFile(_ entry: FileEntry) -> Bool {
+        documentURL?.standardizedFileURL == entry.url.standardizedFileURL
+            || (revealedFileSelection?.sessionID == sessionID && revealedFileSelection?.path == entry.id)
     }
     var filteredFiles: [URL] {
         let query = quickQuery.trimmingCharacters(in: .whitespacesAndNewlines)

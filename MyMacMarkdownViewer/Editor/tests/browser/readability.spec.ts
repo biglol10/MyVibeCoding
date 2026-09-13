@@ -144,7 +144,9 @@ test('blank code lines preserve their height when a preview becomes editable', a
   const preview = page.locator('pre').first();
   const before = await preview.boundingBox();
   await preview.click();
-  const bodyLines = page.locator('.code-source-line:not(.code-fence-line)');
+  // The language header has its own fixed-height row; measure editable body
+  // lines, including all three genuine blank lines in this code sample.
+  const bodyLines = page.locator('.code-source-line:not(.code-fence-line):not(.code-language-line)');
   const lines = await bodyLines.evaluateAll(nodes => nodes.map(n => ({ text: n.textContent, height: parseFloat(getComputedStyle(n).lineHeight), rect: n.getBoundingClientRect().toJSON() })));
   expect(lines.filter(line => !line.text?.trim()).length).toBe(3);
   for (const line of lines) expect(line.height).toBeCloseTo(25.84, 1);

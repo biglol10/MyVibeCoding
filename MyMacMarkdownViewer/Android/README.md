@@ -1,5 +1,7 @@
 # Android Markdown Reader
 
+최신 개인 APK: [Android 1.2.3 다운로드](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacMarkdownViewer/MarkdownReader-1.2.3-Android.apk).
+
 개인 사용을 위한 휴대폰 우선 Markdown 리더입니다. 태블릿 화면에도 대응하며, 문서 원문을 수정·저장·생성·이름 변경·삭제하지 않는 읽기 전용 앱입니다. Android 시스템 파일 선택기로 문서 하나 또는 폴더를 열고, 선택한 트리 안의 상대 경로 이미지도 표시합니다.
 
 ## 사용자 기능
@@ -36,7 +38,7 @@ cd Android
 python3 Android/scripts/package-apk.py
 ```
 
-현재 배포 파일은 [Android 1.2.3 APK 다운로드](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacMarkdownViewer/MarkdownReader-1.2.3-Android.apk)입니다. 새 빌드 파일명은 앱 버전을 따릅니다. 개인 서명 자료 `~/.local/share/mymarkdownreader-signing`이 있어야 업데이트 가능한 동일 서명이 유지됩니다. 이 폴더의 비밀 내용은 공개하거나 저장소에 추가하지 마세요.
+현재 개발 빌드는 `dist/android/MarkdownReader-1.2.3-Android.apk`에 생성됩니다. 배포 파일명은 앱 버전을 따릅니다. 개인 서명 자료 `~/.local/share/mymarkdownreader-signing`이 있어야 업데이트 가능한 동일 서명이 유지됩니다. 이 폴더의 비밀 내용은 공개하거나 저장소에 추가하지 마세요.
 
 ## 구조와 브리지
 

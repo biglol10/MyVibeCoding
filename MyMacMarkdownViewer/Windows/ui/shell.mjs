@@ -1,4 +1,10 @@
 import { buildOutline, normalizeOutlineQuery, outlineSignature, visibleOutline } from "./outline.mjs";
+import {
+  findFileEntry,
+  isPathWithinRoot,
+  knownAncestorDirectories,
+  sameTreePath,
+} from "./file-reveal.mjs";
 
 const $ = (s) => document.querySelector(s);
 const frame = $("#editor-frame");
@@ -45,6 +51,8 @@ let searchState = null,
   reviewApplied = false,
   pendingActions = 0,
   mainBusy = false,
+  revealInProgress = false,
+  revealGeneration = 0,
   frameReady = false;
 
 function text(node, value) {
@@ -114,6 +122,7 @@ function setBusy() {
     .forEach((b) => {
       if (b.dataset.action !== "settings") b.disabled = blocked;
     });
+  updateRevealCurrentButton();
 }
 function sendEditor(message) {
   const isOpen = message?.type === "open";
@@ -157,6 +166,30 @@ function renderHeader() {
       ? "var(--warning)"
       : "var(--muted)";
   text($("#mode"), state.sourceMode ? "원문 모드" : "읽기/편집");
+  updateRevealCurrentButton();
+}
+function revealUnavailableReason() {
+  const docPath = state.doc?.path;
+  if (!state.root) return "먼저 폴더를 열어 주세요.";
+  if (!docPath) return "저장된 문서가 없습니다.";
+  if (!isPathWithinRoot(docPath, state.root))
+    return "열린 문서가 현재 폴더 안에 없습니다.";
+  if (!findFileEntry(docPath, state.entries))
+    return "현재 문서가 파일 목록에 없습니다. 새로 고침 후 다시 시도해 주세요.";
+  return "";
+}
+function updateRevealCurrentButton() {
+  const button = $("#reveal-current");
+  if (!button) return;
+  const reason = revealInProgress
+    ? "현재 문서를 확인하고 있습니다."
+    : pendingActions > 0 || mainBusy
+      ? "진행 중인 작업이 끝난 뒤 다시 시도해 주세요."
+      : revealUnavailableReason();
+  button.disabled = !!reason;
+  button.title = reason ? "현재 문서 찾기: " + reason : "현재 문서 찾기";
+  if (reason) button.setAttribute("aria-description", reason);
+  else button.removeAttribute("aria-description");
 }
 function pathDepth(entry) {
   return Number.isFinite(entry.depth)
@@ -434,6 +467,81 @@ function revealPath(path) {
     const next = parent.replace(/[\\/][^\\/]+$/, "");
     if (next === parent) break;
     parent = next;
+  }
+}
+function scrollTreeRowIntoView(row) {
+  const tree = $("#tree");
+  const treeRect = tree.getBoundingClientRect();
+  const top = treeRect.top + tree.clientTop;
+  const bottom = top + tree.clientHeight;
+  const rowRect = row.getBoundingClientRect();
+  if (rowRect.top < top) tree.scrollTop -= top - rowRect.top;
+  else if (rowRect.bottom > bottom) tree.scrollTop += rowRect.bottom - bottom;
+}
+function revealRequestMatches(request) {
+  return (
+    sameTreePath(state.root, request.root) &&
+    state.doc?.sessionID === request.sessionID &&
+    sameTreePath(state.doc?.path, request.path)
+  );
+}
+async function revealCurrentDocument() {
+  if (revealInProgress) return;
+  const reason = revealUnavailableReason();
+  if (reason) {
+    showNotice(reason);
+    return;
+  }
+  const request = {
+    generation: ++revealGeneration,
+    root: state.root,
+    path: state.doc.path,
+    sessionID: state.doc.sessionID,
+  };
+  revealInProgress = true;
+  updateRevealCurrentButton();
+  try {
+    // This targeted check validates the current path without rescanning the root.
+    const checked = await invoke("info", { path: request.path });
+    if (request.generation !== revealGeneration || !revealRequestMatches(request))
+      return;
+    if (!checked?.ok || !checked.value || checked.value.directory) {
+      showNotice("현재 문서를 확인할 수 없습니다. 파일이 이동되었거나 삭제되었는지 확인해 주세요.");
+      return;
+    }
+    const entry = findFileEntry(request.path, state.entries);
+    const ancestors = entry
+      ? knownAncestorDirectories(entry.path, state.root, state.entries)
+      : null;
+    if (!entry || !ancestors) {
+      showNotice("현재 문서의 파일 목록이 바뀌었습니다. 새로 고침한 뒤 다시 시도해 주세요.");
+      return;
+    }
+
+    const previousSelection = selectedPath;
+    const addedAncestors = ancestors.filter((path) => !expanded.has(path));
+    for (const path of ancestors) expanded.add(path);
+    selectedPath = entry.path;
+    renderTree();
+    const row = [...$("#tree").querySelectorAll(".tree-item")]
+      .find((item) => sameTreePath(item.dataset.path, entry.path));
+    if (!row) {
+      for (const path of addedAncestors) expanded.delete(path);
+      selectedPath = previousSelection;
+      renderTree();
+      showNotice("현재 문서를 파일 목록에서 표시할 수 없습니다. 새로 고침한 뒤 다시 시도해 주세요.");
+      return;
+    }
+    scrollTreeRowIntoView(row);
+    showNotice("현재 문서를 파일 목록에서 찾았습니다.", false);
+  } catch {
+    if (request.generation === revealGeneration && revealRequestMatches(request))
+      showNotice("현재 문서를 확인할 수 없습니다. 파일이 이동되었거나 삭제되었는지 확인해 주세요.");
+  } finally {
+    if (request.generation === revealGeneration) {
+      revealInProgress = false;
+      updateRevealCurrentButton();
+    }
   }
 }
 function toggleSidebar(force) {
@@ -1104,6 +1212,9 @@ document.addEventListener("click", (event) => {
   }
   if (button.dataset.theme) setTheme(button.dataset.theme);
   if (button.dataset.tab) switchTab(button.dataset.tab);
+});
+$("#reveal-current").addEventListener("click", () => {
+  void revealCurrentDocument();
 });
 $("#search-form").addEventListener("submit", runSearch);
 $("#outline-query").addEventListener("input", (event) => {

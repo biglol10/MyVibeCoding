@@ -1465,6 +1465,10 @@ app
           searchReport = review = null;
           return { ok: true };
         }
+        // Metadata reads must not lock the editor, cancel pending autosave,
+        // or broadcast an unrelated notice over the caller's own result.
+        if (action === "info")
+          return { ok: true, value: await doAction(action, payload) };
         return { ok: true, value: await run(action, payload) };
       } catch (e) {
         return { ok: false, error: e.message || String(e) };

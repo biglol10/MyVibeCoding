@@ -117,24 +117,51 @@ function previewReplacementFrom(state: EditorState, block: Block) {
   return block.kind === 'CodeBlock' ? state.doc.lineAt(block.from).from : block.from;
 }
 
+function previewReplacementEnd(state: EditorState, block: Block, nextBlockFrom?: number) {
+  if (nextBlockFrom === undefined) return block.to;
+  if (!isCodeBlock(block)) return Math.max(block.to, nextBlockFrom - 1);
+  // A fenced closing line has no live height. Replace that line's terminating
+  // break, but leave every following blank source line in place so reading and
+  // editing preserve the same paragraph position after a code block.
+  return Math.min(nextBlockFrom, block.to < state.doc.length ? block.to + 1 : block.to);
+}
+
+function isEmptyFencedCode(state: EditorState, block: Block) {
+  if (block.kind !== 'FencedCode') return false;
+  const marks = block.node?.getChildren('CodeMark') ?? [];
+  return marks.length > 1 && state.doc.lineAt(marks[0].from).number + 1 === state.doc.lineAt(marks.at(-1)!.from).number;
+}
+
 function codeSourceLines(state: EditorState, block: Block, ranges: Range<Decoration>[], extraClass = '') {
   const fenced = block.kind === 'FencedCode';
   const fenceLines = new Set(block.node?.getChildren('CodeMark').map(mark => state.doc.lineAt(mark.from).number) ?? []);
   const first = state.doc.lineAt(block.from).number, last = state.doc.lineAt(Math.max(block.from, block.to - 1)).number;
+  const openingFence = fenced && fenceLines.has(first);
+  const bodyLines: number[] = [];
+  for (let number = first; number <= last; number++) {
+    if (!(fenced && fenceLines.has(number))) bodyLines.push(number);
+  }
+  const firstBody = bodyLines[0], lastBody = bodyLines.at(-1);
   for (let number = first; number <= last; number++) {
     const line = state.doc.line(number);
     const fence = fenced && fenceLines.has(number);
-    // A keyboard cursor can intentionally reach a fence. Keep that one line
-    // visible so it can be edited, while live clicks always target code text.
-    const selectedFence = fence && state.selection.ranges.some(range => range.from >= line.from && range.from <= line.to);
-    const edge = `${number === first ? ' code-source-first' : ''}${number === last ? ' code-source-last' : ''}`;
-    const languageLine = fence && number === first;
-    ranges.push(Decoration.line({ class: `code-source-line${edge}${fence && !selectedFence ? ' code-fence-line' : ''}${languageLine ? ' code-language-line' : ''}${selectedFence ? ' code-fence-caret-line' : ''}${extraClass}` }).range(line.from));
+    const languageLine = openingFence && number === first;
+    // The frame belongs to editable source lines, never to fence delimiters.
+    // Keeping delimiter geometry independent from the selection prevents an
+    // arrow-key visit to either fence from moving the header or code surface.
+    const edge = `${number === firstBody ? ' code-source-first' : ''}${number === lastBody ? ' code-source-last' : ''}`;
+    ranges.push(Decoration.line({ class: `code-source-line${edge}${fence && !languageLine ? ' code-fence-line' : ''}${languageLine ? ' code-language-line' : ''}${extraClass}` }).range(line.from));
     if (languageLine) {
       // Replacing the whole opening line leaves the document's fence and its
       // optional trailing attributes untouched while exposing only the
-      // language picker in the live code header.
+      // language picker in the live code header. Delimiters remain source-mode
+      // edits, so this replacement stays in place even when a keyboard cursor
+      // reaches the opening fence.
       ranges.push(Decoration.replace({ widget: new CodeLanguageWidget(block.source, block.from, true) }).range(line.from, line.to));
+    } else if (fence) {
+      // Pair the hidden closing delimiter with the view's atomic range set so
+      // normal live-mode arrows and deletion cannot land in invisible syntax.
+      ranges.push(Decoration.replace({}).range(line.from, line.to));
     }
   }
   if (!fenced) {
@@ -156,7 +183,7 @@ function stopCodeLanguageEvent(event: Event) {
 function codeLanguageHeader(view: EditorView, source: string, fallbackFrom: number, sourceHeader: boolean) {
   const info = codeFenceInfo(source);
   const header = document.createElement('div');
-  header.className = `code-language-header${sourceHeader && !info ? ' code-language-source-header' : ''}`;
+  header.className = `code-language-header${sourceHeader ? ' code-language-live-header' : ''}${sourceHeader && !info ? ' code-language-source-header' : ''}`;
   header.dataset.codeLanguage = ''; header.dataset.codeBlockFrom = String(fallbackFrom);
   const label = codeLanguageLabel(info?.language ?? '');
   if (!info) {
@@ -537,6 +564,13 @@ function decorateBlock(state: EditorState, blocks: Block[], index: number, range
     }
     const mermaid = isMermaidBlock(block);
     const code = isCodeBlock(block);
+    // With no editable body, retain the same framed preview and language
+    // picker in live mode. Source mode still exposes both delimiters.
+    if (code && isEmptyFencedCode(state, block)) {
+      const replacementEnd = previewReplacementEnd(state, block, blocks[index + 1]?.from);
+      ranges.push(Decoration.replace({ widget: new PreviewWidget(block, options.settings, options.generation, session.sessionID, active, context), block: true, inclusive: false }).range(previewReplacementFrom(state, block), replacementEnd));
+      return;
+    }
     const diagramEditing = mermaid && !state.readOnly && (options.diagramEditing === block.from || sourceSelected(state, block));
     // Mermaid stays rendered while its source is edited. Ordinary clicks never
     // select a preview widget; only the explicit button can enter this state.
@@ -548,7 +582,7 @@ function decorateBlock(state: EditorState, blocks: Block[], index: number, range
     // A transition to read-only must not leave an already-selected source block
     // exposed as an editable-looking surface.
     if (state.readOnly && code && block.from < block.to) {
-      const replacementEnd = blocks[index + 1] ? Math.max(block.to, end - 1) : block.to;
+      const replacementEnd = previewReplacementEnd(state, block, blocks[index + 1]?.from);
       ranges.push(Decoration.replace({ widget: new PreviewWidget(block, options.settings, options.generation, session.sessionID, false, context), block: true, inclusive: false }).range(previewReplacementFrom(state, block), replacementEnd));
       return;
     }
@@ -568,7 +602,7 @@ function decorateBlock(state: EditorState, blocks: Block[], index: number, range
     // its source. This lets the Finish button return to the rendered diagram
     // even though CodeMirror's wider display span still considers it active.
     if (mermaid && !sourceSelected(state, block) && block.from < block.to) {
-      const replacementEnd = blocks[index + 1] ? Math.max(block.to, end - 1) : block.to;
+      const replacementEnd = previewReplacementEnd(state, block, blocks[index + 1]?.from);
       ranges.push(Decoration.replace({ widget: new PreviewWidget(block, options.settings, options.generation, session.sessionID, false, context), block: true, inclusive: false }).range(block.from, replacementEnd));
       return;
     }
@@ -588,8 +622,8 @@ function decorateBlock(state: EditorState, blocks: Block[], index: number, range
         const line = state.doc.lineAt(pos); if (line.to >= state.doc.length) break; pos = line.to + 1;
       }
     } else if (block.from < block.to) {
-      // Keep one source line break between widgets so CodeMirror can virtualize separate block lines.
-      const replacementEnd = blocks[index + 1] ? Math.max(block.to, end - 1) : block.to;
+      // Leave code separators to the source-line geometry used while editing.
+      const replacementEnd = previewReplacementEnd(state, block, blocks[index + 1]?.from);
       ranges.push(Decoration.replace({ widget: new PreviewWidget(block, options.settings, options.generation, session.sessionID, active, context), block: true, inclusive: false }).range(previewReplacementFrom(state, block), replacementEnd));
     }
 }
@@ -665,10 +699,69 @@ function updateEditedDecorations(previous: { blocks: Block[]; decorations: Decor
   }).map(tr.changes).update({ add: additions, sort: true });
 }
 
-export const livePreview = StateField.define<{ blocks: Block[]; decorations: DecorationSet; fragments: readonly TreeFragment[]; tree: Tree; context: RenderContext }>({
+function codeFenceAtomicRanges(state: EditorState, tree: Tree): DecorationSet {
+  const ranges: Range<Decoration>[] = [];
+  tree.iterate({ enter(node) {
+    if (node.name !== 'FencedCode') return;
+    for (const mark of node.node.getChildren('CodeMark')) {
+      const line = state.doc.lineAt(mark.from);
+      ranges.push(Decoration.mark({}).range(line.from, line.to));
+    }
+    return false;
+  } });
+  return Decoration.set(ranges, true);
+}
+
+function fencedCodeAt(state: EditorState, position: number) {
+  const bounded = Math.max(0, Math.min(state.doc.length, position));
+  for (const at of [bounded, Math.max(0, bounded - 1), Math.min(state.doc.length, bounded + 1)]) {
+    let node: SyntaxNode | null = state.field(livePreview).tree.resolveInner(at, 1);
+    while (node) {
+      if (node.name === 'FencedCode') return node;
+      node = node.parent;
+    }
+  }
+}
+
+function hiddenFenceCursorTarget(state: EditorState, position: number, direction: number) {
+  if (state.field(previewOptions).sourceMode) return position;
+  const node = fencedCodeAt(state, position);
+  if (!node) return position;
+  const marks = node.getChildren('CodeMark');
+  const opening = marks[0] && state.doc.lineAt(marks[0].from);
+  const closing = marks.length > 1 ? state.doc.lineAt(marks.at(-1)!.from) : undefined;
+  if (!opening) return position;
+  for (const mark of marks) {
+    const line = state.doc.lineAt(mark.from);
+    if (position < line.from || position > line.to) continue;
+    const backward = direction < 0;
+    if (closing && closing.number === opening.number + 1) {
+      return backward ? (opening.from > 0 ? opening.from - 1 : Math.min(state.doc.length, closing.to + 1))
+        : (closing.to < state.doc.length ? closing.to + 1 : Math.max(0, opening.from - 1));
+    }
+    if (line.number === opening.number) return backward ? (line.from > 0 ? line.from - 1 : Math.min(state.doc.length, line.to + 1))
+      : Math.min(state.doc.length, line.to + 1);
+    return backward ? Math.max(0, line.from - 1) : (line.to < state.doc.length ? line.to + 1 : Math.max(0, line.from - 1));
+  }
+  return position;
+}
+
+function fenceBoundaryExit(state: EditorState, position: number, key: string) {
+  const node = fencedCodeAt(state, position);
+  if (!node) return position;
+  const marks = node.getChildren('CodeMark');
+  const opening = marks[0] && state.doc.lineAt(marks[0].from);
+  const closing = marks.length > 1 ? state.doc.lineAt(marks.at(-1)!.from) : undefined;
+  if (!opening || !closing) return position;
+  if (key === 'ArrowUp' && position === opening.to + 1) return opening.from > 0 ? opening.from - 1 : position;
+  if (key === 'ArrowDown' && position === closing.from - 1) return closing.to < state.doc.length ? closing.to + 1 : position;
+  return position;
+}
+
+export const livePreview = StateField.define<{ blocks: Block[]; decorations: DecorationSet; atomics: DecorationSet; fragments: readonly TreeFragment[]; tree: Tree; context: RenderContext }>({
   create(state) {
     const source = state.doc.toString(), tree = markdownParser.parse(source), blocks = blocksFor(source, tree);
-    const context = documentRenderContext(source); return { blocks, decorations: decorations(state, blocks, context), fragments: TreeFragment.addTree(tree), tree, context };
+    const context = documentRenderContext(source); return { blocks, decorations: decorations(state, blocks, context), atomics: codeFenceAtomicRanges(state, tree), fragments: TreeFragment.addTree(tree), tree, context };
   },
   update(value, tr) {
     const options = tr.state.field(previewOptions);
@@ -678,7 +771,7 @@ export const livePreview = StateField.define<{ blocks: Block[]; decorations: Dec
       tr.changes.iterChangedRanges((fromA, toA, fromB, toB) => changes.push({fromA, toA, fromB, toB}));
       fragments = TreeFragment.applyChanges(fragments, changes);
     }
-    if (options.composing) return { blocks: value.blocks, decorations: value.decorations.map(tr.changes), fragments, tree: value.tree, context: value.context };
+    if (options.composing) return { blocks: value.blocks, decorations: value.decorations.map(tr.changes), atomics: value.atomics.map(tr.changes), fragments, tree: value.tree, context: value.context };
     const before = tr.startState.field(previewOptions);
     const previewChanged = options !== before;
     // Read-only locks, scroll requests and unrelated effects do not change Markdown decoration.
@@ -712,14 +805,33 @@ export const livePreview = StateField.define<{ blocks: Block[]; decorations: Dec
       }) };
     }
     const previouslyComposing = tr.startState.field(previewOptions).composing;
-    let blocks = value.blocks, tree = value.tree, context = value.context;
+    let blocks = value.blocks, tree = value.tree, context = value.context, atomics = value.atomics;
     if (tr.docChanged || previouslyComposing) {
       const source = tr.state.doc.toString(); tree = markdownParser.parse(source, fragments);
-      blocks = blocksFor(source, tree); fragments = TreeFragment.addTree(tree); context = documentRenderContext(source);
+      blocks = blocksFor(source, tree); fragments = TreeFragment.addTree(tree); context = documentRenderContext(source); atomics = codeFenceAtomicRanges(tr.state, tree);
     }
     const nextDecorations = tr.docChanged && !previouslyComposing && !previewChanged && !options.sourceMode
       ? updateEditedDecorations(value, tr, blocks, context) : decorations(tr.state, blocks, context);
-    return { blocks, decorations: nextDecorations, fragments, tree, context };
+    return { blocks, decorations: nextDecorations, atomics, fragments, tree, context };
   },
-  provide: field => EditorView.decorations.from(field, value => value.decorations),
+  provide: field => [
+    EditorView.decorations.from(field, value => value.decorations),
+    EditorView.atomicRanges.of(view => view.state.field(previewOptions).sourceMode ? Decoration.none : view.state.field(field).atomics),
+    EditorView.domEventHandlers({ keydown(event, view) {
+      const options = view.state.field(previewOptions);
+      if (options.sourceMode || options.composing || view.composing || event.isComposing || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey
+        || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') || !view.state.selection.main.empty) return false;
+      const target = fenceBoundaryExit(view.state, view.state.selection.main.head, event.key);
+      if (target === view.state.selection.main.head) return false;
+      event.preventDefault();
+      view.dispatch({ selection: EditorSelection.cursor(target) });
+      return true;
+    } }),
+    EditorView.updateListener.of(update => {
+      const selection = update.state.selection.main;
+      if (update.state.field(previewOptions).composing || update.view.composing || !update.selectionSet || !selection.empty) return;
+      const target = hiddenFenceCursorTarget(update.state, selection.head, Math.sign(selection.head - update.startState.selection.main.head));
+      if (target !== selection.head) update.view.dispatch({ selection: EditorSelection.cursor(target) });
+    }),
+  ],
 });

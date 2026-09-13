@@ -15,6 +15,10 @@ enum AppQA {
         let allowedRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("MyMarkdownViewer/QA", isDirectory: true).standardizedFileURL
         guard root.path == allowedRoot.path || root.path.hasPrefix(allowedRoot.path + "/") else { return }
+        if args.contains("--qa-reveal-current") {
+            await FileRevealQA.run(model: model, root: root)
+            return
+        }
         if args.contains("--qa-code-language") {
             await codeLanguageChecks(model: model, web: web, root: root)
             return
@@ -160,7 +164,8 @@ enum AppQA {
                 const select = document.querySelector('select[aria-label="코드 언어"]');
                 if (!select) throw new Error('Missing language selector');
                 select.value = 'javascript'; select.dispatchEvent(new Event('change', {bubbles:true}));
-                await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                // Language edits update CodeMirror synchronously. Waiting for
+                // a paint can stall while this QA window is in the background.
                 return window.MarkdownHost.snapshot().text;
                 """, arguments: [:], in: nil, contentWorld: .page) as? String
             let changed = source.replacingOccurrences(of: "~~~py  title=", with: "~~~javascript  title=")
@@ -177,9 +182,14 @@ enum AppQA {
             let redone = try await model.bridge.snapshot()["text"] as? String
             report["redo"] = redone == changed
             try await Task.sleep(for: .milliseconds(250))
-            let image = try await web.takeSnapshot(configuration: nil)
-            if let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff), let png = bitmap.representation(using: .png, properties: [:]) {
-                try png.write(to: root.appendingPathComponent("code-language-night.png"))
+            // Native UI capture can be performed by the external QA runner.
+            // Do not make save/undo verification depend on an offscreen
+            // WKWebView snapshot callback when that capture is disabled.
+            if !ProcessInfo.processInfo.arguments.contains("--qa-no-snapshot") {
+                let image = try await web.takeSnapshot(configuration: nil)
+                if let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff), let png = bitmap.representation(using: .png, properties: [:]) {
+                    try png.write(to: root.appendingPathComponent("code-language-night.png"))
+                }
             }
             model.command("undo")
             _ = try await model.bridge.snapshot()

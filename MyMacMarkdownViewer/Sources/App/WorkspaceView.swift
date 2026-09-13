@@ -128,10 +128,9 @@ struct WorkspaceView: View {
                 Text("파일").tag("files"); Text("목차").tag("outline"); Text("검색").tag("search")
             }.pickerStyle(.segmented).labelsHidden().padding(12)
             if model.sidebarMode == "files" {
-                HStack {
+                HStack(spacing: 4) {
                     Text(model.folderURL?.lastPathComponent ?? "작업 폴더").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary).lineLimit(2).lineSpacing(3).truncationMode(.middle)
                         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading).help(model.folderURL?.path ?? "작업 폴더")
-                    Spacer()
                     if model.folderURL != nil {
                         Menu {
                             Button("새 문서…") { model.createWorkspaceItem(in: nil, folder: false) }
@@ -140,6 +139,13 @@ struct WorkspaceView: View {
                             .help("작업 폴더에 만들기").disabled(model.workspaceBusy)
                     }
                     Button { model.chooseFolder() } label: { Image(systemName: "folder.badge.plus").frame(width: 28, height: 28) }.buttonStyle(.plain).help("폴더 열기")
+                    Button { Task { await model.revealCurrentFileInSidebar() } } label: {
+                        Image(systemName: "scope").frame(width: 28, height: 28)
+                    }.buttonStyle(.plain)
+                        .help(model.currentFileRevealUnavailableReason ?? "현재 문서 찾기 · 파일 목록에서 보기")
+                        .accessibilityLabel("현재 문서 찾기")
+                        .accessibilityIdentifier("reveal-current-document")
+                        .disabled(model.currentFileRevealUnavailableReason != nil)
                 }.padding(.horizontal, 14).padding(.vertical, 8)
                 if model.folderURL == nil {
                     VStack(alignment: .leading, spacing: 12) {
@@ -149,9 +155,21 @@ struct WorkspaceView: View {
                     }.padding(16)
                 } else {
                     GeometryReader { size in
-                        ScrollView {
-                            FileTreeRows(model: model, rows: model.visibleFileRows, width: max(0, size.size.width - 12))
-                                .padding(.horizontal, 6).padding(.bottom, 16)
+                        ScrollViewReader { proxy in
+                            ScrollView {
+                                FileTreeRows(model: model, rows: model.visibleFileRows, width: max(0, size.size.width - 12))
+                                    .padding(.horizontal, 6).padding(.bottom, 16)
+                            }
+                            .task(id: model.fileRevealRequest?.id) {
+                                guard let request = model.fileRevealRequest else { return }
+                                defer { model.completeSidebarReveal(request.id) }
+                                // Let the newly expanded flat rows enter the view
+                                // before asking the sidebar's own scroller to move.
+                                await Task.yield()
+                                guard !Task.isCancelled, model.sessionID == request.sessionID,
+                                      model.visibleFileRows.contains(where: { $0.id == request.path }) else { return }
+                                proxy.scrollTo(request.path, anchor: .center)
+                            }
                         }
                     }
                 }
@@ -189,8 +207,10 @@ private struct FileTreeRows: View {
                             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                     }.padding(.leading, min(CGFloat(row.depth) * 13 + 8, max(8, width - 110))).padding(.trailing, 8).frame(width: width, height: 32)
                         .contentShape(Rectangle())
-                        .background(model.documentURL == entry.url ? Color.primary.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 5))
+                        .background(model.isCurrentSidebarFile(entry) ? Color.primary.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 5))
                 }.buttonStyle(.plain).help(entry.url.path).accessibilityLabel(entry.name)
+                    .id(row.id)
+                    .accessibilityAddTraits(model.isCurrentSidebarFile(entry) ? .isSelected : [])
                     .contextMenu {
                         Button(entry.isDirectory ? "펼치기" : "열기") { model.openWorkspaceItem(entry) }
                         Divider()

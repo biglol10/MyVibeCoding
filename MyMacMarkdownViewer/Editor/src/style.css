@@ -29,14 +29,14 @@ body {font-family:var(--font-family)}
 .active-source-line[class*=source-heading] {line-height:1.4!important;font-weight:650;letter-spacing:-.025em}
 .active-source-line[class*=source-heading] span {text-decoration:none!important}
 .source-heading-1 {font-size:2em}.source-heading-2 {font-size:1.5em}.source-heading-3 {font-size:1.22em}
-.cm-editor[data-mode=live] .cm-line.code-source-line {font-family:var(--code-font-family)!important;font-size:max(15px,.95em);line-height:1.6!important;background:var(--surface);border-left:1px solid var(--border);border-right:1px solid var(--border);padding:0 18px!important;white-space:pre-wrap;overflow-x:visible;overflow-wrap:anywhere}
-.cm-editor[data-mode=live] .cm-line.code-source-first {padding-top:16px!important;border-top:1px solid var(--border);border-top-left-radius:5px;border-top-right-radius:5px}
-.cm-editor[data-mode=live] .cm-line.code-source-last {padding-bottom:16px!important;border-bottom:1px solid var(--border);border-bottom-left-radius:5px;border-bottom-right-radius:5px}
+.cm-editor[data-mode=live] .cm-line.code-source-line {font-family:var(--code-font-family)!important;font-size:max(15px,.95em);line-height:1.6!important;background:var(--surface);border-left:1px solid color-mix(in srgb,var(--border) 65%,transparent);border-right:1px solid color-mix(in srgb,var(--border) 65%,transparent);padding:0 18px!important;white-space:pre-wrap;overflow-x:visible;overflow-wrap:anywhere}
+.cm-editor[data-mode=live] .cm-line.code-source-first {padding-top:16px!important;border-top:1px solid color-mix(in srgb,var(--border) 65%,transparent);border-top-left-radius:5px;border-top-right-radius:5px}
+.cm-editor[data-mode=live] .cm-line.code-source-last {padding-bottom:16px!important;border-bottom:1px solid color-mix(in srgb,var(--border) 65%,transparent);border-bottom-left-radius:5px;border-bottom-right-radius:5px}
 /* Fences remain in the single Markdown document but stay out of the live code surface. Source mode exposes them for structural edits. */
 .cm-editor[data-mode=live] .cm-line.code-fence-line {height:0;min-height:0;font-size:0!important;line-height:0!important;padding-top:0!important;padding-bottom:0!important;border-width:0;overflow:hidden}
 .cm-editor[data-mode=live] .cm-line.code-source-line.code-language-line {height:calc(.6em + var(--code-language-header-height) + .25em);min-height:calc(.6em + var(--code-language-header-height) + .25em);font-size:var(--font-size)!important;line-height:normal!important;background:transparent;border:0;padding:.6em 0 0!important;overflow:visible;white-space:normal}
-.cm-editor[data-mode=live] .cm-line.code-fence-line + .cm-line.code-source-line {border-top:1px solid var(--border);border-top-left-radius:5px;border-top-right-radius:5px;padding-top:16px!important}
-.cm-editor[data-mode=live] .cm-line.code-source-line:has(+ .cm-line.code-fence-line) {border-bottom:1px solid var(--border);border-bottom-left-radius:5px;border-bottom-right-radius:5px;padding-bottom:16px!important}
+/* These edges are assigned from the parsed code body. Do not infer them from
+   adjacent fence lines: a cursor or selection can visit a delimiter. */
 /* A selected Markdown link exposes its URL. Keep it as the theme link color,
    never CodeMirror's default dark blue, in live and source modes. */
 .cm-editor .tok-url,.cm-editor .tok-link {color:var(--accent)}
@@ -131,6 +131,10 @@ body {font-family:var(--font-family)}
 .md-inline-math {display:inline-block;text-indent:0}
 .preview-widget {padding-bottom:0}
 .code-language-header {height:var(--code-language-header-height);display:flex;align-items:center;justify-content:flex-end;color:var(--muted);font-family:var(--code-font-family);font-size:12px;line-height:1}
+/* A replacement widget is inline in CodeMirror. Anchor its header to the
+   opening line's reserved space, outside the code surface's line baseline. */
+.cm-editor[data-mode=live] .cm-line.code-language-line {position:relative}
+.cm-editor[data-mode=live] .cm-line.code-language-line .code-language-live-header {position:absolute;left:0;right:0;bottom:.25em;font-size:var(--font-size)}
 .code-language-source-header {height:calc(.6em + var(--code-language-header-height) + .25em);padding-top:.6em;font-size:var(--font-size)}
 .code-language-label,.code-language-select {min-height:24px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--foreground);font:inherit;font-size:12px;line-height:1;padding:4px 7px}
 .code-language-label {display:inline-flex;align-items:center}
@@ -149,7 +153,7 @@ body {font-family:var(--font-family)}
 .table-controls button:disabled,.table-controls select:disabled {opacity:.55}
 .table-cell-input {display:block;width:100%;min-width:88px;border:0;background:transparent;color:inherit;font:inherit;line-height:inherit;padding:0;outline-offset:3px}
 .table-cell-input:focus {outline:2px solid var(--accent);border-radius:2px}
-.preview-widget pre {border-radius:5px;border-color:color-mix(in srgb,var(--border) 65%,transparent)}
+.preview-widget pre {border-radius:5px;border-color:color-mix(in srgb,var(--border) 65%,transparent);white-space:pre-wrap;overflow-wrap:anywhere;tab-size:4}
 .preview-widget:has(> .code-language-header) > pre {margin-top:.25em}
 .preview-widget:has(> .code-language-header):has(> [data-diagram-edit]) {padding-top:0}
 .preview-widget:has(> .code-language-header) > [data-diagram-edit] {top:calc(var(--code-language-header-height) + 4px)}

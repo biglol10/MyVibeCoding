@@ -10,7 +10,7 @@ Run from the repository root:
 ANDROID_SDK_ROOT="$HOME/Library/Android/sdk" Android/tests/emulator-setup.sh
 ```
 
-The script creates or reuses only `MarkdownReader_QA`, using the installed API 35 Google APIs arm64-v8a image. It reserves emulator serial `emulator-5580` and TCP port 5580, launches headless with no audio and no boot animation, waits for `sys.boot_completed=1`, writes original fixture SHA-256 values to `Android/tests/fixtures/android-fixture-hashes.json`, and pushes the fixtures. A live process may be inspected with `pgrep -af 'emulator.*MarkdownReader_QA'`; do not target existing `OtFit_*` AVDs or a connected physical device.
+The script creates or reuses only `MarkdownReader_QA`, using the installed API 35 Google APIs arm64-v8a image. It reserves emulator serial `emulator-5580` and TCP port 5580, launches headless with no audio and no boot animation, waits for `sys.boot_completed=1`, writes original fixture SHA-256 values to `Android/tests/fixtures/android-fixture-hashes.json`, and pushes the fixtures. A live process may be inspected with `pgrep -af 'emulator.*MarkdownReader_QA'`; do not target another existing AVD or a connected physical device.
 
 For read-only verification, compare the opened document and its files against the JSON hashes after exercising navigation, links, and rendering. An unchanged hash confirms the fixture file bytes stayed unchanged; it does not prove the app UI itself is read-only.
 

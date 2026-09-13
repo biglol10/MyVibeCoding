@@ -1,6 +1,6 @@
 # MyMarkdownViewer Windows
 
-Windows 11 Intel·AMD x64용 개인 사용 버전입니다. [최신 0.3.5 포터블 ZIP 다운로드](https://github.com/biglol10/MyVibeCoding/releases/download/mymarkdownviewer-2026-09-13/MyMarkdownViewer-0.3.5-Windows-x64.zip) 후 전체 압축을 풀고 `MyMarkdownViewer.exe`를 실행합니다. 런타임과 편집기 리소스가 포함되므로 별도 Node.js나 WebView 설치가 필요 없습니다. EXE만 분리하지 마세요.
+Windows 11 Intel·AMD x64용 개인 사용 버전입니다. [최신 0.3.7 포터블 ZIP 다운로드](https://github.com/biglol10/MyVibeCoding/releases/download/mymarkdownviewer-2026-09-14/MyMarkdownViewer-0.3.7-Windows-x64.zip) 후 전체 압축을 풀고 `MyMarkdownViewer.exe`를 실행합니다. 런타임과 편집기 리소스가 포함되므로 별도 Node.js나 WebView 설치가 필요 없습니다. EXE만 분리하지 마세요.
 
 ## 구현 범위
 
@@ -58,3 +58,11 @@ Electron renderer의 Node 실행은 꺼져 있으며 sandbox와 contextIsolation
 ## 0.3.5 코드 언어 표시
 
 코드 상자 오른쪽 위의 언어 표시를 눌러 언어와 구문 색상을 바꿀 수 있습니다. 코드 본문과 부가 정보는 보존되며 실행 취소할 수 있습니다. 클릭 시 코드 상자가 위로 이동하던 간격 변화도 수정했습니다. [검증 범위](../docs/Code-Language-Verification-2026-09-13.md)를 확인하세요.
+
+## 0.3.6 코드 커서 위치 수정
+
+커서가 코드 앞·본문·끝 줄로 이동해도 언어 헤더가 상자 테두리와 겹치거나 안쪽 여백이 사라지지 않습니다. 시작·끝 표시 줄의 키보드 이동과 빈 코드 블록을 함께 보완했습니다. [검증 범위](../docs/Code-Cursor-Layout-Verification-2026-09-13.md)를 확인하세요.
+
+## 0.3.7 현재 문서 찾기
+
+파일 탭 상단의 과녁 모양 **현재 문서 찾기** 버튼으로 상위 폴더를 펼치고 현재 문서를 선택해 목록에 표시합니다. 본문 위치·선택 범위·미저장 내용을 유지하며 예약된 자동 저장을 방해하지 않습니다.
