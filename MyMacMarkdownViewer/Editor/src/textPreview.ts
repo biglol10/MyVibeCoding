@@ -9,6 +9,7 @@ type Inline = { from: number; to: number; kind: string; marks: { from: number; t
 type Heading = { from: number; to: number; level: number; marks: { from: number; to: number }[] };
 type Plan = { items: Item[]; inlines: Inline[]; headings: Heading[] };
 const plans = new WeakMap<Block, Plan | null>();
+const linkModifier = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform) ? '⌘' : 'Ctrl';
 
 function planFor(block: Block): Plan | null {
   if (plans.has(block)) return plans.get(block)!;
@@ -182,7 +183,7 @@ export function decorateTextBlock(state: EditorState, block: Block, ranges: Rang
     const active = touches(state, inline.from, inline.to);
     const classes: Record<string,string> = { StrongEmphasis: 'md-strong', Emphasis: 'md-emphasis', Strikethrough: 'md-strike', InlineCode: 'md-code', Link: 'md-link' };
     if (inline.kind === 'Link' && inline.labelTo != null && inline.href) {
-      ranges.push(Decoration.mark({ class: 'md-link', attributes: { 'data-href': inline.href, title: '⌘클릭하여 링크 열기' } }).range(inline.from + 1, inline.labelTo));
+      ranges.push(Decoration.mark({ class: 'md-link', attributes: { 'data-href': inline.href, title: `클릭하여 편집 · ${linkModifier}클릭하여 링크 열기` } }).range(inline.from + 1, inline.labelTo));
       if (!active) {
         ranges.push(Decoration.replace({}).range(inline.from, inline.from + 1));
         ranges.push(Decoration.replace({}).range(inline.labelTo, inline.to));

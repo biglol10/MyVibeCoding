@@ -47,4 +47,4 @@ Android Gradle lint는 오류 0, 경고 8이다. 버전 갱신 권고, target AP
 
 Mac 0.2.2(5), Windows 0.2.2, Android1.1.2(5)를 다시 빌드했다. Mac 설치본은 이전 버전을 백업하고 교체했다. 사용자 문서·설정은 보존했다. 실기기 설치, 메일, 푸시, 병합은 수행하지 않았다.
 
-상세 산출물 해시: [full-audit-release.json](full-audit-release.json).
+상세 산출물 해시: [full-audit-release.json](full-audit-release.json). 새 예방 규칙은 `.codex/lessons.md`에 기록했다.

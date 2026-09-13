@@ -4,9 +4,9 @@ import { defaultKeymap, history, historyKeymap, undo, redo, indentWithTab } from
 import { search, searchKeymap, openSearchPanel } from '@codemirror/search';
 import { markdown, markdownKeymap } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
-import { syntaxHighlighting, defaultHighlightStyle, bracketMatching } from '@codemirror/language';
+import { syntaxHighlighting, HighlightStyle, bracketMatching } from '@codemirror/language';
 import { GFM } from '@lezer/markdown';
-import { classHighlighter } from '@lezer/highlight';
+import { classHighlighter, tags } from '@lezer/highlight';
 import { clearTableComposition, isTableComposing, livePreview, previewOptions, setSourceMode, setComposition, updateSettings } from './livePreview';
 import { outlineFor, rebaseMarkdown } from './markdown';
 import { post, session, setSession, defaultSettings, accepts, type Settings } from './protocol';
@@ -24,6 +24,21 @@ let metadataTimer: ReturnType<typeof setTimeout>;
 const readOnly = new Compartment();
 const theme = new Compartment();
 const welcome = `# 조용한 문서 공간\n\n긴 글을 편하게 읽고, 필요한 부분만 자연스럽게 고쳐 보세요.\n\n문서나 폴더를 열어 시작할 수 있습니다. **현재 블록**에서는 Markdown 원문이 보입니다.\n\n## 읽기와 편집\n\n- 왼쪽 사이드바에서 파일과 목차를 전환합니다.\n- **⌘P**로 파일을 빠르게 찾고 **⌘F**로 문서 안을 검색합니다.\n- **⌘⇧M**으로 원문 모드를 전환합니다.\n\n> 기본 테마는 다크 모드입니다. 설정에서 글꼴과 읽기 폭을 조절할 수 있습니다.\n`;
+
+// Keep CodeMirror's semantic tags through live editing and source mode. CSS
+// variables make the values theme-aware without the stock blue URL fallback.
+const semanticHighlightStyle = HighlightStyle.define([
+  { tag: [tags.keyword, tags.atom, tags.bool, tags.null, tags.modifier, tags.operatorKeyword, tags.controlKeyword, tags.definitionKeyword, tags.moduleKeyword], color: 'var(--syntax-keyword)' },
+  { tag: [tags.string, tags.docString, tags.character, tags.regexp, tags.escape, tags.special(tags.string)], color: 'var(--syntax-string)' },
+  { tag: [tags.number, tags.integer, tags.float, tags.literal], color: 'var(--syntax-number)' },
+  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName), tags.typeName, tags.className, tags.namespace, tags.propertyName], color: 'var(--syntax-function)' },
+  { tag: [tags.comment, tags.lineComment, tags.blockComment, tags.docComment, tags.meta], color: 'var(--syntax-comment)' },
+  { tag: [tags.variableName, tags.special(tags.variableName), tags.operator, tags.punctuation], color: 'var(--syntax-parameter)' },
+  { tag: [tags.url, tags.link], color: 'var(--accent)' },
+  { tag: tags.strong, fontWeight: '650' },
+  { tag: tags.emphasis, fontStyle: 'italic' },
+  { tag: tags.monospace, fontFamily: 'var(--code-font-family)' },
+]);
 
 function emitMetadata() {
   clearTimeout(metadataTimer);
@@ -109,7 +124,10 @@ function makeState(text: string, anchor = 0, head = anchor) {
     }),
     history(), drawSelection(), dropCursor(), bracketMatching(),
     markdown({ codeLanguages: languages, extensions: GFM }),
-    syntaxHighlighting(defaultHighlightStyle), syntaxHighlighting(classHighlighter),
+    // Code colors are supplied by our semantic token classes in style.css. The
+    // stock highlighter assigns an opaque blue URL color in active Markdown,
+    // which conflicts with every application theme.
+    syntaxHighlighting(semanticHighlightStyle), syntaxHighlighting(classHighlighter),
     search({ top: true }), readOnly.of(EditorState.readOnly.of(false)),
     theme.of(EditorView.theme({}, { dark: settings.theme !== 'light' })),
     previewOptions, livePreview, highlightActiveLine(), EditorView.lineWrapping,

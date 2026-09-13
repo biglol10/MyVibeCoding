@@ -1,8 +1,8 @@
 # 코드·다이어그램 표시 검증
 
-검증일: 2026-09-12. 통합 편집기와 각 플랫폼의 표시 동작을 직접 검증하고 변경분을 재검토했다.
+검증일: 2026-09-12. 아래 검증은 변경 사항을 재검토한 뒤 직접 실행했다.
 
-후속 설치: Mac 0.3.3 (9)를 설치하고 마지막 문서·폴더·Night 화면·목록 스크롤을 확인했다. 아래 설치 미수행 항목은 최초 구현 검증 당시의 범위다. 최신 설치 결과는 `code-preview-installation.json`을 따른다.
+후속 설치: Mac 0.3.3 (9) 설치본의 문서·폴더·Night 화면·목록 스크롤을 확인했다. 아래 설치 미수행 항목은 최초 구현 검증 당시의 범위다.
 
 ## 변경된 동작
 
@@ -42,6 +42,6 @@
 - 목록·인용문 안의 복잡한 중첩 Mermaid를 독립된 편집 가능 그림으로 만드는 기능은 이번 범위에 포함되지 않는다.
 - 이번 수정은 소스와 QA 빌드에 적용했다. `/Applications/MyMarkdownViewer.app`의 기존 0.3.2 (8)은 교체하지 않았다.
 - 이번에 실행한 Mac QA 앱과 임시 미리보기 서버는 종료했다. 사용자 설치 앱은 유지했다.
-- `.codex/lessons.md`에 표시·편집 상태, 응답별 집계 기준, 단독 파일 저장 권한과 검증 보완을 기록했다.
+- `.codex/lessons.md`에 표시·편집 상태, 단독 파일 저장 권한과 검증 보완을 기록했다.
 
 Foundation 교체 위치의 근거: [Apple FileManager.itemReplacementDirectory](https://developer.apple.com/documentation/Foundation/FileManager/SearchPathDirectory/itemReplacementDirectory).

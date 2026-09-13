@@ -25,7 +25,7 @@
     "version": "0.2.2",
     "build": "5",
     "installed": "/Applications/MyMarkdownViewer.app",
-    "backup": "$HOME/Desktop/practice/MyMacMarkdownViewer/build/installed-backups/MyMarkdownViewer-0.2.1-20260912-132027.app",
+    "backup": "$HOME/MyMacMarkdownViewer/build/installed-backups/MyMarkdownViewer-0.2.1-20260912-132027.app",
     "sourceMatch": true,
     "signatureVerified": true,
     "launchVerified": true,

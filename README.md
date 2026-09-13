@@ -15,6 +15,8 @@
 | MyMacMarkdownViewer | Mac·Windows용 Markdown 편집기와 Android 읽기 전용 리더 | [MyMacMarkdownViewer](./MyMacMarkdownViewer) | [Mac 0.3.3 ZIP](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacMarkdownViewer/MyMarkdownViewer-0.3.3-macOS.zip), [Android 1.2.1 APK](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacMarkdownViewer/MarkdownReader-1.2.1-Android.apk) |
 | FlowPilot_mac | SwiftUI 네이티브 macOS 활동 추적, 브라우저 도메인 수집, 메뉴바 일시정지/재개, 기존 Tauri/Windows 소스 포함 | [FlowPilot_mac](./FlowPilot_mac) | [Swift Native zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.zip), [Swift Native DMG](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.dmg) |
 
+MyMacMarkdownViewer의 최신 소스에는 2026-09-13 가독성 개선이 반영되어 있습니다. 위 다운로드는 각각 Mac 0.3.3과 Android 1.2.1 빌드이며, 이번 소스 변경은 아직 새 설치 패키지로 배포하지 않았습니다.
+
 ## 클론
 
 ```bash

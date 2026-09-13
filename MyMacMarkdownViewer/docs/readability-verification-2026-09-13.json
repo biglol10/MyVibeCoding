@@ -1,0 +1,34 @@
+{
+  "shared_editor_files_verified": 235,
+  "asset_mismatches": [],
+  "native_edit_saved": true,
+  "native_undo_save_restored_sha256": "63ce43804a387ba754d9f7cc705e623fe12d53a5258aa2e8c86a1ae050753837",
+  "native_GUI_checked": [
+    "Night theme through native settings",
+    "link click exposes readable wrapped URL",
+    "code preview/edit semantic colors and blank lines",
+    "keyboard/paste code edit then Save",
+    "Undo then Save restores original bytes"
+  ],
+  "qa_app_running": false,
+  "verification_environment": {
+    "macOS": "26.6.2",
+    "architecture": "arm64"
+  },
+  "source_sha256": {
+    "Editor/src/main.ts": "659ccb57ae4b209eac68e6f746605565f6e39216652851d569e0665466a85a0e",
+    "Editor/src/style.css": "8143358e155d6d064d8e6de0399cc4d860dbf096a609385b617c0d34b6bf8f5f",
+    "Editor/src/render.ts": "5fe2ab7a696eaf13a11239ce61036e887cd50caf15b692966932258b6559651d",
+    "Editor/src/textPreview.ts": "fae81b5aaa46e9161e0f0fa93201fddf50e82b604faf749ef31b8fbf36be5a85",
+    "Android/reader/reader.css": "8c72594944a414d2f4772ef1cbb6147c46b11f0441b7e7e962d59c0325617f45"
+  },
+  "results": {
+    "unit_tests": 16,
+    "webkit_browser_tests": 65,
+    "chromium_browser_tests": 65,
+    "android_reader_suites": 5,
+    "electron_host_readability": true,
+    "electron_code_diagram_edit_undo_save": true,
+    "native_universal_build_and_signature": true
+  }
+}

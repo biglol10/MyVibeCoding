@@ -10,3 +10,24 @@
 /* Keep navigation results visible on short landscape screens. The toolbar
    still provides navigation close, and the app footer retains read-only status. */
 @media(max-height:500px){.sidebar-heading,.sidebar-foot{display:none}.open-actions{padding:4px 12px}.tabs{padding:0 20px}#sidebar section{padding-top:4px;padding-bottom:12px}}
+
+/* Reading contrast and code sizing: retain the user's text-size setting while
+   keeping dense content legible at the smallest setting. */
+html{--link:#bddcff;--code-keyword:#cbb1e9;--code-string:#b2c798;--code-number:#dcba85;--code-function:#bad6f2;--code-comment:#b1b8bf;--code-foreground:#dee1e5;--code-addition:#9bd2a5;--code-deletion:#f0aaa5}
+html[data-theme=dark]{--link:#9bc5ff;--code-keyword:#c3a1df;--code-function:#9bbce1;--code-comment:#a4afa8;--code-foreground:#d9dce1;--code-addition:#82c68f;--code-deletion:#e58f8f}
+html[data-theme=light]{--link:#315f92;--code-keyword:#8653a2;--code-string:#557338;--code-number:#8a5c21;--code-function:#376897;--code-comment:#626c65;--code-foreground:#282b30;--code-addition:#326b3c;--code-deletion:#963f3f}
+#document a{color:var(--link);text-decoration-thickness:.08em;text-underline-offset:.17em;overflow-wrap:anywhere;word-break:break-word}
+#document a:visited{color:var(--link)}
+#document code{font-size:max(15px,.95em)}
+#document pre{font-size:max(15px,.95em);overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+#document table{font-size:max(15px,.9em)}
+#document pre code{font-size:inherit}
+.hljs-keyword,.hljs-literal,.hljs-doctag,.hljs-meta .hljs-keyword{color:var(--code-keyword)}
+.hljs-string,.hljs-attribute,.hljs-regexp,.hljs-meta .hljs-string{color:var(--code-string)}
+.hljs-number,.hljs-bullet{color:var(--code-number)}
+html[data-theme=light] .hljs-number{color:var(--code-number)}
+.hljs-title,.hljs-title.function_,.hljs-title.class_,.hljs-built_in,.hljs-type,.hljs-attr,.hljs-selector-tag,.hljs-selector-class,.hljs-selector-id,.hljs-section,.hljs-symbol{color:var(--code-function)}
+.hljs-comment,.hljs-quote{color:var(--code-comment)}
+.hljs-params,.hljs-variable,.hljs-template-variable,.hljs-subst,.hljs-punctuation,.hljs-operator,.hljs-property,.hljs-tag{color:var(--code-foreground)}
+.hljs-addition{color:var(--code-addition)}.hljs-deletion{color:var(--code-deletion)}
+mark{background:#e6c95f;color:#282b30}mark.current-match{background:#f0b93f;color:#24211a;outline:2px solid currentColor;outline-offset:1px}

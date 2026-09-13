@@ -35,23 +35,5 @@
     "Exact Samsung device/provider cause not reproduced on user device",
     "Download root selection restriction belongs to Android; select a child folder",
     "Existing personal APK signing certificate retained"
-  ],
-  "delivery": {
-    "recipient": "nba2005kings@naver.com",
-    "status": "sent and received attachment verified",
-    "earlierBodyOnlySelfMail": {
-      "messageId": "50911",
-      "time": "10:32",
-      "attachment": false
-    },
-    "time": "2026-09-12 10:36 KST",
-    "messageId": "50913",
-    "subject": "Markdown Reader 1.1.1 APK 첨부 — 폴더 표시 수정 · Night",
-    "attachment": "MarkdownReader-1.1.1-Android.apk",
-    "recipientVerified": true,
-    "mailFoldersVerified": [
-      "받은메일함",
-      "보낸메일함"
-    ]
-  }
+  ]
 }

@@ -31,4 +31,13 @@ export async function closeElectron(app) {
     console.error('[qa] Playwright close timed out; cleaning up owned Electron process', owned?.pid);
     owned?.kill('SIGKILL');
   }
+  // Closing the automation connection can finish before the OS reaps the
+  // process. Wait for this owned child, not a process-name-wide shutdown.
+  const waitForExit = () => !owned || owned.exitCode !== null || owned.signalCode !== null
+    ? Promise.resolve()
+    : new Promise(resolve => owned.once('exit', resolve));
+  if (!await bounded(waitForExit())) {
+    owned?.kill('SIGKILL');
+    if (!await bounded(waitForExit())) throw new Error(`QA Electron process ${owned?.pid} did not exit`);
+  }
 }
