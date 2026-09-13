@@ -1,6 +1,6 @@
 # MyMarkdownViewer Windows
 
-Windows 11 Intel·AMD x64용 개인 사용 버전입니다. `dist/windows/MyMarkdownViewer-0.3.3-Windows-x64.zip` 전체를 압축 해제하고 `MyMarkdownViewer.exe`를 실행합니다. 런타임과 편집기 리소스가 포함되므로 별도 Node.js나 WebView 설치가 필요 없습니다. EXE만 분리하지 마세요.
+Windows 11 Intel·AMD x64용 개인 사용 버전입니다. [최신 0.3.5 포터블 ZIP 다운로드](https://github.com/biglol10/MyVibeCoding/releases/download/mymarkdownviewer-2026-09-13/MyMarkdownViewer-0.3.5-Windows-x64.zip) 후 전체 압축을 풀고 `MyMarkdownViewer.exe`를 실행합니다. 런타임과 편집기 리소스가 포함되므로 별도 Node.js나 WebView 설치가 필요 없습니다. EXE만 분리하지 마세요.
 
 ## 구현 범위
 
@@ -50,3 +50,11 @@ Electron renderer의 Node 실행은 꺼져 있으며 sandbox와 contextIsolation
 ## 0.3.1 이어 읽기
 
 일반 실행 시 마지막 문서·읽던 위치·열어 둔 폴더를 복원합니다. 파일을 지정해 실행하면 지정한 파일을 우선합니다. 파일이 없으면 안내하며 폴더는 독립적으로 복원합니다. 편집기 시작 신호를 놓치지 않도록 화면 초기화 순서도 수정했습니다.
+
+## 0.3.4 가독성 개선
+
+읽기·클릭·편집 상태에서 코드 글자 크기와 줄 높이를 맞추고, Night 테마의 활성 링크 주소와 코드 구문 색상 대비를 보완했습니다. 빈 코드 줄도 클릭 상태에서 높이를 유지합니다. [가독성 검토](../docs/Readability-Review-2026-09-13.md)와 Windows 패키지 검증 기록을 확인하세요.
+
+## 0.3.5 코드 언어 표시
+
+코드 상자 오른쪽 위의 언어 표시를 눌러 언어와 구문 색상을 바꿀 수 있습니다. 코드 본문과 부가 정보는 보존되며 실행 취소할 수 있습니다. 클릭 시 코드 상자가 위로 이동하던 간격 변화도 수정했습니다. [검증 범위](../docs/Code-Language-Verification-2026-09-13.md)를 확인하세요.

@@ -273,7 +273,7 @@ export async function renderStandaloneHTML(source: string, settings: Settings, e
     }
   } else {
     for (const block of blocksFor(body)) {
-      const isMermaid = /^\s*(`{3,}|~{3,})mermaid(?:\s|$)/i.test(block.source);
+      const isMermaid = /^\s*(`{3,}|~{3,})[\t ]*mermaid(?:\s|$)/i.test(block.source);
       const element = isMermaid ? document.createElement('div') : renderBlock(block.source, safeSettings, context, block.from);
       if (isMermaid) await renderStandaloneDiagram(element, block.source, 'light');
       root.append(element);
@@ -298,7 +298,7 @@ let mermaidPromise: Promise<typeof import('mermaid')> | undefined;
 let queue = Promise.resolve();
 let diagramID = 0;
 export function renderDiagram(element: HTMLElement, source: string, theme: string, isCurrent: () => boolean, measured: () => void) {
-  const sourceCode = source.replace(/^\s*(`{3,}|~{3,})mermaid[^\n]*\n/i, '').replace(/\n\s*(`{3,}|~{3,})\s*$/, '');
+  const sourceCode = source.replace(/^\s*(`{3,}|~{3,})[\t ]*mermaid[^\n]*\n/i, '').replace(/\n\s*(`{3,}|~{3,})\s*$/, '');
   element.classList.add('diagram-block');
   element.textContent = '다이어그램 불러오는 중…';
   queue = queue.then(async () => {
@@ -323,7 +323,7 @@ export function renderDiagram(element: HTMLElement, source: string, theme: strin
 }
 
 async function renderStandaloneDiagram(element: HTMLElement, source: string, theme: string) {
-  const sourceCode = source.replace(/^\s*(`{3,}|~{3,})mermaid[^\n]*\n/i, '').replace(/\n\s*(`{3,}|~{3,})\s*$/, '');
+  const sourceCode = source.replace(/^\s*(`{3,}|~{3,})[\t ]*mermaid[^\n]*\n/i, '').replace(/\n\s*(`{3,}|~{3,})\s*$/, '');
   await (queue = queue.then(async () => {
     try {
       if (sourceCode.length > 50000) throw new Error('다이어그램이 너무 커 원문으로 표시합니다.');

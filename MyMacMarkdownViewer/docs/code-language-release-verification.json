@@ -1,0 +1,42 @@
+{
+  "passed": true,
+  "date": "2026-09-13",
+  "environment": "macOS 26.6.2 arm64; native WKWebView and Electron 44.3.0; browser WebKit/Chromium",
+  "editorUnitTests": 20,
+  "webkitTests": 73,
+  "chromiumTests": 73,
+  "windowsUnitTests": 22,
+  "nativeMac": "docs/code-language-mac-verification.json",
+  "windows": "docs/code-language-windows-verification.json",
+  "android": "docs/code-language-android-verification.json",
+  "androidBrowserSuites": [
+    "code language",
+    "reader",
+    "readability",
+    "session",
+    "navigation"
+  ],
+  "sharedEditorAssetsCompared": 235,
+  "releases": [
+    {
+      "file": "dist/MyMarkdownViewer-0.3.4-macOS.zip",
+      "bytes": 6750753,
+      "sha256": "f646125d55a52ce756f3178ccb76a9f60b739086129a7f5cc3aece7b253f53a4"
+    },
+    {
+      "file": "dist/windows/MyMarkdownViewer-0.3.5-Windows-x64.zip",
+      "bytes": 161297544,
+      "sha256": "175fdd3e896c79c076c05aa28d3fb6ce6c3e3d61f95af16e79461f80df4acb6c"
+    },
+    {
+      "file": "dist/android/MarkdownReader-1.2.3-Android.apk",
+      "bytes": 3740297,
+      "sha256": "ae7208a7d109f32ba869a0acf224dfed1b83b41e2b734d94f7a1e792e8d001da"
+    }
+  ],
+  "installedMacVersion": "0.3.3 (9)",
+  "newMacInstalled": false,
+  "actualWindowsOSVerified": false,
+  "actualAndroidDeviceVerified": false,
+  "longCodeSoftWrapping": "Code editing keeps the top edge; wrapping long lines may naturally increase the bottom height."
+}

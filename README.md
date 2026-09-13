@@ -12,7 +12,7 @@
 | MyMacSearch | 자체 SQLite FTS5 인덱스와 FSEvents 변경 감지로 파일명·경로·메타데이터를 빠르게 찾는 읽기 전용 SwiftUI 검색 도구 | [MyMacSearch](./MyMacSearch) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacSearch/MyMacSearch-personal-mac.zip) |
 | MyMacStats | CPU, RAM, Disk I/O, Network, Battery, Processes 상태, refresh 설정 저장, RAM 알림을 보여주는 SwiftUI 시스템 모니터 | [MyMacStats](./MyMacStats) | [MyMacStats-test-build.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacStats/MyMacStats-test-build.zip) |
 | MyMacCalendar | 로컬 우선 일정 관리, 반복 일정, 검색, 알림, 빠른 추가 확인, 자동 휴일 가져오기, 메뉴바/플로팅 위젯 복구를 제공하는 SwiftUI 캘린더 | [MyMacCalendar](./MyMacCalendar) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacCalendar/MyMacCalendar-personal-mac.zip) |
-| MyMacMarkdownViewer | Mac·Windows용 Markdown 편집기와 Android 읽기 전용 리더 | [MyMacMarkdownViewer](./MyMacMarkdownViewer) | [Mac 0.3.3 ZIP](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacMarkdownViewer/MyMarkdownViewer-0.3.3-macOS.zip), [Android 1.2.1 APK](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacMarkdownViewer/MarkdownReader-1.2.1-Android.apk) |
+| MyMacMarkdownViewer | Mac·Windows용 Markdown 편집기와 Android 읽기 전용 리더 | [MyMacMarkdownViewer](./MyMacMarkdownViewer) | [Mac 0.3.4 ZIP](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacMarkdownViewer/MyMarkdownViewer-0.3.4-macOS.zip), [Windows 0.3.5 ZIP](https://github.com/biglol10/MyVibeCoding/releases/download/mymarkdownviewer-2026-09-13/MyMarkdownViewer-0.3.5-Windows-x64.zip), [Android 1.2.3 APK](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacMarkdownViewer/MarkdownReader-1.2.3-Android.apk) |
 | FlowPilot_mac | SwiftUI 네이티브 macOS 활동 추적, 브라우저 도메인 수집, 메뉴바 일시정지/재개, 기존 Tauri/Windows 소스 포함 | [FlowPilot_mac](./FlowPilot_mac) | [Swift Native zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.zip), [Swift Native DMG](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.dmg) |
 
 MyMacMarkdownViewer의 최신 소스에는 2026-09-13 가독성 개선이 반영되어 있습니다. 위 다운로드는 각각 Mac 0.3.3과 Android 1.2.1 빌드이며, 이번 소스 변경은 아직 새 설치 패키지로 배포하지 않았습니다.
@@ -123,7 +123,7 @@ npm run tauri -- dev
 
 ## 다운로드 파일 관리
 
-다운로드 파일은 `downloads/` 아래에 함께 커밋합니다. 새 빌드를 만들면 같은 파일명으로 교체한 뒤 커밋/푸시하면 README의 GitHub raw 링크가 그대로 최신 파일을 가리킵니다.
+다운로드 파일은 `downloads/` 아래에 함께 커밋합니다. 새 빌드를 만들면 같은 파일명으로 교체한 뒤 커밋/푸시하면 README의 GitHub raw 링크가 그대로 최신 파일을 가리킵니다. GitHub가 일반 저장소에서 100 MiB를 넘는 파일을 차단하므로 MyMacMarkdownViewer Windows ZIP은 GitHub Release 자산으로 제공합니다.
 
 macOS 앱을 다른 Mac에서 앱 더블클릭만으로 실행할 수 있게 공개 배포하려면 Apple Developer ID 서명과 notarization이 필요합니다. 개인 Mac에 설치하는 용도라면 각 앱 zip에 포함된 설치 스크립트를 사용하세요.
 
@@ -133,7 +133,7 @@ macOS 앱을 다른 Mac에서 앱 더블클릭만으로 실행할 수 있게 공
 - MyMacSearch 개인용 zip: `MyMacSearch/scripts/package-personal.sh`
 - MyMacStats 개인용 zip: `MyMacStats/scripts/build-app-bundle.sh --deploy-personal`
 - MyMacCalendar 개인용 zip: `MyMacCalendar/scripts/package_personal.sh`
-- MyMacMarkdownViewer Mac Universal 0.3.3 ZIP: `MyMacMarkdownViewer/scripts/build.sh`
-- MyMacMarkdownViewer Android 1.2.1 개인 APK: `MyMacMarkdownViewer/Android/scripts/package-apk.py`
-- Windows x64 소스·패키징 안내는 `MyMacMarkdownViewer/Windows`에 포함됩니다. 154 MB 포터블 ZIP은 저장소 다운로드 파일에 포함하지 않습니다.
+- MyMacMarkdownViewer Mac Universal 0.3.4 ZIP: `MyMacMarkdownViewer/scripts/build.sh`
+- MyMacMarkdownViewer Windows 0.3.5 포터블 ZIP: [GitHub Release](https://github.com/biglol10/MyVibeCoding/releases/download/mymarkdownviewer-2026-09-13/MyMarkdownViewer-0.3.5-Windows-x64.zip)
+- MyMacMarkdownViewer Android 1.2.3 개인 APK: `MyMacMarkdownViewer/Android/scripts/package-apk.py`
 - FlowPilot Swift Native 개인용 zip/DMG: `FlowPilot_mac`에서 `npm run package:macos:native`, `npm run package:macos:native:dmg`

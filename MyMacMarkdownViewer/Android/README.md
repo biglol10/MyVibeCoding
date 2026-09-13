@@ -36,7 +36,7 @@ cd Android
 python3 Android/scripts/package-apk.py
 ```
 
-현재 배포 파일은 `dist/android/MarkdownReader-1.2.1-Android.apk`입니다. 새 빌드 파일명은 앱 버전을 따릅니다. 개인 서명 자료 `~/.local/share/mymarkdownreader-signing`이 있어야 업데이트 가능한 동일 서명이 유지됩니다. 이 폴더의 비밀 내용은 공개하거나 저장소에 추가하지 마세요.
+현재 배포 파일은 [Android 1.2.3 APK 다운로드](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacMarkdownViewer/MarkdownReader-1.2.3-Android.apk)입니다. 새 빌드 파일명은 앱 버전을 따릅니다. 개인 서명 자료 `~/.local/share/mymarkdownreader-signing`이 있어야 업데이트 가능한 동일 서명이 유지됩니다. 이 폴더의 비밀 내용은 공개하거나 저장소에 추가하지 마세요.
 
 ## 구조와 브리지
 
@@ -53,3 +53,11 @@ python3 Android/scripts/package-apk.py
 ## 1.2.1 이어 읽기
 
 마지막 문서·읽던 위치·탐색 폴더를 복원합니다. 화면 회전·테마 변경 후에도 읽기 비율을 유지합니다. 문서 접근 폴더와 탐색 폴더를 구분하고, 만료되거나 잘못된 폴더 정보가 읽을 수 있는 문서의 복원을 막지 않도록 했습니다.
+
+## 1.2.2 읽기 가독성
+
+코드·인라인 코드·표의 최소 글자 크기, 문법 색상과 검색 강조 대비를 개선했습니다. 이 글자 크기는 본문 글자 크기 설정과 함께 확대됩니다.
+
+## 1.2.3 코드 언어 표시
+
+코드 상자와 Mermaid 위에 언어 이름을 표시합니다. 언어가 없으면 ‘텍스트’로 표시하며, 표시를 눌러도 원문은 바뀌지 않습니다. 읽기 전용 앱에는 언어 변경 기능이 없습니다. [검증 범위](../docs/Code-Language-Verification-2026-09-13.md)를 확인하세요.

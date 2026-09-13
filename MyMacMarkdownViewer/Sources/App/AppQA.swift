@@ -15,6 +15,10 @@ enum AppQA {
         let allowedRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("MyMarkdownViewer/QA", isDirectory: true).standardizedFileURL
         guard root.path == allowedRoot.path || root.path.hasPrefix(allowedRoot.path + "/") else { return }
+        if args.contains("--qa-code-language") {
+            await codeLanguageChecks(model: model, web: web, root: root)
+            return
+        }
         let activity = ProcessInfo.processInfo.beginActivity(options: .userInitiated, reason: "MyMarkdownViewer installation verification")
         defer { ProcessInfo.processInfo.endActivity(activity) }
         var report: [String: Any] = ["platform": "WKWebView", "realIMEVerified": false]
@@ -135,6 +139,61 @@ enum AppQA {
             report["completed"] = false
         }
         if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) { try? data.write(to: root.appendingPathComponent("app-qa.json"), options: .atomic) }
+    }
+
+    private static func codeLanguageChecks(model: AppModel, web: WKWebView, root: URL) async {
+        var report: [String: Any] = ["platform": "native macOS WKWebView", "physicalIMEVerified": false]
+        let previous = model.settings
+        defer { model.settings = previous }
+        do {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            let file = root.appendingPathComponent("code-language.md")
+            let source = "# 코드 언어\n\n~~~py  title=\"Example\"\nvalue = \"한글 보존\"\nprint(value)\n~~~\n\n뒤 문단\n"
+            func encoded(_ text: String) -> Data { Data([0xEF, 0xBB, 0xBF]) + Data(text.replacingOccurrences(of: "\n", with: "\r\n").utf8) }
+            try encoded(source).write(to: file, options: .atomic)
+            model.settings.theme = .night
+            model.settings.autosave = false
+            try await model.resetQAFixture(file)
+            _ = try await model.bridge.snapshot()
+            try await Task.sleep(for: .milliseconds(500))
+            let selected = try await web.callAsyncJavaScript("""
+                const select = document.querySelector('select[aria-label="코드 언어"]');
+                if (!select) throw new Error('Missing language selector');
+                select.value = 'javascript'; select.dispatchEvent(new Event('change', {bubbles:true}));
+                await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                return window.MarkdownHost.snapshot().text;
+                """, arguments: [:], in: nil, contentWorld: .page) as? String
+            let changed = source.replacingOccurrences(of: "~~~py  title=", with: "~~~javascript  title=")
+            report["changedOnlyLanguage"] = selected == changed
+            let changedSaved = await model.save()
+            let changedBytes = try Data(contentsOf: file)
+            report["savedWithBOMAndCRLF"] = changedSaved && changedBytes == encoded(changed)
+            model.command("undo")
+            let undone = try await model.bridge.snapshot()["text"] as? String
+            let undoSaved = await model.save()
+            let undoneBytes = try Data(contentsOf: file)
+            report["undoAndSave"] = undone == source && undoSaved && undoneBytes == encoded(source)
+            model.command("redo")
+            let redone = try await model.bridge.snapshot()["text"] as? String
+            report["redo"] = redone == changed
+            try await Task.sleep(for: .milliseconds(250))
+            let image = try await web.takeSnapshot(configuration: nil)
+            if let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff), let png = bitmap.representation(using: .png, properties: [:]) {
+                try png.write(to: root.appendingPathComponent("code-language-night.png"))
+            }
+            model.command("undo")
+            _ = try await model.bridge.snapshot()
+            let restored = await model.save()
+            let restoredBytes = try Data(contentsOf: file)
+            report["restoredOriginalBytes"] = restored && restoredBytes == encoded(source)
+            report["passed"] = ["changedOnlyLanguage", "savedWithBOMAndCRLF", "undoAndSave", "redo", "restoredOriginalBytes"].allSatisfy { report[$0] as? Bool == true }
+        } catch {
+            report["passed"] = false
+            report["error"] = error.localizedDescription
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) {
+            try? data.write(to: root.appendingPathComponent("code-language.json"), options: .atomic)
+        }
     }
 
     private static func insert(_ text: String, model: AppModel) async throws {

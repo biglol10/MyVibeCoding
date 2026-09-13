@@ -31,3 +31,10 @@ html[data-theme=light] .hljs-number{color:var(--code-number)}
 .hljs-params,.hljs-variable,.hljs-template-variable,.hljs-subst,.hljs-punctuation,.hljs-operator,.hljs-property,.hljs-tag{color:var(--code-foreground)}
 .hljs-addition{color:var(--code-addition)}.hljs-deletion{color:var(--code-deletion)}
 mark{background:#e6c95f;color:#282b30}mark.current-match{background:#f0b93f;color:#24211a;outline:2px solid currentColor;outline-offset:1px}
+
+/* Code language labels stay outside the horizontally scrollable code surface. */
+.reader-code-frame{display:flow-root;max-width:100%;min-width:0}
+.reader-code-language{display:block;margin:0 2px 4px;text-align:right;color:var(--muted);font-size:12px;line-height:1.4;user-select:none;-webkit-user-select:none}
+.reader-code-frame>pre{margin-top:0}
+.reader-diagram-frame{margin:0 0 1.1em}
+.reader-diagram-frame>.rendered-block.diagram-block{margin:0}

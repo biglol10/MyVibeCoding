@@ -1,11 +1,13 @@
 import { StateEffect, StateField, EditorSelection, type EditorState, type Range, type Transaction } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType, type DecorationSet } from '@codemirror/view';
-import { TreeFragment, type Tree } from '@lezer/common';
+import { undo, redo } from '@codemirror/commands';
+import { TreeFragment, type SyntaxNode, type Tree } from '@lezer/common';
 import { blocksFor, markdownParser, type Block } from './markdown';
 import { documentRenderContext, needsDocumentContext, renderBlock, renderDiagram, type RenderContext } from './render';
 import { defaultSettings, post, session, type Settings } from './protocol';
 import { decorateTextBlock, toggleTaskAt } from './textPreview';
 import { escapeCellPipes, parseTable, serializeTable, withTableAlignment, withTableColumn, withTableRow } from './table';
+import { codeFenceInfo, codeLanguageLabel, codeLanguageOptions } from './codeLanguage';
 
 export const setSourceMode = StateEffect.define<boolean>();
 export const setComposition = StateEffect.define<boolean>();
@@ -31,7 +33,7 @@ export const previewOptions = StateField.define({
   },
 });
 
-function isMermaidBlock(block: Block) { return /^\s*(`{3,}|~{3,})mermaid(?:\s|$)/i.test(block.source); }
+function isMermaidBlock(block: Block) { return codeFenceInfo(block.source)?.language.toLowerCase() === 'mermaid'; }
 function isCodeBlock(block: Block) { return block.kind === 'FencedCode' || block.kind === 'CodeBlock'; }
 function sourceSelected(state: EditorState, block: Block) {
   return state.selection.ranges.some(range => range.empty ? range.from >= block.from && range.from < block.to : range.from < block.to && range.to > block.from);
@@ -61,6 +63,42 @@ function currentBlockForDOM(view: EditorView, dom: HTMLElement, fallbackFrom: nu
   }
 }
 
+function codeBlockAt(state: EditorState, position: number): Block | undefined {
+  const tree = state.field(livePreview).tree;
+  const bounded = Math.max(0, Math.min(state.doc.length, position));
+  // A header inside a list item's replacement maps to the outer List node in
+  // CodeMirror. Walk the syntax tree instead, so nested fences retain their
+  // actual source range and never rewrite the list or blockquote prefix.
+  for (const at of [bounded, Math.min(state.doc.length, bounded + 1)]) {
+    let node: SyntaxNode | null = tree.resolveInner(at, 1);
+    while (node) {
+      if (node.name === 'FencedCode' || node.name === 'CodeBlock') {
+        return { from: node.from, to: node.to, kind: node.name, source: state.sliceDoc(node.from, node.to), node };
+      }
+      node = node.parent;
+    }
+  }
+}
+
+function currentCodeBlockForDOM(view: EditorView, dom: HTMLElement, fallbackFrom: number) {
+  const preview = dom.closest<HTMLElement>('.preview-widget');
+  if (preview) {
+    const outer = currentBlockForDOM(view, preview, fallbackFrom);
+    if (outer) {
+      const candidates = isCodeBlock(outer) ? [outer] : nestedCodeBlocks(view.state, outer);
+      const headers = [...preview.querySelectorAll<HTMLElement>('[data-code-language]')];
+      const candidate = candidates[headers.indexOf(dom)];
+      if (candidate) return candidate;
+    }
+  }
+  try {
+    const found = codeBlockAt(view.state, view.posAtDOM(dom));
+    if (found) return found;
+  } catch { /* Widgets can map to their containing list or quote. */ }
+  return codeBlockAt(view.state, fallbackFrom)
+    ?? view.state.field(livePreview).blocks.find(block => block.from === fallbackFrom && isCodeBlock(block));
+}
+
 function codeContentBounds(state: EditorState, block: Block) {
   if (block.kind !== 'FencedCode') return { from: block.from, to: block.to };
   const first = state.doc.lineAt(block.from), last = state.doc.lineAt(Math.max(block.from, block.to - 1));
@@ -70,6 +108,13 @@ function codeContentBounds(state: EditorState, block: Block) {
   const marks = block.node?.getChildren('CodeMark') ?? [];
   const closed = marks.length > 1 && state.doc.lineAt(marks.at(-1)!.from).number === last.number;
   return { from: Math.min(block.to, first.to + 1), to: closed ? Math.max(first.to + 1, last.from - 1) : block.to };
+}
+
+function previewReplacementFrom(state: EditorState, block: Block) {
+  // A CodeBlock node starts after its four-space marker. Replacing from the
+  // physical line start prevents that marker from becoming a leftover empty
+  // display line before the reading widget.
+  return block.kind === 'CodeBlock' ? state.doc.lineAt(block.from).from : block.from;
 }
 
 function codeSourceLines(state: EditorState, block: Block, ranges: Range<Decoration>[], extraClass = '') {
@@ -82,9 +127,103 @@ function codeSourceLines(state: EditorState, block: Block, ranges: Range<Decorat
     // A keyboard cursor can intentionally reach a fence. Keep that one line
     // visible so it can be edited, while live clicks always target code text.
     const selectedFence = fence && state.selection.ranges.some(range => range.from >= line.from && range.from <= line.to);
-    const edge = number === first ? ' code-source-first' : number === last ? ' code-source-last' : '';
-    ranges.push(Decoration.line({ class: `code-source-line${edge}${fence && !selectedFence ? ' code-fence-line' : ''}${selectedFence ? ' code-fence-caret-line' : ''}${extraClass}` }).range(line.from));
+    const edge = `${number === first ? ' code-source-first' : ''}${number === last ? ' code-source-last' : ''}`;
+    const languageLine = fence && number === first;
+    ranges.push(Decoration.line({ class: `code-source-line${edge}${fence && !selectedFence ? ' code-fence-line' : ''}${languageLine ? ' code-language-line' : ''}${selectedFence ? ' code-fence-caret-line' : ''}${extraClass}` }).range(line.from));
+    if (languageLine) {
+      // Replacing the whole opening line leaves the document's fence and its
+      // optional trailing attributes untouched while exposing only the
+      // language picker in the live code header.
+      ranges.push(Decoration.replace({ widget: new CodeLanguageWidget(block.source, block.from, true) }).range(line.from, line.to));
+    }
   }
+  if (!fenced) {
+    // CodeBlock nodes begin after their four-space source marker, but line
+    // decorations begin at the physical line start. Put the block widget at
+    // that same start so it does not split the code line into an unstyled
+    // prefix and a separate body line.
+    ranges.push(Decoration.widget({ widget: new CodeLanguageWidget(block.source, block.from, true), block: true, side: -1 }).range(state.doc.lineAt(block.from).from));
+  }
+}
+
+function stopCodeLanguageEvent(event: Event) {
+  // Ordinary picker keys stay local and cannot type into the contenteditable
+  // document behind the control. Mod+Z is handled directly by the picker.
+  if (event instanceof KeyboardEvent && (event.metaKey || event.ctrlKey || event.altKey)) return;
+  event.stopPropagation();
+}
+
+function codeLanguageHeader(view: EditorView, source: string, fallbackFrom: number, sourceHeader: boolean) {
+  const info = codeFenceInfo(source);
+  const header = document.createElement('div');
+  header.className = `code-language-header${sourceHeader && !info ? ' code-language-source-header' : ''}`;
+  header.dataset.codeLanguage = ''; header.dataset.codeBlockFrom = String(fallbackFrom);
+  const label = codeLanguageLabel(info?.language ?? '');
+  if (!info) {
+    const staticLabel = document.createElement('span');
+    staticLabel.className = 'code-language-label'; staticLabel.textContent = label;
+    staticLabel.setAttribute('aria-label', '코드 언어'); header.append(staticLabel); return header;
+  }
+  const select = document.createElement('select');
+  select.className = 'code-language-select'; select.setAttribute('aria-label', '코드 언어');
+  select.disabled = view.state.readOnly;
+  // Aliases such as py and plaintext use their canonical option without
+  // rewriting source merely because the picker is opened. Unknown tokens get
+  // one visible option of their own so their spelling is preserved.
+  const selectedValue = codeLanguageOptions.find(option => option.label === label)?.value ?? info.language;
+  const options = codeLanguageOptions.some(option => option.value === selectedValue)
+    ? codeLanguageOptions : [{ value: info.language, label }, ...codeLanguageOptions];
+  for (const option of options) {
+    const element = document.createElement('option'); element.value = option.value; element.textContent = option.label;
+    if (option.value === selectedValue) element.selected = true;
+    select.append(element);
+  }
+  // A native select remains fully keyboard-operable, but its keys must not
+  // reach CodeMirror's contenteditable selection and insert source text.
+  select.addEventListener('keydown', event => {
+    if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'z') return;
+    event.preventDefault(); event.stopPropagation();
+    const current = currentCodeBlockForDOM(view, header, fallbackFrom);
+    (event.shiftKey ? redo : undo)(view);
+    const blockFrom = current?.from ?? fallbackFrom;
+    queueMicrotask(() => [...view.dom.querySelectorAll<HTMLElement>('[data-code-language]')]
+      .find(element => Number(element.dataset.codeBlockFrom) === blockFrom)
+      ?.querySelector<HTMLSelectElement>('.code-language-select')?.focus({ preventScroll: true }));
+  });
+  for (const event of ['mousedown', 'keydown', 'keyup', 'keypress', 'beforeinput']) select.addEventListener(event, stopCodeLanguageEvent);
+  select.addEventListener('change', event => {
+    event.stopPropagation();
+    if (view.state.readOnly || view.composing || view.state.field(previewOptions).composing) return;
+    const current = currentCodeBlockForDOM(view, header, fallbackFrom);
+    if (!current) return;
+    const currentInfo = codeFenceInfo(current.source);
+    if (!currentInfo) return;
+    const openingLineEnd = current.source.search(/\r?\n/);
+    const trailingInfo = current.source.slice(currentInfo.to, openingLineEnd < 0 ? current.source.length : openingLineEnd);
+    // Removing a language in front of fence attributes would turn the first
+    // attribute into a new language token. Keep an explicit text token only
+    // for that case; otherwise an empty language remains genuinely empty.
+    const nextLanguage = !select.value && /\S/.test(trailingInfo) ? 'text' : select.value;
+    if (currentInfo.language === nextLanguage) return;
+    view.dispatch({ changes: {
+      from: current.from + currentInfo.from,
+      to: current.from + currentInfo.to,
+      insert: nextLanguage,
+    }, userEvent: 'input.code-language' });
+    // Changing an option replaces its widget. Restore focus without changing
+    // the viewport so native keyboard selection can immediately undo/redo.
+    queueMicrotask(() => [...view.dom.querySelectorAll<HTMLElement>('[data-code-language]')]
+      .find(element => Number(element.dataset.codeBlockFrom) === current.from)
+      ?.querySelector<HTMLSelectElement>('.code-language-select')?.focus({ preventScroll: true }));
+  });
+  header.append(select); return header;
+}
+
+class CodeLanguageWidget extends WidgetType {
+  constructor(readonly source: string, readonly blockFrom: number, readonly sourceHeader: boolean) { super(); }
+  eq(other: CodeLanguageWidget) { return this.source === other.source && this.blockFrom === other.blockFrom && this.sourceHeader === other.sourceHeader; }
+  toDOM(view: EditorView) { return codeLanguageHeader(view, this.source, this.blockFrom, this.sourceHeader); }
+  ignoreEvent() { return true; }
 }
 
 function protectDiagramControl(button: HTMLButtonElement) {
@@ -134,9 +273,22 @@ class PreviewWidget extends WidgetType {
   eq(other: PreviewWidget) { return this.block.from === other.block.from && this.block.source === other.block.source && this.generation === other.generation && this.sessionID === other.sessionID && this.active === other.active && this.context === other.context; }
   toDOM(view: EditorView) {
     const isMermaid = isMermaidBlock(this.block);
-    const dom = isMermaid ? document.createElement('div') : renderBlock(this.block.source, this.settings, this.context, this.block.from);
+    // Lezer's CodeBlock range begins after the four-space marker. Restore it
+    // only for rendering so indented code keeps the same code surface without
+    // changing the document or its source offsets.
+    const renderSource = this.block.kind === 'CodeBlock'
+      ? this.block.source.split(/\r?\n/).map(line => `    ${line}`).join('\n') : this.block.source;
+    const dom = isMermaid ? document.createElement('div') : renderBlock(renderSource, this.settings, this.context, this.block.from);
     dom.classList.add('preview-widget'); if (this.active) dom.classList.add('focus-active'); dom.dataset.kind = this.block.kind;
     dom.setAttribute('aria-label', '클릭하여 이 블록 편집');
+    const visibleCodeBlocks = isCodeBlock(this.block) ? [this.block] : nestedCodeBlocks(view.state, this.block);
+    const codePreviews = [...dom.querySelectorAll('pre')];
+    visibleCodeBlocks.forEach((code, index) => {
+      const header = codeLanguageHeader(view, code.source, code.from, false);
+      const preview = codePreviews[index];
+      if (preview) preview.before(header);
+      else if (code === this.block) dom.prepend(header);
+    });
     if (isMermaid) {
       dom.append(diagramDOM(view, this.block.source, this.settings.theme, this.sessionID, this.generation, false, this.block.from));
       if (!view.state.readOnly) {
@@ -207,9 +359,12 @@ class PreviewWidget extends WidgetType {
       const lines = this.block.source.split('\n');
       const line = Math.min(lines.length - 1, Math.floor(fraction * lines.length));
       const offset = lines.slice(0, line).reduce((total, value) => total + value.length + 1, 0);
-      const selectionTarget = Math.min(view.state.doc.length, from + offset);
       const current = currentBlockForDOM(view, dom, this.block.from);
       const bounds = codeContentBounds(view.state, current ?? this.block);
+      // A block replacement can map its DOM back to the end of an indented
+      // CodeBlock. Its syntax range is the stable source anchor for clicks.
+      const selectionFrom = isCodeBlock(this.block) ? (current ?? this.block).from : from;
+      const selectionTarget = Math.min(view.state.doc.length, selectionFrom + offset);
       view.dispatch({ selection: EditorSelection.cursor(isCodeBlock(this.block) ? Math.max(bounds.from, Math.min(bounds.to, selectionTarget)) : selectionTarget), scrollIntoView: false });
       view.focus();
     });
@@ -394,7 +549,7 @@ function decorateBlock(state: EditorState, blocks: Block[], index: number, range
     // exposed as an editable-looking surface.
     if (state.readOnly && code && block.from < block.to) {
       const replacementEnd = blocks[index + 1] ? Math.max(block.to, end - 1) : block.to;
-      ranges.push(Decoration.replace({ widget: new PreviewWidget(block, options.settings, options.generation, session.sessionID, false, context), block: true, inclusive: false }).range(block.from, replacementEnd));
+      ranges.push(Decoration.replace({ widget: new PreviewWidget(block, options.settings, options.generation, session.sessionID, false, context), block: true, inclusive: false }).range(previewReplacementFrom(state, block), replacementEnd));
       return;
     }
     // Reference links and notes need the cached whole-document markdown-it
@@ -435,7 +590,7 @@ function decorateBlock(state: EditorState, blocks: Block[], index: number, range
     } else if (block.from < block.to) {
       // Keep one source line break between widgets so CodeMirror can virtualize separate block lines.
       const replacementEnd = blocks[index + 1] ? Math.max(block.to, end - 1) : block.to;
-      ranges.push(Decoration.replace({ widget: new PreviewWidget(block, options.settings, options.generation, session.sessionID, active, context), block: true, inclusive: false }).range(block.from, replacementEnd));
+      ranges.push(Decoration.replace({ widget: new PreviewWidget(block, options.settings, options.generation, session.sessionID, active, context), block: true, inclusive: false }).range(previewReplacementFrom(state, block), replacementEnd));
     }
 }
 

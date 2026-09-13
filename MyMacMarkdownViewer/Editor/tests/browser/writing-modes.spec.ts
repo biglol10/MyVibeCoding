@@ -8,7 +8,8 @@ test('focus mode highlights the current paragraph without changing document widt
  const current=page.locator('.focus-active-line');
  await expect(current).toContainText('현재 작성할');
  expect(await current.evaluate(e=>getComputedStyle(e).opacity)).toBe('1');
- expect(Number(await page.locator('.focus-muted-line').first().evaluate(e=>getComputedStyle(e).opacity))).toBeLessThan(1);
+ const muted=page.locator('.focus-muted-line').first();
+ await expect.poll(async()=>Number(await muted.evaluate(e=>getComputedStyle(e).opacity))).toBeLessThan(1);
  expect(await page.locator('.cm-content').evaluate(e=>e.getBoundingClientRect().width)).toBe(before);
  expect(await page.evaluate(()=>window.__editorTest!.snapshot().text)).toBe(text);
  await page.screenshot({path:'test-results/focus-mode.png'});

@@ -4,9 +4,15 @@
 
 ## 실행
 
-배포본은 Mac·Windows 0.3.3 / Android 1.2.1입니다. 코드 블록을 클릭해도 코드 서식을 유지하고, 다이어그램 편집 시 원문과 그림을 함께 표시합니다. 앱을 다시 열면 각 기기에서 마지막 문서·읽던 위치·폴더를 복원합니다. [표시 수정과 검증 범위](docs/Code-Preview-Verification-2026-09-12.md)를 참고하세요. 사용자 승인으로 Mac 설치본을 0.3.3 (9)로 교체했습니다.
+배포본은 Mac 0.3.4 / Windows 0.3.5 / Android 1.2.3입니다. 코드 블록을 클릭해도 코드 서식을 유지하고, 다이어그램 편집 시 원문과 그림을 함께 표시합니다. 앱을 다시 열면 각 기기에서 마지막 문서·읽던 위치·폴더를 복원합니다. Windows의 링크·코드와 Android의 코드·표 가독성 보완도 새 ZIP·APK에 포함했습니다. [표시 수정과 검증 범위](docs/Code-Preview-Verification-2026-09-12.md), [가독성 검토](docs/Readability-Review-2026-09-13.md), [코드 언어 표시 검증](docs/Code-Language-Verification-2026-09-13.md)를 참고하세요. Mac 설치본은 0.3.3 (9)입니다.
 
-현재 배포 파일은 `dist/MyMarkdownViewer.app`과 `dist/MyMarkdownViewer-0.3.3-macOS.zip`입니다. 앱을 원하는 위치에 복사해서 실행할 수 있습니다. macOS 14 이상을 대상으로 하며 Apple Silicon과 Intel 실행 파일을 함께 포함합니다.
+### 최신 설치 파일
+
+- [Mac Universal 0.3.4 ZIP](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacMarkdownViewer/MyMarkdownViewer-0.3.4-macOS.zip)
+- [Windows x64 0.3.5 ZIP](https://github.com/biglol10/MyVibeCoding/releases/download/mymarkdownviewer-2026-09-13/MyMarkdownViewer-0.3.5-Windows-x64.zip)
+- [Android 1.2.3 APK](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacMarkdownViewer/MarkdownReader-1.2.3-Android.apk)
+
+현재 배포 파일은 `dist/MyMarkdownViewer.app`과 `dist/MyMarkdownViewer-0.3.4-macOS.zip`입니다. 앱을 원하는 위치에 복사해서 실행할 수 있습니다. macOS 14 이상을 대상으로 하며 Apple Silicon과 Intel 실행 파일을 함께 포함합니다.
 
 현재 배포본은 개인 실행용 ad-hoc 서명입니다. Developer ID 서명과 Apple 공증은 포함되지 않았습니다. 다른 Mac으로 옮겼을 때 Gatekeeper의 배포 검증을 통과하는 공증된 배포본으로 간주하면 안 됩니다.
 
@@ -29,7 +35,7 @@
 
 사이드바 오른쪽 경계를 드래그하면 너비를 조절할 수 있고 재실행 후에도 유지됩니다. 긴 파일·폴더 이름은 영역 안에서 줄임표로 표시하며, 마우스를 올리면 전체 경로를 확인할 수 있습니다. 인용문 안의 제목도 읽기 상태에서는 `####` 같은 문법 기호를 숨깁니다.
 
-표는 **표 편집**을 눌러 셀을 수정하고 행·열 추가/삭제와 정렬을 바꿉니다. 셀은 Enter·Tab 또는 포커스를 옮길 때 반영되며 실행 취소할 수 있습니다. 여러 줄 수식·Mermaid는 클릭하면 블록 원문으로 편집합니다. 체크리스트는 체크박스를 눌러 수정할 수 있습니다. `Examples/읽기와-편집.md`에서 새 읽기 화면을 확인할 수 있습니다. 변경 내용과 복잡한 블록의 처리 범위는 [읽기 UI 개선 기록](docs/Reading-UI.md)에 정리했습니다.
+표는 **표 편집**을 눌러 셀을 수정하고 행·열 추가/삭제와 정렬을 바꿉니다. 셀은 Enter·Tab 또는 포커스를 옮길 때 반영되며 실행 취소할 수 있습니다. 여러 줄 수식은 클릭하면 원문을 편집합니다. Mermaid는 클릭해도 그림을 유지하고 **편집**을 누르면 원문과 그림을 함께 표시합니다. 코드 상자 오른쪽 위의 언어 표시를 누르면 Python·JavaScript 등의 언어를 바꿀 수 있고, Markdown 언어 지정과 구문 색상에 함께 반영됩니다. 원문 모드에서는 여는·닫는 코드 기호도 직접 수정할 수 있습니다. 체크리스트는 체크박스를 눌러 수정할 수 있습니다. `Examples/읽기와-편집.md`에서 새 읽기 화면을 확인할 수 있습니다. 변경 내용과 복잡한 블록의 처리 범위는 [읽기 UI 개선 기록](docs/Reading-UI.md)에 정리했습니다.
 
 테마는 다크·Night · 청회색·라이트·시스템 설정 따르기 중에서 선택하며 재실행 후에도 유지합니다. Night는 청회색 배경의 별도 테마이며 기존 다크 색상과 첫 실행 기본값은 유지합니다. 본문 기본값은 17px, 행간 1.7, 읽기 폭 800px입니다. [Night 테마와 검증 기록](docs/Night-Theme.md).
 
@@ -102,7 +108,7 @@ npm --prefix Editor run test:browser
 
 ## Windows 버전
 
-Windows 11 Intel·AMD x64용 [포터블 ZIP](dist/windows/MyMarkdownViewer-0.3.3-Windows-x64.zip)을 전체 압축 해제하고 `MyMarkdownViewer.exe`를 실행합니다. 별도 런타임 설치는 필요 없습니다. [사용·빌드 안내](Windows/README.md)와 [검증 범위](docs/Windows-Verification.md)를 확인하세요. 실제 Windows PC 실행과 Windows 두벌식 입력은 아직 미검증입니다.
+Windows 11 Intel·AMD x64용 [포터블 ZIP 0.3.5 다운로드](https://github.com/biglol10/MyVibeCoding/releases/download/mymarkdownviewer-2026-09-13/MyMarkdownViewer-0.3.5-Windows-x64.zip)을 전체 압축 해제하고 `MyMarkdownViewer.exe`를 실행합니다. 별도 런타임 설치는 필요 없습니다. [사용·빌드 안내](Windows/README.md)와 [검증 범위](docs/Windows-Verification.md)를 확인하세요. 실제 Windows PC 실행과 Windows 두벌식 입력은 아직 미검증입니다.
 
 ## 성능 개선 배포본
 
@@ -119,7 +125,7 @@ Typora Windows의 문서 중심 구성을 참고해 큰 도구 버튼을 메뉴�
 
 ### 최종 리뷰 및 재빌드 (2026-09-12)
 
-Windows의 메뉴·테마와 Mac/Windows `.markdown` 확장자 처리를 보완했습니다. Android는 읽기 전용을 유지합니다. [변경 및 검증 기록](docs/Final-Review-2026-09-12.md), [Android APK 1.0.1](dist/android/MarkdownReader-1.0.1-Android.apk)을 참고하세요.
+Windows의 메뉴·테마와 Mac/Windows `.markdown` 확장자 처리를 보완했습니다. Android는 읽기 전용을 유지합니다. [변경 및 검증 기록](docs/Final-Review-2026-09-12.md)을 참고하세요. 최신 Android 설치 파일은 위의 APK 1.2.3 링크에서 받을 수 있습니다.
 
 ### 문서 기능 확장 (0.2.0)
 

@@ -1,6 +1,7 @@
 import './reader.css';
 import { documentRenderContext, renderBlock, renderDiagram } from '../../Editor/src/render';
 import { blocksFor, outlineFor } from '../../Editor/src/markdown';
+import { codeFenceInfo, codeLanguageLabel } from '../../Editor/src/codeLanguage';
 import { frontMatterFor, headingSlug } from '../../Editor/src/semantic';
 import { defaultSettings, setSession } from '../../Editor/src/protocol';
 import type { Settings } from '../../Editor/src/protocol';
@@ -170,6 +171,48 @@ function schedulePosition() {
   if (positionTimer) clearTimeout(positionTimer);
   positionTimer = setTimeout(() => { positionTimer = undefined; sendPosition(); }, 350);
 }
+function codeLabel(language: string) {
+  return codeLanguageLabel(language);
+}
+function addCodeLanguageLabels(node: HTMLElement, kind: string, source: string): HTMLElement | undefined {
+  // Front matter is rendered in a <pre>, but it is document metadata rather
+  // than a code sample and should not receive a language label.
+  if (kind === 'FrontMatter' || node.querySelector('.front-matter')) return undefined;
+  const pres = [...node.querySelectorAll<HTMLPreElement>('pre')];
+  if (!pres.length) return undefined;
+
+  const info = codeFenceInfo(source);
+  const classLanguage = (pre: HTMLPreElement) => {
+    const code = pre.querySelector('code');
+    const languageClass = [...(code?.classList ?? [])].find(name => name.startsWith('language-'));
+    return languageClass?.slice('language-'.length) ?? '';
+  };
+  const languageFor = (pre: HTMLPreElement) => info?.language || classLanguage(pre);
+
+  // Mermaid replaces its target node's children asynchronously, so its
+  // persistent language label must live beside that render target.
+  const diagramLanguage = languageFor(pres[0]);
+  if (kind === 'FencedCode' && /^mermaid$/i.test(diagramLanguage)) {
+    const frame = document.createElement('div');
+    frame.className = 'reader-code-frame reader-diagram-frame';
+    const label = document.createElement('span');
+    label.className = 'reader-code-language';
+    label.textContent = codeLabel(diagramLanguage);
+    frame.append(label, node);
+    return frame;
+  }
+
+  for (const pre of pres) {
+    const frame = document.createElement('div');
+    frame.className = 'reader-code-frame';
+    const label = document.createElement('span');
+    label.className = 'reader-code-language';
+    label.textContent = codeLabel(languageFor(pre));
+    pre.before(frame);
+    frame.append(label, pre);
+  }
+  return undefined;
+}
 async function renderDocument(keepPosition = false, requestedPosition = 0) {
   if (!current) return;
   const captured = current, revision = ++generation, oldPosition = scrollRatio();
@@ -204,8 +247,9 @@ async function renderDocument(keepPosition = false, requestedPosition = 0) {
       };
     });
     node.querySelectorAll('table').forEach(table => { const scroller = document.createElement('div'); scroller.className = 'table-scroll'; scroller.tabIndex = 0; scroller.setAttribute('aria-label', '표, 가로로 스크롤'); table.replaceWith(scroller); scroller.append(table); });
-    article.append(node);
-    if (block.kind === 'FencedCode' && /^\s*(`{3,}|~{3,})mermaid\b/.test(source)) renderDiagram(node, source, settings.theme, () => revision === generation, () => {});
+    const labeledContainer = addCodeLanguageLabels(node, block.kind, source);
+    article.append(labeledContainer ?? node);
+    if (block.kind === 'FencedCode' && codeFenceInfo(source)?.language.toLowerCase() === 'mermaid') renderDiagram(node, source, settings.theme, () => revision === generation, () => {});
     if (index % 24 === 23) await new Promise(resolve => setTimeout(resolve, 0));
   }
   if (revision !== generation) return;
@@ -282,7 +326,7 @@ function search() {
   const query = $<HTMLInputElement>('#query').value.trim();
   if (!query || !current) { $('#match-count').textContent = !current ? '먼저 문서를 열어 주세요' : '검색어를 입력하세요'; return; }
   const regex = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu');
-  const walker = document.createTreeWalker(article, NodeFilter.SHOW_TEXT, { acceptNode(node) { return (node.parentElement?.closest('.katex,svg,button,mark') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT); } });
+  const walker = document.createTreeWalker(article, NodeFilter.SHOW_TEXT, { acceptNode(node) { return (node.parentElement?.closest('.katex,svg,button,mark,.reader-code-language') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT); } });
   const nodes: Text[] = []; while (walker.nextNode()) nodes.push(walker.currentNode as Text);
   for (const text of nodes) {
     if (matches.length >= 500) { searchLimited = true; break; }
