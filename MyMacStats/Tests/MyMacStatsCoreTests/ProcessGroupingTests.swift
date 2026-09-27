@@ -2,6 +2,35 @@ import XCTest
 @testable import MyMacStatsCore
 
 final class ProcessGroupingTests: XCTestCase {
+    func testApplicationIdentityNormalizesPathComponentsWithoutMergingCopies() {
+        let paths = ["/Applications/Example.app/./Contents/MacOS/Example", "/Applications/Unused/../Example.app/Contents/MacOS/Helper"]
+        let processes = paths.enumerated().map { index, path in
+            ProcessMetric(pid: Int32(10 + index), name: "worker", cpuPercent: 1, memoryBytes: 10, path: path, bundleIdentifier: nil)
+        }
+        let groups = ProcessGrouping.groups(processes, searchText: "", sortKey: .cpu)
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups[0].id, "app:/Applications/Example.app")
+        XCTAssertEqual(groups[0].processes.count, 2)
+    }
+
+    func testSameExecutableAndNameDoNotMergeIndependentProcesses() {
+        let processes = [10, 11].map { pid in
+            ProcessMetric(pid: Int32(pid), name: "node", cpuPercent: 1, memoryBytes: 10, path: "/opt/homebrew/bin/node", bundleIdentifier: "shared.identifier")
+        }
+        let groups = ProcessGrouping.groups(processes, searchText: "", sortKey: .cpu)
+        XCTAssertEqual(groups.count, 2)
+        XCTAssertTrue(groups.allSatisfy { $0.processes.count == 1 && !$0.isApplicationTarget })
+    }
+
+    func testSameNamedAppCopiesRemainSeparate() {
+        let processes = ["/Applications/Example.app", "/Users/example/Test/Example.app"].enumerated().map { index, path in
+            ProcessMetric(pid: Int32(10 + index), name: "Example", cpuPercent: 1, memoryBytes: 10, path: path + "/Contents/MacOS/Example", bundleIdentifier: "com.example.app")
+        }
+        let groups = ProcessGrouping.groups(processes, searchText: "", sortKey: .cpu)
+        XCTAssertEqual(groups.count, 2)
+        XCTAssertEqual(Set(groups.map(\.id)).count, 2)
+    }
+
     func testGroupsProcessesByOwningApplicationBundle() {
         let processes = [
             ProcessMetric(

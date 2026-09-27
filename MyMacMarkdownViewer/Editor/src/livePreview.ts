@@ -8,6 +8,7 @@ import { defaultSettings, post, session, type Settings } from './protocol';
 import { decorateTextBlock, toggleTaskAt } from './textPreview';
 import { escapeCellPipes, parseTable, serializeTable, withTableAlignment, withTableColumn, withTableRow } from './table';
 import { codeFenceInfo, codeLanguageLabel, codeLanguageOptions } from './codeLanguage';
+import { bindPreviewLinks } from './navigation';
 
 export const setSourceMode = StateEffect.define<boolean>();
 export const setComposition = StateEffect.define<boolean>();
@@ -17,6 +18,30 @@ export const setDiagramEditing = StateEffect.define<number | null>();
 let tableCompositionActive = false;
 export function isTableComposing() { return tableCompositionActive; }
 export function clearTableComposition() { tableCompositionActive = false; }
+const tableDraftCommits = new WeakMap<HTMLInputElement, () => void>();
+export function hasTableDraft() {
+  const input = document.activeElement;
+  return input instanceof HTMLInputElement && input.classList.contains('table-cell-input')
+    && input.value !== input.defaultValue;
+}
+
+/** Capture drafts without using blur as a save operation. A commit can replace
+ * the widget, so restore both the user's raw draft and its input selection. */
+export function commitTableDraft(view: EditorView, preserveFocus = true) {
+  const input = document.activeElement;
+  if (isTableComposing() || !(input instanceof HTMLInputElement) || !input.classList.contains('table-cell-input')) return;
+  const { tableId, row, column } = input.dataset;
+  const value = input.value, start = input.selectionStart, end = input.selectionEnd, direction = input.selectionDirection;
+  const top = view.scrollDOM.scrollTop, left = view.scrollDOM.scrollLeft;
+  tableDraftCommits.get(input)?.();
+  if (!preserveFocus) { input.blur(); return; }
+  const current = view.dom.querySelector<HTMLInputElement>(`.table-cell-input[data-table-id="${tableId}"][data-row="${row}"][data-column="${column}"]`);
+  if (!current || current.disabled) return;
+  current.value = value; current.defaultValue = value;
+  current.focus({ preventScroll: true });
+  if (start !== null && end !== null) current.setSelectionRange(start, end, direction ?? undefined);
+  view.scrollDOM.scrollTop = top; view.scrollDOM.scrollLeft = left;
+}
 export const previewOptions = StateField.define({
   create: () => ({ sourceMode: false, composing: false, settings: { ...defaultSettings }, generation: 0, tableEditing: null as number | null, diagramEditing: null as number | null }),
   update(value, transaction) {
@@ -307,6 +332,7 @@ class PreviewWidget extends WidgetType {
       ? this.block.source.split(/\r?\n/).map(line => `    ${line}`).join('\n') : this.block.source;
     const dom = isMermaid ? document.createElement('div') : renderBlock(renderSource, this.settings, this.context, this.block.from);
     dom.classList.add('preview-widget'); if (this.active) dom.classList.add('focus-active'); dom.dataset.kind = this.block.kind;
+    bindPreviewLinks(dom, view, () => view.state.field(livePreview).context);
     dom.setAttribute('aria-label', '클릭하여 이 블록 편집');
     const visibleCodeBlocks = isCodeBlock(this.block) ? [this.block] : nestedCodeBlocks(view.state, this.block);
     const codePreviews = [...dom.querySelectorAll('pre')];
@@ -352,24 +378,7 @@ class PreviewWidget extends WidgetType {
       if (target.closest('[data-remote-images]')) { event.preventDefault(); post('remoteImages'); return; }
       const anchor = target.closest('a');
       if (anchor) {
-        event.preventDefault();
-        const rawJump = anchor.getAttribute('data-jump');
-        if (rawJump !== null) {
-          const jump = Number(rawJump);
-          if (Number.isInteger(jump) && jump >= 0) { view.dispatch({ selection: EditorSelection.cursor(jump), effects: EditorView.scrollIntoView(jump, { y: 'center' }) }); view.focus(); return; }
-        }
-        const href = anchor.getAttribute('href') ?? '';
-        const semanticPosition = href.startsWith('#') ? this.context.jumps.get(href.slice(1)) : undefined;
-        if (semanticPosition !== undefined) {
-          view.dispatch({ selection: EditorSelection.cursor(semanticPosition), effects: EditorView.scrollIntoView(semanticPosition, { y: 'center' }) }); view.focus(); return;
-        }
-        if (href.startsWith('#')) {
-          const destination = document.getElementById(href.slice(1))?.closest<HTMLElement>('.preview-widget');
-          if (destination) {
-            try { const at = view.posAtDOM(destination); view.dispatch({ selection: EditorSelection.cursor(at), effects: EditorView.scrollIntoView(at, { y: 'center' }) }); view.focus(); return; } catch { /* host fallback */ }
-          }
-        }
-        post('openLink', { href }); return;
+        return; // Shared mouse/keyboard handler owns preview links.
       }
       if (target.closest('[data-task]')) {
         event.preventDefault();
@@ -425,6 +434,7 @@ class TableWidget extends WidgetType {
     const table = parseTable(this.block.source, this.block.from);
     if (!table) return renderBlock(this.block.source, view.state.field(previewOptions).settings);
     const dom = document.createElement('div'); dom.className = 'preview-widget table-widget'; dom.dataset.kind = 'Table';
+    bindPreviewLinks(dom, view, () => view.state.field(livePreview).context);
     if (!this.editing) {
       const reading = renderBlock(this.block.source, view.state.field(previewOptions).settings, this.context, this.block.from);
       const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'table-edit-toggle'; edit.textContent = '표 편집';
@@ -476,11 +486,11 @@ class TableWidget extends WidgetType {
       Array.from({ length: Math.max(row.length, table.rows[0].length) }, (_, column) => row[column]).forEach((existingCell, column) => {
         const cell = existingCell ?? { text: '', from: table.to, to: table.to };
         const tag = rowIndex === 0 ? 'th' : 'td', td = document.createElement(tag);
-        const input = document.createElement('input'); input.className = 'table-cell-input'; input.value = cell.text; input.disabled = locked();
+        const input = document.createElement('input'); input.className = 'table-cell-input'; input.defaultValue = cell.text; input.disabled = locked();
         input.setAttribute('aria-label', `${rowIndex === 0 ? 1 : rowIndex}행 ${column + 1}열`);
         let composing = false, committing = false;
         const commit = () => {
-          if (composing || committing || !input.isConnected || locked() || input.value === cell.text) return;
+          if (composing || committing || !input.isConnected || locked() || input.value === input.defaultValue) return;
           const value = escapeCellPipes(input.value.replace(/\n/g, ' '));
           // Replacing a table widget can synchronously blur its focused input
           // in Chromium. Never start a second transaction during that update.
@@ -495,7 +505,9 @@ class TableWidget extends WidgetType {
             replaceTable({ ...fresh, rows });
           } else view.dispatch({ changes: { from: cell.from, to: cell.to, insert: value }, userEvent: 'input' });
           } finally { committing = false; }
+          post('tableDraft', { dirty: false });
         };
+        tableDraftCommits.set(input, commit);
         input.dataset.tableId = String(table.from); input.dataset.row = String(rowIndex); input.dataset.column = String(column);
         input.addEventListener('mousedown', event => event.stopPropagation());
         input.addEventListener('focus', () => { selectedColumn = column; selectedRow = rowIndex; deleteRow.disabled = locked() || rowIndex < 2; align.value = table.alignments[column] ?? 'none'; });
@@ -503,6 +515,7 @@ class TableWidget extends WidgetType {
         // replace this widget and break IME/focus; blur, Tab and Enter make one
         // ordinary CodeMirror undo step instead.
         input.addEventListener('blur', commit);
+        input.addEventListener('input', () => post('tableDraft', { dirty: input.value !== input.defaultValue }));
         input.addEventListener('compositionstart', () => { composing = true; tableCompositionActive = true; post('composition', { active: true }); });
         input.addEventListener('compositionend', () => { composing = false; tableCompositionActive = false; post('composition', { active: false }); });
         input.addEventListener('keydown', event => {

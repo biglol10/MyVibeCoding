@@ -2,6 +2,17 @@ import XCTest
 @testable import CaptureStudio
 
 final class AppSettingsTests: XCTestCase {
+    func testUntilStoppedOptionRoundTripsAndOldSettingsKeepTimedRecording() throws {
+        var settings = AppSettings.defaults
+        settings.recordUntilStopped = true
+        let data = try JSONEncoder().encode(settings)
+        XCTAssertTrue(try JSONDecoder().decode(AppSettings.self, from: data).recordUntilStopped)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object.removeValue(forKey: "recordUntilStopped")
+        let legacy = try JSONSerialization.data(withJSONObject: object)
+        XCTAssertFalse(try JSONDecoder().decode(AppSettings.self, from: legacy).recordUntilStopped)
+    }
+
     func testDefaultFoldersUseDesktop() {
         let settings = AppSettings.defaults
 

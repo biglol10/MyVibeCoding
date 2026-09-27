@@ -9,6 +9,7 @@ struct SettingsView: View {
     @Query(sort: \HolidayRecord.date) private var holidays: [HolidayRecord]
     @State private var selectedTab = "general"
     @State private var newHolidayTitle = ""
+    @State private var holidayPendingDeletion: HolidayRecord?
     @State private var newHolidayDate = Date()
     @State private var settingsErrorMessage: String?
     @State private var isFetchingHolidays = false
@@ -61,6 +62,18 @@ struct SettingsView: View {
         .frame(width: 760, height: 540)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { ensureSettings() }
+        .confirmationDialog("수동 휴일을 삭제할까요?", isPresented: Binding(
+            get: { holidayPendingDeletion != nil },
+            set: { if !$0 { holidayPendingDeletion = nil } }
+        ), titleVisibility: .visible) {
+            Button("삭제", role: .destructive) {
+                if let holidayPendingDeletion { hideOrDelete(holidayPendingDeletion) }
+                holidayPendingDeletion = nil
+            }
+            Button("취소", role: .cancel) { holidayPendingDeletion = nil }
+        } message: {
+            Text(holidayPendingDeletion?.title ?? "")
+        }
         .alert("설정을 적용할 수 없습니다", isPresented: settingsErrorBinding) {
             Button("확인", role: .cancel) {}
         } message: {
@@ -118,7 +131,7 @@ struct SettingsView: View {
                     }
                 }
                 SettingsDivider()
-                SettingsRow("표시할 일정 수") {
+                SettingsRow("위젯 목록 일정 수") {
                     Picker("", selection: visibleCountBinding) {
                         Text("3개").tag(3)
                         Text("5개").tag(5)
@@ -134,6 +147,9 @@ struct SettingsView: View {
 
     private var notificationsTab: some View {
         SettingsPage {
+            SettingsSection("알림 상태") {
+                NotificationStatusView().padding(.vertical, 12)
+            }
             SettingsSection("기본 알림 시간") {
                 SettingsRow("빠른 선택") {
                     HStack(spacing: 8) {
@@ -201,12 +217,31 @@ struct SettingsView: View {
                     VStack(spacing: 0) {
                         ForEach(Array(visibleHolidays.enumerated()), id: \.element.id) { index, holiday in
                             HolidaySettingsRow(holiday: holiday) {
-                                hideOrDelete(holiday)
+                                if holiday.source == .api { hideOrDelete(holiday) }
+                                else { holidayPendingDeletion = holiday }
                             }
                             if index < visibleHolidays.count - 1 {
                                 SettingsDivider()
                             }
                         }
+                    }
+                }
+            }
+            if hiddenHolidays.isEmpty == false {
+                SettingsSection("숨긴 휴일") {
+                    ForEach(hiddenHolidays, id: \.id) { holiday in
+                        HStack {
+                            Text(holiday.localDate().formatted(date: .abbreviated, time: .omitted))
+                                .foregroundStyle(.secondary)
+                            Text(holiday.title)
+                            Spacer()
+                            Button("복원") {
+                                holiday.isHidden = false
+                                holiday.updatedAt = Date()
+                                saveModelContext("휴일을 복원할 수 없습니다.")
+                            }
+                        }
+                        .padding(.vertical, 10)
                     }
                 }
             }
@@ -238,6 +273,8 @@ struct SettingsView: View {
             }
         }
     }
+
+    private var hiddenHolidays: [HolidayRecord] { holidays.filter { $0.isHidden && $0.source == .api } }
 
     private var visibleHolidays: [HolidayRecord] {
         holidays.filter { $0.isHidden == false }
@@ -610,7 +647,7 @@ private struct HolidaySettingsRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Text(holiday.date.formatted(date: .abbreviated, time: .omitted))
+            Text(holiday.localDate().formatted(date: .abbreviated, time: .omitted))
                 .font(.system(size: 12, weight: .semibold).monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(width: 104, alignment: .leading)

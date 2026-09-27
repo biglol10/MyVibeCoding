@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct ToolInspectorPresentation: Equatable {
@@ -45,6 +46,10 @@ struct ToolInspectorView: View {
 
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
+                if presentation.showsLineWidth || presentation.showsTextSize {
+                    ColorPicker("Color", selection: strokeColorBinding, supportsOpacity: false)
+                        .fixedSize()
+                }
                 if presentation.showsLineWidth {
                     Stepper("Width \(Int(editorViewModel.displayedLineWidth))", value: lineWidthBinding, in: 1...24)
                 }
@@ -52,6 +57,21 @@ struct ToolInspectorView: View {
                 if presentation.showsTextSize {
                     Stepper("Text \(Int(editorViewModel.displayedTextSize))", value: textSizeBinding, in: 10...72)
                 }
+            }
+
+            if let layer = selectedLayer, layer.isResizable {
+                HStack(spacing: 12) {
+                    Text("Annotation size (px)").foregroundStyle(.secondary)
+                    TextField("Width", value: Binding<Double>(
+                        get: { Double(layer.frame.width) },
+                        set: { editorViewModel.resizeSelectedLayer(width: CGFloat($0), height: layer.frame.height) }
+                    ), format: .number).frame(width: 72)
+                    Text("×")
+                    TextField("Height", value: Binding<Double>(
+                        get: { Double(layer.frame.height) },
+                        set: { editorViewModel.resizeSelectedLayer(width: layer.frame.width, height: CGFloat($0)) }
+                    ), format: .number).frame(width: 72)
+                }.textFieldStyle(.roundedBorder)
             }
 
             if presentation.showsTextContent {
@@ -66,6 +86,18 @@ struct ToolInspectorView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    private var strokeColorBinding: Binding<Color> {
+        Binding(get: {
+            let color = editorViewModel.displayedStrokeColor
+            return Color(red: color.red, green: color.green, blue: color.blue, opacity: color.alpha)
+        }, set: { value in
+            guard let color = NSColor(value).usingColorSpace(.sRGB) else { return }
+            editorViewModel.updateDisplayedStrokeColor(LayerColor(
+                red: color.redComponent, green: color.greenComponent, blue: color.blueComponent
+            ))
+        })
     }
 
     private var lineWidthBinding: Binding<CGFloat> {

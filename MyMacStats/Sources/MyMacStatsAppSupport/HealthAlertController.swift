@@ -31,6 +31,9 @@ public final class HealthAlertController {
     private var memoryCriticalStartedAt: Date?
     private var didSendMemoryCriticalAlert = false
     private var didRequestAuthorization = false
+    private var deliveryTask: Task<Void, Never>?
+
+    deinit { deliveryTask?.cancel() }
 
     public init(
         notifier: HealthAlertNotifying = UserNotificationHealthAlertNotifier(),
@@ -41,36 +44,46 @@ public final class HealthAlertController {
     }
 
     public func observe(snapshot: SystemMetricsSnapshot) async {
+        await submit(snapshot: snapshot)?.value
+    }
+
+    /// Queue notification work without delaying metric sampling or termination validation.
+    @discardableResult
+    public func submit(snapshot: SystemMetricsSnapshot) -> Task<Void, Never>? {
         guard snapshot.summary(for: .memory)?.health == .critical else {
             memoryCriticalStartedAt = nil
             didSendMemoryCriticalAlert = false
-            return
+            return nil
         }
 
         let criticalStartedAt = memoryCriticalStartedAt ?? snapshot.updatedAt
         memoryCriticalStartedAt = criticalStartedAt
 
         guard !didSendMemoryCriticalAlert,
+              deliveryTask == nil,
               snapshot.updatedAt.timeIntervalSince(criticalStartedAt) >= sustainedCriticalSeconds
         else {
-            return
+            return nil
         }
 
-        await ensureAuthorization()
-        await notifier.deliver(
-            HealthAlert(
-                kind: .memoryCritical,
-                title: "MyMacStats RAM Critical",
-                message: "RAM has stayed critical for 30 seconds. Open MyMacStats to inspect high-memory apps."
-            )
-        )
         didSendMemoryCriticalAlert = true
-    }
-
-    private func ensureAuthorization() async {
-        guard !didRequestAuthorization else { return }
-        await notifier.requestAuthorization()
+        let needsAuthorization = !didRequestAuthorization
         didRequestAuthorization = true
+        let notifier = notifier
+        let duration = Int(sustainedCriticalSeconds)
+        deliveryTask = Task { [weak self] in
+            defer { self?.deliveryTask = nil }
+            if needsAuthorization { await notifier.requestAuthorization() }
+            guard !Task.isCancelled, self?.memoryCriticalStartedAt == criticalStartedAt else { return }
+            await notifier.deliver(
+                HealthAlert(
+                    kind: .memoryCritical,
+                    title: "MyMacStats RAM Critical",
+                    message: "RAM has stayed critical for \(duration) seconds. Open MyMacStats to inspect high-memory apps."
+                )
+            )
+        }
+        return deliveryTask
     }
 }
 

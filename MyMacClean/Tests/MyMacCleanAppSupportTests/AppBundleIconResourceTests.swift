@@ -16,7 +16,7 @@ final class AppBundleIconResourceTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: iconURL.path), "MyMacCleanIcon.icns should exist in app resources")
     }
 
-    func testAppInfoPlistExplainsFinderAutomationForTrashFallback() throws {
+    func testAppInfoPlistDeclaresAppManagementUsageAndNoAppleEventsUsage() throws {
         let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         let plistURL = root.appendingPathComponent("Sources/MyMacCleanApp/Resources/MyMacCleanInfo.plist")
 
@@ -26,9 +26,10 @@ final class AppBundleIconResourceTests: XCTestCase {
             return
         }
 
-        let usage = plist["NSAppleEventsUsageDescription"] as? String
+        let usage = plist["NSAppBundlesUsageDescription"] as? String
         XCTAssertNotNil(usage)
-        XCTAssertTrue(usage?.contains("Finder") == true)
+        XCTAssertTrue(usage?.contains("App Management") == true)
         XCTAssertTrue(usage?.contains("Trash") == true)
+        XCTAssertNil(plist["NSAppleEventsUsageDescription"])
     }
 }

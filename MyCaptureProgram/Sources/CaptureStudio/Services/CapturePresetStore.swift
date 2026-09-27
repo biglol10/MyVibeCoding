@@ -22,12 +22,25 @@ public final class CapturePresetStore: ObservableObject {
     }
 
     public func save(_ preset: CapturePreset) {
-        if let index = userPresets.firstIndex(where: { $0.id == preset.id || $0.name == preset.name }) {
+        if let index = userPresets.firstIndex(where: { $0.id == preset.id }) {
             userPresets[index] = preset
         } else {
             userPresets.append(preset)
         }
         persist()
+    }
+
+    public var nextPersonalPresetName: String {
+        let names = Set(userPresets.map(\.name))
+        var index = 1
+        while names.contains("Personal \(index)") { index += 1 }
+        return "Personal \(index)"
+    }
+
+    public func matches(_ preset: CapturePreset, appState: AppState, settings: AppSettings) -> Bool {
+        appState.captureMode == preset.captureMode
+            && appState.areaType == preset.areaType
+            && preset.applyingOptions(to: settings) == settings
     }
 
     public func remove(id: UUID) {
@@ -39,16 +52,7 @@ public final class CapturePresetStore: ObservableObject {
         appState.captureMode = preset.captureMode
         appState.areaType = preset.areaType
         settingsStore.update { settings in
-            settings.automaticallySaveScreenshots = preset.settings.automaticallySaveScreenshots
-            settings.automaticallySaveRecordings = preset.settings.automaticallySaveRecordings
-            settings.showInFinderAfterSave = preset.settings.showInFinderAfterSave
-            settings.copyCapturedImageToClipboard = preset.settings.copyCapturedImageToClipboard
-            settings.defaultDelaySeconds = preset.settings.defaultDelaySeconds
-            settings.includeSystemAudio = preset.settings.includeSystemAudio
-            settings.includeMicrophone = preset.settings.includeMicrophone
-            settings.showCursorInRecordings = preset.settings.showCursorInRecordings
-            settings.countdownSeconds = preset.settings.countdownSeconds
-            settings.recordingDurationSeconds = preset.settings.recordingDurationSeconds
+            settings = preset.applyingOptions(to: settings)
         }
     }
 

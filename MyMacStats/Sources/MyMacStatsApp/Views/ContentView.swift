@@ -7,14 +7,8 @@ struct ContentView: View {
     @State private var isSettingsSelected = false
 
     var body: some View {
-        NavigationSplitView {
-            SidebarView(viewModel: viewModel, isSettingsSelected: $isSettingsSelected)
-        } content: {
-            MetricListView(viewModel: viewModel, isSettingsSelected: $isSettingsSelected)
-        } detail: {
-            MetricDetailView(viewModel: viewModel, isSettingsSelected: isSettingsSelected)
-        }
-        .preferredColorScheme(.dark)
+        dashboard
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
         .alert(terminationAlertTitle, isPresented: terminationAlertBinding) {
             Button("Cancel", role: .cancel) {
@@ -42,6 +36,29 @@ struct ContentView: View {
         }
         .task {
             viewModel.start()
+        }
+    }
+
+    @ViewBuilder
+    private var dashboard: some View {
+        if !isSettingsSelected && viewModel.showsProcessControls {
+            NavigationSplitView {
+                SidebarView(viewModel: viewModel, isSettingsSelected: $isSettingsSelected)
+            } content: {
+                MetricListView(viewModel: viewModel)
+            } detail: {
+                MetricDetailView(viewModel: viewModel)
+            }
+        } else {
+            NavigationSplitView {
+                SidebarView(viewModel: viewModel, isSettingsSelected: $isSettingsSelected)
+            } detail: {
+                if isSettingsSelected {
+                    SettingsView(viewModel: viewModel)
+                } else {
+                    MetricDetailView(viewModel: viewModel)
+                }
+            }
         }
     }
 

@@ -32,6 +32,7 @@ public struct DeletionReceipt: Codable, Equatable, Identifiable, Sendable {
     public let bundleIdentifier: String?
     public let bundlePath: String
     public let action: DeletionAction
+    public let deletionMode: DeletionMode?
     public let completedAt: Date
     public let selectedCandidates: [DeletionReceiptCandidate]
     public let executionResults: [DeletionItemResult]
@@ -44,6 +45,7 @@ public struct DeletionReceipt: Codable, Equatable, Identifiable, Sendable {
         bundleIdentifier: String?,
         bundlePath: String,
         action: DeletionAction,
+        deletionMode: DeletionMode? = nil,
         completedAt: Date = Date(),
         selectedCandidates: [DeletionReceiptCandidate],
         executionResults: [DeletionItemResult],
@@ -55,6 +57,7 @@ public struct DeletionReceipt: Codable, Equatable, Identifiable, Sendable {
         self.bundleIdentifier = bundleIdentifier
         self.bundlePath = bundlePath
         self.action = action
+        self.deletionMode = deletionMode
         self.completedAt = completedAt
         self.selectedCandidates = selectedCandidates
         self.executionResults = executionResults

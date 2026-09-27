@@ -3,6 +3,23 @@ import XCTest
 @testable import MyMacFinder
 
 final class FolderSizeServiceTests: XCTestCase {
+    func testEnumerationFailureDoesNotReturnPartialSizeAsComplete() throws {
+        let unreadable = tempDirectory.appendingPathComponent("unreadable", isDirectory: true)
+        try FileManager.default.createDirectory(at: unreadable, withIntermediateDirectories: true)
+        try Data(repeating: 1, count: 7).write(to: tempDirectory.appendingPathComponent("visible.bin"))
+        try Data(repeating: 1, count: 11).write(to: unreadable.appendingPathComponent("restricted.bin"))
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: unreadable.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: unreadable.path)
+        }
+        guard !FileManager.default.isReadableFile(atPath: unreadable.path) else {
+            throw XCTSkip("This account can bypass file permissions.")
+        }
+
+        XCTAssertThrowsError(try FolderSizeService().size(of: tempDirectory)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("fully calculated"))
+        }
+    }
     private var tempDirectory: URL!
 
     override func setUpWithError() throws {

@@ -51,10 +51,11 @@ public struct FullDiskAccessProbe: Sendable {
     }
 
     public func status() -> FullDiskAccessStatus {
+        var readAtLeastOne = false
         for url in protectedURLs {
             do {
                 _ = try directoryContents(url)
-                return .granted
+                readAtLeastOne = true
             } catch {
                 switch permissionStatus(for: error) {
                 case .missing:
@@ -67,7 +68,7 @@ public struct FullDiskAccessProbe: Sendable {
             }
         }
 
-        return .undetermined
+        return readAtLeastOne ? .granted : .undetermined
     }
 
     private func permissionStatus(for error: Error) -> FullDiskAccessStatus {

@@ -25,7 +25,9 @@ final class InspectorModelsTests: XCTestCase {
         XCTAssertEqual(details.fileExtension, "--")
         XCTAssertEqual(details.sizeText, "--")
         XCTAssertEqual(details.dateCreatedText, "--")
-        XCTAssertEqual(details.dateModifiedText, "2024-01-01 00:00")
+        let localFormatter = DateFormatter()
+        localFormatter.dateFormat = "yyyy-MM-dd HH:mm"
+        XCTAssertEqual(details.dateModifiedText, localFormatter.string(from: Date(timeIntervalSince1970: 1_704_067_200)))
         XCTAssertEqual(details.dateAccessedText, "--")
         XCTAssertEqual(details.path, entry.url.path)
         XCTAssertEqual(details.isHiddenText, "Yes")

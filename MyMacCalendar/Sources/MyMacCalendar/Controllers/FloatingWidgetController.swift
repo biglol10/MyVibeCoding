@@ -11,7 +11,7 @@ final class FloatingWidgetController {
     private var latestOccurrences: [EventOccurrence] = []
     private var latestOnSelect: ((EventOccurrence) -> Void)?
 
-    func show(occurrences: [EventOccurrence], opacity: Double, alwaysOnTop: Bool, onSelect: @escaping (EventOccurrence) -> Void) {
+    func show(occurrences: [EventOccurrence], visibleCount: Int, opacity: Double, alwaysOnTop: Bool, onSelect: @escaping (EventOccurrence) -> Void) {
         latestOccurrences = occurrences
         latestOnSelect = onSelect
         let onShowAll: () -> Void = { [weak self] in
@@ -22,7 +22,7 @@ final class FloatingWidgetController {
 
         if window == nil {
             let hosting = FloatingWidgetHostingController(
-                rootView: FloatingWidgetView(occurrences: occurrences, onSelect: onSelect, onShowAll: onShowAll)
+                rootView: FloatingWidgetView(occurrences: occurrences, visibleCount: visibleCount, onSelect: onSelect, onShowAll: onShowAll)
             )
             let newWindow = FloatingWidgetWindow(contentViewController: hosting)
             newWindow.styleMask = [.borderless]
@@ -54,7 +54,7 @@ final class FloatingWidgetController {
             hostingController = hosting
         }
 
-        hostingController?.rootView = FloatingWidgetView(occurrences: occurrences, onSelect: onSelect, onShowAll: onShowAll)
+        hostingController?.rootView = FloatingWidgetView(occurrences: occurrences, visibleCount: visibleCount, onSelect: onSelect, onShowAll: onShowAll)
         refreshOpenListWindow()
         window?.level = alwaysOnTop ? .floating : .normal
         window?.alphaValue = opacity
@@ -66,9 +66,11 @@ final class FloatingWidgetController {
             let hosting = NSHostingController(rootView: FloatingEventDetailView(detail: detail))
             let newWindow = NSWindow(contentViewController: hosting)
             newWindow.title = "일정 상세"
-            newWindow.styleMask = [.titled, .closable]
+            newWindow.styleMask = [.titled, .closable, .resizable]
             newWindow.isReleasedWhenClosed = false
-            newWindow.setFrame(NSRect(x: 380, y: 600, width: 320, height: 260), display: true)
+            newWindow.contentMinSize = NSSize(width: 320, height: 260)
+            newWindow.setContentSize(NSSize(width: 360, height: 420))
+            newWindow.center()
             detailWindow = newWindow
         } else {
             (detailWindow?.contentViewController as? NSHostingController<FloatingEventDetailView>)?.rootView =

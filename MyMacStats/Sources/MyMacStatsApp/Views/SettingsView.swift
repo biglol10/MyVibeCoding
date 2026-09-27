@@ -7,13 +7,12 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            PanelHeader(title: "Settings", subtitle: "MVP refresh controls")
+            PanelHeader(title: "Settings", subtitle: "Monitoring preferences")
             Divider()
 
-            HStack {
+            VStack(alignment: .leading, spacing: 10) {
                 Text("Refresh Interval")
                     .font(.callout.weight(.semibold))
-                Spacer()
                 Picker("Refresh Interval", selection: $viewModel.refreshInterval) {
                     ForEach(RefreshInterval.allCases) { interval in
                         Text(interval.title).tag(interval)
@@ -21,14 +20,20 @@ struct SettingsView: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.segmented)
-                .frame(width: 260)
+                .frame(maxWidth: 360)
             }
             .padding(16)
 
             Divider()
 
             InfoRow(title: "Menu Bar Display", value: "CPU + RAM")
-            InfoRow(title: "Dock Icon", value: "Always visible in MVP")
+            InfoRow(title: "Dock Icon", value: "Visible")
+            InfoRow(title: "Appearance", value: "Follows macOS")
+            Divider()
+            InfoRow(title: "CPU, RAM, Network", value: viewModel.refreshInterval.title)
+            InfoRow(title: "Processes", value: "\(max(2, viewModel.refreshInterval.rawValue))s")
+            InfoRow(title: "Disk, Battery", value: "\(max(10, viewModel.refreshInterval.rawValue))s")
+            InfoRow(title: "Disk Space Candidates", value: "60s or Scan Again")
             Spacer(minLength: 0)
         }
     }

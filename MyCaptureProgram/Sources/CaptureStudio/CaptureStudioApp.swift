@@ -49,6 +49,7 @@ struct CaptureStudioApp: App {
         }
         .defaultSize(width: 560, height: 128)
         .commands {
+            CaptureDocumentCommands()
             CommandMenu("Capture") {
                 Button("Capture") {
                     startScreenshotCapture()
@@ -60,11 +61,15 @@ struct CaptureStudioApp: App {
                 }
                 .disabled(appState.isInteractionBlocked)
 
-                Button("Stop Recording") {
-                    stopActiveRecording()
+                Button(appState.countdownSecondsRemaining == nil ? "Stop Recording" : "Cancel Countdown") {
+                    if appState.countdownSecondsRemaining != nil {
+                        captureCoordinator.cancelCountdown()
+                    } else {
+                        stopActiveRecording()
+                    }
                 }
                 .keyboardShortcut(.cancelAction)
-                .disabled(!appState.isRecordingInProgress)
+                .disabled(!appState.isRecordingInProgress && appState.countdownSecondsRemaining == nil)
 
                 Divider()
 

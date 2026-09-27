@@ -13,7 +13,7 @@ final class NotificationLifecycleSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("settings.defaultReminderMinute"))
         XCTAssertTrue(source.contains("event.notificationOffsetsRaw"))
         XCTAssertTrue(source.contains("event.recurrenceRaw"))
-        XCTAssertTrue(source.contains("12 * 60 * 60"))
+        XCTAssertTrue(source.contains("5 * 60"))
     }
 
     func testSystemCoordinatorIsSharedAcrossWindowAndEditor() throws {

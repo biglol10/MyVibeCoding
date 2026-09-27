@@ -284,22 +284,18 @@ private final class ScreenRecorder: NSObject, @unchecked Sendable, RecordingSess
 
         var audioInput: AVAssetWriterInput?
         if settings.includeSystemAudio {
-            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: nil)
-            input.expectsMediaDataInRealTime = true
-            if writer.canAdd(input) {
-                writer.add(input)
-                audioInput = input
-            }
+            let input = RecordingAudioConfiguration.makeInput(channelCount: 2)
+            guard writer.canAdd(input) else { throw RecordingError.cannotAddAudioInput }
+            writer.add(input)
+            audioInput = input
         }
 
         var microphoneInput: AVAssetWriterInput?
         if settings.includeMicrophone {
-            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: nil)
-            input.expectsMediaDataInRealTime = true
-            if writer.canAdd(input) {
-                writer.add(input)
-                microphoneInput = input
-            }
+            let input = RecordingAudioConfiguration.makeInput(channelCount: 1)
+            guard writer.canAdd(input) else { throw RecordingError.cannotAddAudioInput }
+            writer.add(input)
+            microphoneInput = input
         }
 
         let configuration = SCStreamConfiguration()
@@ -309,6 +305,8 @@ private final class ScreenRecorder: NSObject, @unchecked Sendable, RecordingSess
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
         configuration.showsCursor = settings.showCursorInRecordings
         configuration.capturesAudio = settings.includeSystemAudio
+        configuration.sampleRate = RecordingAudioConfiguration.sampleRate
+        configuration.channelCount = 2
         configuration.captureMicrophone = settings.includeMicrophone
         configuration.excludesCurrentProcessAudio = true
 
@@ -351,7 +349,11 @@ private final class ScreenRecorder: NSObject, @unchecked Sendable, RecordingSess
                     }
                     do {
                         try await streamLifecycle.start()
-                        try await Task.sleep(nanoseconds: UInt64(durationSeconds) * 1_000_000_000)
+                        if settings.recordUntilStopped {
+                            while true { try await Task.sleep(for: .seconds(3600)) }
+                        } else {
+                            try await Task.sleep(nanoseconds: UInt64(durationSeconds) * 1_000_000_000)
+                        }
                         await streamLifecycle.stop()
                         finishIfNeeded()
                     } catch is CancellationError {
@@ -464,7 +466,10 @@ private final class ScreenRecorder: NSObject, @unchecked Sendable, RecordingSess
         }
 
         if videoInput.isReadyForMoreMediaData {
-            videoInput.append(sampleBuffer)
+            guard videoInput.append(sampleBuffer) else {
+                finishWithError(writer.error ?? RecordingError.writerFailed)
+                return
+            }
             lastVideoTime = presentationTime
         }
     }
@@ -474,7 +479,10 @@ private final class ScreenRecorder: NSObject, @unchecked Sendable, RecordingSess
             return
         }
 
-        input.append(sampleBuffer)
+        guard input.append(sampleBuffer) else {
+            finishWithError(assetWriter?.error ?? RecordingError.writerFailed)
+            return
+        }
     }
 
     private func finishIfNeeded() {
@@ -623,6 +631,7 @@ public enum RecordingError: LocalizedError, Equatable, Sendable {
     case outputFileAlreadyExists
     case noDisplayAvailable
     case cannotAddVideoInput
+    case cannotAddAudioInput
     case writerUnavailable
     case noVideoFramesCaptured
     case writerFailed
@@ -639,6 +648,8 @@ public enum RecordingError: LocalizedError, Equatable, Sendable {
             return "No display is available for recording."
         case .cannotAddVideoInput:
             return "The recording writer could not add a video input."
+        case .cannotAddAudioInput:
+            return "Audio could not be prepared. Check the audio settings and try again."
         case .writerUnavailable:
             return "The recording writer is unavailable."
         case .noVideoFramesCaptured:

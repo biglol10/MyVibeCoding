@@ -77,17 +77,28 @@ public struct RelatedFileScanner: Sendable {
                     isProtected: isProtected,
                     isKnownCleanupRoot: kind != .unknown
                 )
+                let size: Int64
+                let sizeKnown: Bool
+                do {
+                    size = try sizeCalculator.sizeOfItem(at: url)
+                    sizeKnown = true
+                } catch {
+                    size = 0
+                    sizeKnown = false
+                    issues.append(ScanIssue.from(path: url, error: error))
+                }
                 candidates.append(
                     RelatedFileCandidate(
                         url: url,
                         kind: kind,
-                        size: (try? sizeCalculator.sizeOfItem(at: url)) ?? 0,
+                        size: size,
+                        sizeIsKnown: sizeKnown,
                         matchReason: match.matchReason,
                         confidence: match.confidence,
                         evidence: match.evidence,
                         safety: safety.level,
-                        defaultSelected: safety.defaultSelected,
-                        requiresManualReview: safety.requiresManualReview,
+                        defaultSelected: sizeKnown && safety.defaultSelected,
+                        requiresManualReview: !sizeKnown || safety.requiresManualReview,
                         isProtected: isProtected
                     )
                 )

@@ -17,12 +17,14 @@ public struct FolderSizeService: FolderSizeCalculating, @unchecked Sendable {
             throw ExplorerError.notDirectory(folder.path)
         }
 
+        var enumerationError: Error?
         guard let enumerator = fileManager.enumerator(
             at: folder,
             includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
-            options: [.skipsHiddenFiles],
-            errorHandler: { _, _ in
-                false
+            options: [],
+            errorHandler: { _, error in
+                enumerationError = error
+                return false
             }
         ) else {
             throw ExplorerError.permissionDenied(folder.path)
@@ -34,6 +36,9 @@ public struct FolderSizeService: FolderSizeCalculating, @unchecked Sendable {
             if values.isRegularFile == true {
                 total += Int64(values.fileSize ?? 0)
             }
+        }
+        if let enumerationError {
+            throw ExplorerError.operationFailed("Folder size could not be fully calculated: \(enumerationError.localizedDescription)")
         }
         return total
     }

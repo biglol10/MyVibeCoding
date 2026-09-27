@@ -100,6 +100,7 @@ struct RootView: View {
             calculatedFolderSizes: explorerStore.calculatedFolderSizes,
             previewMode: explorerStore.previewMode,
             previewByteLimit: explorerStore.previewByteLimit.rawValue,
+            isCommandEnabled: { explorerStore.isCommandEnabled($0) },
             onCommand: { command in
                 Task { await explorerStore.perform(command) }
             }
@@ -111,75 +112,154 @@ struct RootView: View {
     private func filePane(at index: Int) -> some View {
         if explorerStore.panes.indices.contains(index) {
             let pane = explorerStore.panes[index]
-            FileTableView(
-                entries: explorerStore.visibleEntries(forPaneAt: index),
-                selectedURLs: pane.selectedURLs,
-                canPaste: explorerStore.canPaste,
-                canUndo: explorerStore.canUndo,
-                canCloseTab: explorerStore.canCloseTab,
-                canGoBack: !pane.backStack.isEmpty,
-                canGoForward: !pane.forwardStack.isEmpty,
-                canGoUp: explorerStore.canGoUp(forPaneAt: index),
-                currentURL: pane.currentURL,
-                currentLocation: pane.location,
-                currentSort: pane.sort,
-                showsPathColumn: explorerStore.isShowingRecursiveSearchResults,
-                paneID: pane.id,
-                inlineRenameRequest: inlineRenameRequest(for: pane),
-                requestsInitialFocus: index == explorerStore.activePaneIndex,
-                onFocus: {
-                    focusedToolbarField = nil
-                    explorerStore.activatePane(at: index)
-                    explorerStore.setToolbarTextInputFocused(false)
-                },
-                onSelectionChange: { urls in
-                    explorerStore.activatePane(at: index)
-                    explorerStore.updateSelection(urls)
-                },
-                onOpen: { url in
-                    explorerStore.activatePane(at: index)
-                    Task { await explorerStore.open(url) }
-                },
-                onRename: { paneID, url, newName in
-                    Task { await explorerStore.rename(url, to: newName, inPane: paneID) }
-                },
-                onInlineRenameEnd: { requestID in
-                    explorerStore.clearInlineRenameRequest(matching: requestID)
-                },
-                onCommand: { command in
-                    explorerStore.activatePane(at: index)
-                    Task { await explorerStore.perform(command) }
-                },
-                isCommandEnabled: { command in
-                    explorerStore.isCommandEnabled(command, forPaneAt: index)
-                },
-                openWithApplications: explorerStore.openWithApplications(forPaneAt: index),
-                onOpenWithApplication: { application in
-                    explorerStore.activatePane(at: index)
-                    Task { await explorerStore.openSelected(with: application) }
-                },
-                onDropItems: { urls, destinationFolder, operation in
-                    explorerStore.activatePane(at: index)
-                    Task {
-                        await explorerStore.performDrop(
-                            urls: urls,
-                            destinationFolder: destinationFolder,
-                            operation: operation
-                        )
+            let entries = explorerStore.visibleEntries(forPaneAt: index)
+            let isActive = explorerStore.activePaneIndex == index
+            let isSearching = isActive && explorerStore.isSearching
+            let isFiltered = isActive && explorerStore.hasActiveSearchCriteria
+            let countLabel = isFiltered
+                ? (entries.count == 1 ? "result" : "results")
+                : (entries.count == 1 ? "item" : "items")
+            VStack(spacing: 0) {
+                if explorerStore.paneMode == .dual {
+                    Button {
+                        focusedToolbarField = nil
+                        explorerStore.activatePane(at: index)
+                        explorerStore.requestToolbarFocusClear()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: pane.location.isArchive ? "archivebox" : "folder")
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(index == 0 ? "Left Folder" : "Right Folder")
+                                    .font(.caption.weight(.semibold))
+                                Text(pane.location.displayPath)
+                                    .font(.caption)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            Spacer(minLength: 0)
+                            if isActive {
+                                Text("Active")
+                                    .font(.caption.weight(.semibold))
+                            }
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .contentShape(Rectangle())
                     }
-                },
-                onSortChange: { sortKey in
-                    explorerStore.activatePane(at: index)
-                    explorerStore.sortActivePane(by: sortKey)
+                    .buttonStyle(.plain)
+                    .help(pane.location.displayPath)
+                    .background(isActive ? Color.accentColor.opacity(0.12) : Color.clear)
+                    Divider()
                 }
-            )
-            .frame(minWidth: explorerStore.paneMode == .dual ? 420 : 520)
-            .overlay(alignment: .top) {
-                Rectangle()
-                    .fill(Color.accentColor)
-                    .frame(height: explorerStore.activePaneIndex == index ? 2 : 0)
+                GeometryReader { geometry in
+                    fileTable(for: pane, at: index, compact: geometry.size.width < 680)
+                        .overlay {
+                            if pane.isLoading || isSearching {
+                                ProgressView(isSearching ? "Searching…" : "Loading folder…")
+                                    .padding(16)
+                                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .allowsHitTesting(false)
+                            } else if entries.isEmpty {
+                                VStack(spacing: 10) {
+                                    Image(systemName: isFiltered ? "magnifyingglass" : "folder")
+                                        .font(.title2)
+                                    Text(isFiltered ? "No Matching Items" : "This Folder Is Empty")
+                                        .font(.headline)
+                                    if isFiltered {
+                                        Text("Try another search or clear the filters.")
+                                            .font(.callout)
+                                        Button("Clear All Filters") {
+                                            explorerStore.clearAllSearchCriteria()
+                                        }
+                                    }
+                                }
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            }
+                        }
+                }
+                Divider()
+                HStack {
+                    Text("\(entries.count) \(countLabel)")
+                    Spacer()
+                    if !pane.selectedURLs.isEmpty {
+                        Text("\(pane.selectedURLs.count) selected")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
             }
+            .frame(minWidth: explorerStore.paneMode == .dual ? 420 : 520)
         }
+    }
+
+    private func fileTable(for pane: PaneState, at index: Int, compact: Bool) -> some View {
+        FileTableView(
+            entries: explorerStore.visibleEntries(forPaneAt: index),
+            selectedURLs: pane.selectedURLs,
+            canPaste: explorerStore.canPaste,
+            canUndo: explorerStore.canUndo,
+            canCloseTab: explorerStore.canCloseTab,
+            canGoBack: !pane.backStack.isEmpty,
+            canGoForward: !pane.forwardStack.isEmpty,
+            canGoUp: explorerStore.canGoUp(forPaneAt: index),
+            currentURL: pane.currentURL,
+            currentLocation: pane.location,
+            currentSort: pane.sort,
+            showsPathColumn: index == explorerStore.activePaneIndex && explorerStore.isShowingRecursiveSearchResults,
+            usesCompactColumns: compact,
+            paneID: pane.id,
+            inlineRenameRequest: inlineRenameRequest(for: pane),
+            requestsInitialFocus: index == explorerStore.activePaneIndex,
+            onFocus: {
+                focusedToolbarField = nil
+                explorerStore.activatePane(at: index)
+                explorerStore.setToolbarTextInputFocused(false)
+            },
+            onSelectionChange: { urls in
+                explorerStore.activatePane(at: index)
+                explorerStore.updateSelection(urls)
+            },
+            onOpen: { url in
+                explorerStore.activatePane(at: index)
+                Task { await explorerStore.open(url) }
+            },
+            onRename: { paneID, url, newName in
+                Task { await explorerStore.rename(url, to: newName, inPane: paneID) }
+            },
+            onInlineRenameEnd: { requestID in
+                explorerStore.clearInlineRenameRequest(matching: requestID)
+            },
+            onCommand: { command in
+                explorerStore.activatePane(at: index)
+                Task { await explorerStore.perform(command) }
+            },
+            isCommandEnabled: { command in
+                explorerStore.isCommandEnabled(command, forPaneAt: index)
+            },
+            openWithApplications: explorerStore.openWithApplications(forPaneAt: index),
+            onOpenWithApplication: { application in
+                explorerStore.activatePane(at: index)
+                Task { await explorerStore.openSelected(with: application) }
+            },
+            onDropItems: { urls, destinationFolder, operation in
+                explorerStore.activatePane(at: index)
+                Task {
+                    await explorerStore.performDrop(
+                        urls: urls,
+                        destinationFolder: destinationFolder,
+                        operation: operation
+                    )
+                }
+            },
+            onSortChange: { sortKey in
+                explorerStore.activatePane(at: index)
+                explorerStore.sortActivePane(by: sortKey)
+            }
+        )
     }
 
     private func inlineRenameRequest(for pane: PaneState) -> InlineRenameRequest? {

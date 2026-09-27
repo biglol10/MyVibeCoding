@@ -32,6 +32,7 @@ final class ApplicationListViewModelTests: XCTestCase {
 
         await viewModel.loadApps()
         await viewModel.scanSelectedApp()
+        viewModel.selectedCandidateIDs = Set(viewModel.candidates.filter { !$0.isProtected }.map(\.id))
         await viewModel.deleteConfirmedItems(confirmation: "DELETE", mode: .permanent)
 
         XCTAssertEqual(viewModel.apps, [])

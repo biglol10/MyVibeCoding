@@ -30,6 +30,7 @@ public final class CaptureCoordinator: ObservableObject {
     private var screenshotSaveGenerationByDocumentID: [UUID: UInt64] = [:]
     private var isTerminationPreparationInProgress = false
     private var didAttemptPendingRecordingRecovery = false
+    private var countdownTask: Task<Void, Error>?
 
     public init(
         appState: AppState,
@@ -107,8 +108,8 @@ public final class CaptureCoordinator: ObservableObject {
             let settings = settingsStore.settings
             let didHideCaptureWindows = hideCaptureWindowsIfNeeded(settings: settings)
             defer { restoreCaptureWindowsIfNeeded(didHideCaptureWindows) }
-            try await waitIfNeeded(seconds: settings.defaultDelaySeconds)
             let selection = try await selectCaptureArea()
+            try await waitIfNeeded(seconds: settings.defaultDelaySeconds)
             let namingContext = metadataService.namingContext(for: selection)
             let result = try await screenshotService.captureImage(selection: selection)
             guard let refreshedReplacement = await refreshReplacementAuthorizationIfDocumentChanged(replacement) else {
@@ -163,7 +164,7 @@ public final class CaptureCoordinator: ObservableObject {
                 appState.statusMessage = "Screenshot captured. Press Save to write the file."
             }
         } catch {
-            if isSelectionCancelled(error) {
+            if isSelectionCancelled(error) || error is CancellationError {
                 appState.statusMessage = "Screenshot cancelled."
             } else {
                 appState.statusMessage = "Screenshot failed: \(userMessage(for: error))"
@@ -246,7 +247,7 @@ public final class CaptureCoordinator: ObservableObject {
                 appState.statusMessage = "Recording captured. Press Save to write the file."
             }
         } catch {
-            if isSelectionCancelled(error) {
+            if isSelectionCancelled(error) || error is CancellationError {
                 appState.statusMessage = "Recording cancelled."
             } else if isRecordingStoppedByUser(error) {
                 appState.statusMessage = "Recording stopped."
@@ -601,6 +602,7 @@ public final class CaptureCoordinator: ObservableObject {
             return
         }
 
+        appState.statusMessage = "Creating trimmed copy…"
         let exportDate = Date()
         let temporaryOutputURL = fileOutputService.temporaryRecordingURL()
         var producedResult: RecordingExportResult?
@@ -613,7 +615,7 @@ public final class CaptureCoordinator: ObservableObject {
             )
             producedResult = exportResult
             let temporaryTrimmedURL = exportResult.fileURL
-            guard var currentDocument = appState.currentDocument,
+            guard let currentDocument = appState.currentDocument,
                   currentDocument.id == document.id,
                   currentDocument.fileURL?.standardizedFileURL == sourceURL.standardizedFileURL
             else {
@@ -635,20 +637,19 @@ public final class CaptureCoordinator: ObservableObject {
                 date: exportDate,
                 context: document.namingContext
             )
-            currentDocument.fileURL = trimmedURL
-            currentDocument.fileIdentity = try? CaptureFileIdentity.existingFile(at: trimmedURL)
-            currentDocument.createdAt = Date()
-            currentDocument.isDirty = false
-            let removedTemporarySource = discardTemporaryRecordingIfOwned(
-                document,
-                identity: sourceIdentity
+            let trimmedDocument = EditorDocument(
+                kind: .recording,
+                createdAt: exportDate,
+                fileURL: trimmedURL,
+                fileIdentity: try? CaptureFileIdentity.existingFile(at: trimmedURL),
+                namingContext: document.namingContext,
+                isDirty: false
             )
-            appState.currentDocument = currentDocument
-            await addHistoryItem(for: currentDocument)
+            await addHistoryItem(for: trimmedDocument)
+            // Keep the original open, including its recovery file and unsaved state.
             revealIfNeeded(trimmedURL, settings: settingsStore.settings)
-            appState.statusMessage = removedTemporarySource
-                ? "Recording trimmed."
-                : "Recording trimmed, but the temporary original could not be removed."
+            appState.statusMessage = "Trimmed copy saved. Original recording kept open."
+
         } catch {
             if let producedResult {
                 discardExportResultIfOwned(producedResult)
@@ -675,6 +676,7 @@ public final class CaptureCoordinator: ObservableObject {
             return
         }
 
+        appState.statusMessage = "Exporting GIF…"
         let exportDate = Date()
         let temporaryOutputURL = fileOutputService.temporaryGIFURL()
         var producedResult: RecordingExportResult?
@@ -724,6 +726,7 @@ public final class CaptureCoordinator: ObservableObject {
             return
         }
         let expectedRevision = ScreenshotContentRevision(document)
+        appState.statusMessage = "Recognizing text…"
 
         do {
             let data = try await screenshotDataForOutput(document)
@@ -897,14 +900,32 @@ public final class CaptureCoordinator: ObservableObject {
         )
     }
 
-    private func waitIfNeeded(seconds: Int) async throws {
-        let clampedSeconds = max(0, seconds)
-        guard clampedSeconds > 0 else {
-            return
-        }
+    public func cancelCountdown() {
+        countdownTask?.cancel()
+    }
 
-        appState.statusMessage = "Starting in \(clampedSeconds)s..."
-        try await delaySleeper.sleep(seconds: clampedSeconds)
+    private func waitIfNeeded(seconds: Int) async throws {
+        let seconds = min(max(0, seconds), 10)
+        guard seconds > 0 else { return }
+        let task = Task { @MainActor [self] in
+            for remaining in stride(from: seconds, through: 1, by: -1) {
+                try Task.checkCancellation()
+                appState.countdownSecondsRemaining = remaining
+                appState.statusMessage = "Starting in \(remaining)s…"
+                try await delaySleeper.sleep(seconds: 1)
+            }
+            try Task.checkCancellation()
+        }
+        countdownTask = task
+        defer {
+            countdownTask = nil
+            appState.countdownSecondsRemaining = nil
+        }
+        try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
     }
 
     private func ensureScreenCaptureAccess() throws {
@@ -1157,21 +1178,6 @@ public final class CaptureCoordinator: ObservableObject {
             return
         }
         _ = try? ExclusiveFilePublisher.discardFileIfStillOwned(result.fileURL, identity: fileIdentity)
-    }
-
-    private func discardTemporaryRecordingIfOwned(
-        _ document: EditorDocument,
-        identity: CaptureFileIdentity
-    ) -> Bool {
-        guard document.kind == .recording,
-              document.isDirty,
-              let fileURL = document.fileURL,
-              pendingRecordingStore.owns(fileURL)
-        else {
-            return true
-        }
-
-        return (try? ExclusiveFilePublisher.discardFileIfStillOwned(fileURL, identity: identity)) == true
     }
 
     private func userMessage(for error: Error) -> String {

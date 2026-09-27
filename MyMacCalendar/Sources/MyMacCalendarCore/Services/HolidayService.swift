@@ -45,37 +45,42 @@ public struct NagerHolidayDecoder {
 }
 
 public struct HolidayMerger {
-    public init() {}
+    private let calendar: Calendar
+
+    public init(calendar: Calendar = .current) { self.calendar = calendar }
 
     public func merge(imports: [HolidayImport], existing: [HolidayRecord], year: Int) -> [HolidayRecord] {
         let hiddenApiHolidays = existing.filter { $0.source == .api && $0.isHidden && $0.year == year }
         let hiddenKeys = Set(hiddenApiHolidays.map(\.providerKey))
-        let hiddenDays = Set(hiddenApiHolidays.map { dayKey($0.date) })
-        let manualByDate = Dictionary(grouping: existing.filter { $0.source == .manual && $0.year == year }, by: { dayKey($0.date) })
+        let hiddenDays = Set(hiddenApiHolidays.map { dayKey($0.localDate(in: calendar)) })
+        let manualByDate = Dictionary(grouping: existing.filter { $0.source == .manual && $0.year == year }, by: { dayKey($0.localDate(in: calendar)) })
             .compactMapValues { $0.sorted { $0.updatedAt > $1.updatedAt }.first }
 
         var merged: [HolidayRecord] = []
         for item in imports where isDate(item.date, inYear: year) && hiddenKeys.contains(item.providerKey) == false && hiddenDays.contains(dayKey(item.date)) == false {
             let key = dayKey(item.date)
             if manualByDate[key] == nil {
-                merged.append(HolidayRecord(date: item.date, title: item.title, source: .api, providerKey: item.providerKey, year: year))
+                merged.append(HolidayRecord(date: item.date, title: item.title, source: .api, providerKey: item.providerKey, year: year, calendar: calendar))
             }
         }
 
         merged.append(contentsOf: manualByDate.values)
-        return merged.sorted { $0.date < $1.date }
+        return merged.sorted { $0.localDate(in: calendar) < $1.localDate(in: calendar) }
     }
 
     private func dayKey(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = calendar.timeZone
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: date)
     }
 
     private func isDate(_ date: Date, inYear year: Int) -> Bool {
-        Calendar(identifier: .gregorian).component(.year, from: date) == year
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.timeZone = calendar.timeZone
+        return gregorian.component(.year, from: date) == year
     }
 }
 
@@ -89,14 +94,14 @@ public struct HolidayImportPlanner {
     public func newRecords(imports: [HolidayImport], existing: [HolidayRecord], year: Int) -> [HolidayRecord] {
         let existingAPI = existing.filter { $0.source == .api && $0.year == year }
         let existingProviderKeys = Set(existingAPI.map(\.providerKey))
-        let existingDays = Set(existingAPI.map { calendar.startOfDay(for: $0.date) })
-        let merged = HolidayMerger().merge(imports: imports, existing: existing, year: year)
+        let existingDays = Set(existingAPI.map { calendar.startOfDay(for: $0.localDate(in: calendar)) })
+        let merged = HolidayMerger(calendar: calendar).merge(imports: imports, existing: existing, year: year)
         var plannedProviderKeys = Set<String>()
         var plannedDays = Set<Date>()
 
         return merged.filter { holiday in
             guard holiday.source == .api, holiday.isHidden == false else { return false }
-            let day = calendar.startOfDay(for: holiday.date)
+            let day = calendar.startOfDay(for: holiday.localDate(in: calendar))
             guard existingProviderKeys.contains(holiday.providerKey) == false,
                   existingDays.contains(day) == false,
                   plannedProviderKeys.insert(holiday.providerKey).inserted,

@@ -72,7 +72,7 @@ public enum MainWindowPresentation {
     public static func recordingSummary(settings: AppSettings) -> String {
         var parts = [
             "MP4",
-            "\(settings.recordingDurationSeconds)s",
+            settings.recordUntilStopped ? "Until stopped" : "\(settings.recordingDurationSeconds)s",
             "Delay \(settings.countdownSeconds)s"
         ]
         if settings.recordingQuality == .high {

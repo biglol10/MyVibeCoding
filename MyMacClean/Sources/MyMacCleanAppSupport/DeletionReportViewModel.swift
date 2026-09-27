@@ -122,9 +122,25 @@ public struct DeletionReportViewModel: Equatable, Sendable {
     }
 
     public var hasPermissionFailure: Bool {
-        receipt.verificationResults.contains { $0.status == .permissionDenied }
+        receipt.executionResults.contains { $0.permissionDenied == true }
+            || receipt.verificationResults.contains { $0.status == .permissionDenied }
             || errorLogs.contains { log in
                 Self.isPermissionFailureMessage(log.message)
+            }
+    }
+
+    public var hasAppManagementFailure: Bool {
+        receipt.executionResults.contains { result in
+            !result.success && Self.isApplicationsBundle(result.path)
+                && (result.permissionDenied ?? Self.isPermissionFailureMessage(result.errorMessage ?? ""))
+        } || receipt.verificationResults.contains { $0.status == .permissionDenied && Self.isApplicationsBundle($0.path) }
+    }
+
+    public var hasFullDiskAccessFailure: Bool {
+        receipt.executionResults.contains { $0.permissionDenied == true && !Self.isApplicationsBundle($0.path) }
+            || receipt.verificationResults.contains { $0.status == .permissionDenied && !Self.isApplicationsBundle($0.path) }
+            || errorLogs.contains { log in
+                !Self.isApplicationsBundle(log.path) && Self.isPermissionFailureMessage(log.message)
             }
     }
 
@@ -143,11 +159,21 @@ public struct DeletionReportViewModel: Equatable, Sendable {
             "App: \(receipt.appName)",
             "Bundle ID: \(receipt.bundleIdentifier ?? "Unknown")",
             "Action: \(receipt.action.rawValue)",
+            "Method: \(deletionMethodTitle)",
             "Status: \(statusTitle)",
             "\(completedCountTitle): \(completedCount)",
             "Remaining: \(remainingCount)"
         ]
 
+        lines.append("")
+        lines.append("Selected paths:")
+        for candidate in receipt.selectedCandidates {
+            let status = receipt.verificationResults.first { $0.path == candidate.path }?.status.rawValue ?? "unverified"
+            lines.append("\(candidate.path) - \(status)")
+            if let trashPath = receipt.executionResults.first(where: { $0.path == candidate.path })?.trashPath {
+                lines.append("Trash: \(trashPath)")
+            }
+        }
         if !remainingPaths.isEmpty {
             lines.append("")
             lines.append("Remaining Paths:")
@@ -163,11 +189,25 @@ public struct DeletionReportViewModel: Equatable, Sendable {
         return lines.joined(separator: "\n")
     }
 
+    public var deletionMethodTitle: String {
+        if receipt.action.isStartupItemChange { return "Startup configuration change" }
+        switch receipt.deletionMode {
+        case .moveToTrash: return "Moved to Trash"
+        case .permanent: return "Permanently deleted"
+        case nil: return "Method not recorded in this older receipt"
+        }
+    }
+
     private static func isPermissionFailureMessage(_ message: String) -> Bool {
         let normalized = message.lowercased()
         return normalized.contains("permission")
             || normalized.contains("operation not permitted")
             || normalized.contains("full disk access")
             || normalized.contains("not authorized")
+    }
+
+    private static func isApplicationsBundle(_ path: String) -> Bool {
+        let normalized = URL(fileURLWithPath: path).standardizedFileURL.path
+        return normalized.hasPrefix("/Applications/") && normalized.lowercased().hasSuffix(".app")
     }
 }

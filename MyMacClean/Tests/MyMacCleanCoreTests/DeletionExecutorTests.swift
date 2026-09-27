@@ -24,7 +24,7 @@ final class DeletionExecutorTests: XCTestCase {
         XCTAssertEqual(recorder.removedURLs, [])
     }
 
-    func testExecutorTreatsTrashErrorAsSuccessWhenPathNoLongerExists() async throws {
+    func testExecutorRetainsTrashErrorWithoutVerifiedDestination() async throws {
         let root = try TestFixtures.temporaryDirectory(named: "executor-trash-error-after-move")
         let appURL = root.appendingPathComponent("Figma.app", isDirectory: true)
         let cacheURL = root.appendingPathComponent("Library/Caches/com.figma.Desktop", isDirectory: true)
@@ -49,7 +49,8 @@ final class DeletionExecutorTests: XCTestCase {
             protectionPolicy: ProtectionPolicy(homeDirectory: root)
         ).execute(plan: plan, confirmation: "DELETE")
 
-        XCTAssertEqual(results, [DeletionItemResult(path: cacheURL.path, success: true, errorMessage: nil)])
+        XCTAssertFalse(results[0].success)
+        XCTAssertEqual(results[0].permissionDenied, true)
         XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL.path))
     }
 
@@ -64,11 +65,14 @@ final class DeletionExecutorTests: XCTestCase {
         let candidate = RelatedFileCandidate(url: cacheURL, kind: .appBundle, size: 0, matchReason: "test", confidence: .high, defaultSelected: true, requiresManualReview: false, isProtected: false)
         let plan = DeletionPlan(app: app, candidates: [candidate], createdAt: Date(timeIntervalSince1970: 0))
         let fallbackRecorder = RemovalRecorder()
+        let recycledURL = root.appendingPathComponent("recycle-destination/Figma Helper.app", isDirectory: true)
         let fileRemover = DeletionFileRemover(
             trash: { _ in throw CocoaError(.fileWriteNoPermission) },
             fallbackTrash: { url in
                 fallbackRecorder.recordTrash(url)
-                try FileManager.default.removeItem(at: url)
+                try FileManager.default.createDirectory(at: recycledURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try FileManager.default.moveItem(at: url, to: recycledURL)
+                return recycledURL
             },
             remove: { url in
                 try FileManager.default.removeItem(at: url)
@@ -80,7 +84,7 @@ final class DeletionExecutorTests: XCTestCase {
             protectionPolicy: ProtectionPolicy(homeDirectory: root)
         ).execute(plan: plan, confirmation: "DELETE")
 
-        XCTAssertEqual(results, [DeletionItemResult(path: cacheURL.path, success: true, errorMessage: nil)])
+        XCTAssertEqual(results, [DeletionItemResult(path: cacheURL.path, success: true, errorMessage: nil, trashPath: recycledURL.path)])
         XCTAssertEqual(fallbackRecorder.trashedURLs, [cacheURL])
         XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL.path))
     }
@@ -100,7 +104,7 @@ final class DeletionExecutorTests: XCTestCase {
             trash: { _ in throw CocoaError(.fileWriteNoPermission) },
             fallbackTrash: { url in
                 fallbackRecorder.recordTrash(url)
-                try FileManager.default.removeItem(at: url)
+                return url
             },
             remove: { url in
                 try FileManager.default.removeItem(at: url)
@@ -116,6 +120,95 @@ final class DeletionExecutorTests: XCTestCase {
         XCTAssertFalse(results[0].success)
         XCTAssertEqual(fallbackRecorder.trashedURLs, [])
         XCTAssertTrue(FileManager.default.fileExists(atPath: cacheURL.path))
+    }
+
+    func testExecutorWaitsForAppBundleFallbackCompletionBeforeProceedingInPlanOrder() async throws {
+        let root = try TestFixtures.temporaryDirectory(named: "executor-async-fallback-order")
+        let firstURL = root.appendingPathComponent("First.app", isDirectory: true)
+        let secondURL = root.appendingPathComponent("Second.app", isDirectory: true)
+        try FileManager.default.createDirectory(at: firstURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondURL, withIntermediateDirectories: true)
+
+        let app = InstalledApp(displayName: "First", bundleIdentifier: "com.example.first", version: nil, executableName: "First", bundleURL: firstURL, iconIdentifier: nil, bundleSize: 0, lastOpenedAt: nil)
+        let candidates = [firstURL, secondURL].map {
+            RelatedFileCandidate(url: $0, kind: .appBundle, size: 0, matchReason: "test", confidence: .high, defaultSelected: true, requiresManualReview: false, isProtected: false)
+        }
+        let events = FallbackEventRecorder()
+        let fileRemover = DeletionFileRemover(
+            trash: { _ in throw CocoaError(.fileWriteNoPermission) },
+            fallbackTrash: { url in
+                await events.record("started \(url.lastPathComponent)")
+                try await Task.sleep(for: .milliseconds(25))
+                let recycledURL = root.appendingPathComponent("recycle-destination/\(url.lastPathComponent)", isDirectory: true)
+                try FileManager.default.createDirectory(at: recycledURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try FileManager.default.moveItem(at: url, to: recycledURL)
+                await events.record("completed \(url.lastPathComponent)")
+                return recycledURL
+            },
+            remove: { url in try FileManager.default.removeItem(at: url) }
+        )
+
+        let results = await DeletionExecutor(
+            fileRemover: fileRemover,
+            protectionPolicy: ProtectionPolicy(homeDirectory: root)
+        ).execute(plan: DeletionPlan(app: app, candidates: candidates), confirmation: "DELETE")
+
+        XCTAssertEqual(results.map(\.path), [firstURL.path, secondURL.path])
+        XCTAssertTrue(results.allSatisfy(\.success))
+        let recordedEvents = await events.values
+        XCTAssertEqual(recordedEvents, [
+            "started First.app",
+            "completed First.app",
+            "started Second.app",
+            "completed Second.app"
+        ])
+    }
+
+    func testExecutorReturnsPrimaryAndFallbackErrorsWhenAppBundleFallbackFails() async throws {
+        let root = try TestFixtures.temporaryDirectory(named: "executor-fallback-failure")
+        let appURL = root.appendingPathComponent("Figma.app", isDirectory: true)
+        try FileManager.default.createDirectory(at: appURL, withIntermediateDirectories: true)
+        let app = InstalledApp(displayName: "Figma", bundleIdentifier: "com.figma.Desktop", version: nil, executableName: "Figma", bundleURL: appURL, iconIdentifier: nil, bundleSize: 0, lastOpenedAt: nil)
+        let candidate = RelatedFileCandidate(url: appURL, kind: .appBundle, size: 0, matchReason: "test", confidence: .high, defaultSelected: true, requiresManualReview: false, isProtected: false)
+        let fileRemover = DeletionFileRemover(
+            trash: { _ in throw CocoaError(.fileWriteNoPermission) },
+            fallbackTrash: { _ in throw CocoaError(.fileWriteNoPermission) },
+            remove: { url in try FileManager.default.removeItem(at: url) }
+        )
+
+        let results = await DeletionExecutor(
+            fileRemover: fileRemover,
+            protectionPolicy: ProtectionPolicy(homeDirectory: root)
+        ).execute(plan: DeletionPlan(app: app, candidates: [candidate]), confirmation: "DELETE")
+
+        XCTAssertFalse(results[0].success)
+        XCTAssertTrue(results[0].errorMessage?.contains("Standard Trash failed") == true)
+        XCTAssertTrue(results[0].errorMessage?.contains("App bundle Trash fallback failed") == true)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: appURL.path))
+    }
+
+    func testWorkspaceRecycleMovesDisposableAppFixtureAndReturnsVerifiedTrashURL() async throws {
+        let root = try TestFixtures.temporaryDirectory(named: "workspace-recycle-smoke")
+        let fixtureURL = root.appendingPathComponent("DisposableRecycleFixture.app", isDirectory: true)
+        try FileManager.default.createDirectory(at: fixtureURL.appendingPathComponent("Contents", isDirectory: true), withIntermediateDirectories: true)
+        try Data("fixture".utf8).write(to: fixtureURL.appendingPathComponent("Contents/Info.plist"))
+
+        var recycledURL: URL?
+        defer {
+            if let recycledURL, FileManager.default.fileExists(atPath: recycledURL.path) {
+                try? FileManager.default.removeItem(at: recycledURL)
+            }
+        }
+
+        recycledURL = try await WorkspaceTrashFallback.moveToTrash(fixtureURL)
+
+        let verifiedRecycledURL = try XCTUnwrap(recycledURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixtureURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: verifiedRecycledURL.path))
+        XCTAssertTrue(verifiedRecycledURL.path.contains(".Trash"))
+        try FileManager.default.removeItem(at: verifiedRecycledURL)
+        recycledURL = nil
+        XCTAssertFalse(FileManager.default.fileExists(atPath: verifiedRecycledURL.path))
     }
 
     func testExecutorPermanentlyRemovesPlannedFilesOnlyWhenPermanentModeIsRequested() async throws {
@@ -340,6 +433,18 @@ private final class RemovalRecorder: @unchecked Sendable {
             trash: { [self] url in trashedURLs.append(url) },
             remove: { [self] url in removedURLs.append(url) }
         )
+    }
+}
+
+private actor FallbackEventRecorder {
+    private var events: [String] = []
+
+    func record(_ value: String) {
+        events.append(value)
+    }
+
+    var values: [String] {
+        events
     }
 }
 

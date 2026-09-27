@@ -5,9 +5,13 @@ struct EditorToolbarView: View {
     let activeTool: EditorTool
     let canCopy: Bool
     let canSave: Bool
+    let canUndo: Bool
+    let canRedo: Bool
+    let canDelete: Bool
     let onToolSelected: (EditorTool) -> Void
     let onUndo: () -> Void
     let onRedo: () -> Void
+    let onDelete: () -> Void
     let onCopy: () -> Void
     let onSave: () -> Void
     let onOCR: () -> Void
@@ -25,7 +29,11 @@ struct EditorToolbarView: View {
 
                 Divider().frame(height: 22)
                 toolbarButton("arrow.uturn.backward", "Undo", action: onUndo)
+                    .disabled(!canUndo)
                 toolbarButton("arrow.uturn.forward", "Redo", action: onRedo)
+                    .disabled(!canRedo)
+                toolbarButton("trash", "Delete selected annotation", action: onDelete)
+                    .disabled(!canDelete)
                 toolbarButton("text.viewfinder", "OCR", action: onOCR)
                 toolbarButton("sparkles", "Quick Redact", action: onQuickRedact)
             }
@@ -57,5 +65,6 @@ struct EditorToolbarView: View {
         }
         .disabled(documentKind == nil)
         .help(help)
+        .accessibilityLabel(help)
     }
 }

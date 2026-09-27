@@ -98,7 +98,8 @@ final class OrphanFileScannerTests: XCTestCase {
         let home = try TestFixtures.temporaryDirectory(named: "orphans-launch-agent-home")
         let launchAgent = home.appendingPathComponent("Library/LaunchAgents/ai.openclaw.gateway.plist")
         try FileManager.default.createDirectory(at: launchAgent.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data(repeating: 1, count: 4).write(to: launchAgent)
+        let data = try PropertyListSerialization.data(fromPropertyList: ["Label": "ai.openclaw.gateway", "Program": home.appendingPathComponent("removed-program").path], format: .xml, options: 0)
+        try data.write(to: launchAgent)
 
         let groups = try await OrphanFileScanner(homeDirectory: home, installedApps: []).scan()
 

@@ -42,13 +42,13 @@ public struct CandidateMatcher: Sendable {
         }
 
         let candidateTokens = tokenSequence(from: normalizedPath)
-        let candidateCompact = compactIdentifier(from: normalizedPath)
+
         let nameSequences = [app.displayName, app.executableName ?? ""]
             .map { (name: $0, tokens: tokenSequence(from: $0)) }
             .filter { !$0.tokens.isEmpty }
 
         if let matchedName = nameSequences.first(where: { sequence in
-            fullNameMatch(sequence.tokens, candidateTokens: candidateTokens, candidateCompact: candidateCompact)
+            fullNameMatch(sequence.tokens, candidateTokens: candidateTokens)
         }) {
             if isKnownSharedVendorFolder(normalizedPath, matchedNameTokens: matchedName.tokens) {
                 let evidence = MatchEvidence(
@@ -76,8 +76,8 @@ public struct CandidateMatcher: Sendable {
                 matchReason: "full app name match",
                 confidence: kind == .unknown ? .low : .medium,
                 evidence: [evidence],
-                defaultSelected: kind != .unknown,
-                requiresManualReview: kind == .unknown
+                defaultSelected: false,
+                requiresManualReview: true
             )
         }
 
@@ -92,10 +92,10 @@ public struct CandidateMatcher: Sendable {
             .filter { !$0.isEmpty }
     }
 
-    private func compactNameMatch(_ sequence: [String], in candidateCompact: String) -> Bool {
+    private func compactNameMatch(_ sequence: [String], in candidateTokens: [String]) -> Bool {
         guard sequence.count > 1 else { return false }
         let compactName = sequence.joined()
-        return compactName.count >= 6 && candidateCompact.contains(compactName)
+        return compactName.count >= 6 && candidateTokens.contains(compactName)
     }
 
     private func containsBoundedIdentifier(_ identifier: String, in value: String) -> Bool {
@@ -118,11 +118,11 @@ public struct CandidateMatcher: Sendable {
         !character.isLetter && !character.isNumber && character != "-" && character != "_"
     }
 
-    private func fullNameMatch(_ sequence: [String], candidateTokens: [String], candidateCompact: String) -> Bool {
+    private func fullNameMatch(_ sequence: [String], candidateTokens: [String]) -> Bool {
         if sequence.count == 1 {
             return candidateTokens == sequence
         }
-        return candidateTokens.containsContiguous(sequence) || compactNameMatch(sequence, in: candidateCompact)
+        return candidateTokens.containsContiguous(sequence) || compactNameMatch(sequence, in: candidateTokens)
     }
 
     private func isKnownSharedVendorFolder(_ normalizedPath: String, matchedNameTokens: [String]) -> Bool {
@@ -131,14 +131,7 @@ public struct CandidateMatcher: Sendable {
             && tokenSequence(from: normalizedPath) == matchedNameTokens
     }
 
-    private func compactIdentifier(from value: String) -> String {
-        value
-            .lowercased()
-            .unicodeScalars
-            .filter { CharacterSet.alphanumerics.contains($0) }
-            .map(String.init)
-            .joined()
-    }
+
 }
 
 private extension Array where Element == String {

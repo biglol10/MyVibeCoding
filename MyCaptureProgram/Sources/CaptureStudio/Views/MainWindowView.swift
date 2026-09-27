@@ -15,6 +15,8 @@ struct MainWindowView: View {
     @State private var guideDontShowAgain = true
     @State private var trimStartText = "0"
     @State private var trimEndText = ""
+    @State private var pendingDeleteID: UUID?
+    @State private var isDeleteConfirmationPresented = false
 
     init(captureCoordinator: CaptureCoordinator, appState: AppState) {
         self.captureCoordinator = captureCoordinator
@@ -25,6 +27,14 @@ struct MainWindowView: View {
     var body: some View {
         VStack(spacing: 0) {
             quickBar
+            if appState.currentDocument == nil, let message = appState.statusMessage {
+                Text(message)
+                    .font(.callout)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 12).padding(.bottom, 10)
+            }
 
             Group {
                 if appState.isHistoryPresented {
@@ -48,10 +58,10 @@ struct MainWindowView: View {
                 }
 
                 if appState.currentDocument?.kind == .screenshot,
-                   ToolInspectorPresentation.controls(
+                   (ToolInspectorPresentation.controls(
                     for: editorViewModel.activeTool,
                     selectedLayer: selectedLayer
-                   ).isVisible {
+                   ).isVisible || selectedLayer?.isResizable == true) {
                     Divider()
                     ToolInspectorView(selectedLayer: selectedLayer, editorViewModel: editorViewModel)
                 }
@@ -87,6 +97,33 @@ struct MainWindowView: View {
                 }
             )
         }
+        .background(CaptureCountdownPanel(
+            secondsRemaining: appState.countdownSecondsRemaining,
+            onCancel: captureCoordinator.cancelCountdown
+        ))
+        .focusedSceneValue(\.captureDocument, CaptureDocumentActions(
+            canSave: appState.currentDocument.map {
+                MainWindowPresentation.recentResult(for: $0, statusMessage: nil).canSave
+            } == true && !appState.isInteractionBlocked,
+            save: { Task { await captureCoordinator.saveCurrentDocument() } }
+        ))
+        .confirmationDialog("Delete the entire capture?", isPresented: $isDeleteConfirmationPresented, titleVisibility: .visible) {
+            Button("Delete Capture", role: .destructive) {
+                guard pendingDeleteID == appState.currentDocument?.id else { return }
+                captureCoordinator.deleteCurrentDocument()
+                pendingDeleteID = nil
+            }
+        } message: {
+            Text("Saved files move to Trash. Unsaved annotations will be discarded. To delete only an annotation, use the editor toolbar.")
+        }
+        .onChange(of: appState.currentDocument?.fileURL) {
+            trimStartText = "0"
+            trimEndText = ""
+        }
+        .onChange(of: appState.currentDocument?.id) {
+            trimStartText = "0"
+            trimEndText = ""
+        }
         .onAppear(perform: presentGuideOnLaunchIfNeeded)
         .task(id: appState.currentDocument?.id) {
             await captureCoordinator.recoverPendingRecordingIfAvailable()
@@ -115,7 +152,11 @@ struct MainWindowView: View {
             .disabled(appState.isInteractionBlocked)
             .help("Capture area")
 
-            if appState.isRecordingInProgress {
+            if let seconds = appState.countdownSecondsRemaining {
+                Button("Cancel (\(seconds)s)") { captureCoordinator.cancelCountdown() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+            } else if appState.isRecordingInProgress {
                 Button {
                     Task { await captureCoordinator.stopActiveRecording() }
                 } label: {
@@ -197,10 +238,6 @@ struct MainWindowView: View {
     }
 
     private var secondarySummaryText: String {
-        if appState.currentDocument == nil, let statusMessage = appState.statusMessage {
-            return statusMessage
-        }
-
         return MainWindowPresentation.recordingSummary(settings: settingsStore.settings)
     }
 
@@ -225,7 +262,7 @@ struct MainWindowView: View {
                     } label: {
                         quickOptionLabel(
                             title: preset.name,
-                            isSelected: appState.captureMode == preset.captureMode && appState.areaType == preset.areaType
+                            isSelected: presetStore.matches(preset, appState: appState, settings: settingsStore.settings)
                         )
                     }
                 }
@@ -247,17 +284,16 @@ struct MainWindowView: View {
                         } label: {
                             quickOptionLabel(
                                 title: preset.name,
-                                isSelected: appState.captureMode == preset.captureMode && appState.areaType == preset.areaType
+                                isSelected: presetStore.matches(preset, appState: appState, settings: settingsStore.settings)
                             )
                         }
                     }
                 }
 
-                Button("Save Current Settings as Preset") {
-                    let nextIndex = presetStore.userPresets.count + 1
+                Button("Save Capture Options as Preset") {
                     presetStore.save(
                         CapturePreset(
-                            name: "Personal \(nextIndex)",
+                            name: presetStore.nextPersonalPresetName,
                             captureMode: appState.captureMode,
                             areaType: appState.areaType,
                             settings: settingsStore.settings
@@ -359,7 +395,8 @@ struct MainWindowView: View {
                 Text(result.detail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer()
@@ -412,11 +449,13 @@ struct MainWindowView: View {
 
             if result.canDelete {
                 Button {
-                    captureCoordinator.deleteCurrentDocument()
+                    pendingDeleteID = document.id
+                    isDeleteConfirmationPresented = true
                 } label: {
                     Image(systemName: "trash")
                 }
-                .help("Delete")
+                .help("Delete entire capture")
+                .accessibilityLabel("Delete entire capture")
             }
         }
         .padding(.horizontal, 12)
@@ -451,7 +490,7 @@ struct MainWindowView: View {
 
             let filteredItems = historyStore.items(matching: appState.historySearchText)
             if filteredItems.isEmpty {
-                Text("No captures yet.")
+                Text(appState.historySearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No captures yet." : "No matching captures.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 58, alignment: .center)
@@ -538,9 +577,13 @@ struct MainWindowView: View {
                 activeTool: editorViewModel.activeTool,
                 canCopy: result.canCopy,
                 canSave: result.canSave,
-                onToolSelected: { editorViewModel.activeTool = $0 },
-                onUndo: editorViewModel.undo,
-                onRedo: editorViewModel.redo,
+                canUndo: editorViewModel.canUndo,
+                canRedo: editorViewModel.canRedo,
+                canDelete: editorViewModel.canDeleteSelectedLayer,
+                onToolSelected: { editorViewModel.activeTool = $0; editorViewModel.focusCanvas() },
+                onUndo: { editorViewModel.undo(); editorViewModel.focusCanvas() },
+                onRedo: { editorViewModel.redo(); editorViewModel.focusCanvas() },
+                onDelete: { editorViewModel.deleteSelectedLayer(); editorViewModel.focusCanvas() },
                 onCopy: { Task { await captureCoordinator.copyCurrentDocument() } },
                 onSave: { Task { await captureCoordinator.saveCurrentDocument() } },
                 onOCR: { Task { await captureCoordinator.runOCR() } },
@@ -552,7 +595,8 @@ struct MainWindowView: View {
     private var previewArea: some View {
         HStack(spacing: 0) {
             if let document = appState.currentDocument, document.kind == .screenshot {
-                EditorCanvasView(document: document, editorViewModel: editorViewModel)
+                ScreenshotEditorViewport(document: document, editorViewModel: editorViewModel,
+                                 onCopy: { Task { await captureCoordinator.copyCurrentDocument() } })
             } else {
                 recordingPreview
             }
@@ -590,13 +634,13 @@ struct MainWindowView: View {
 
     private var recordingTools: some View {
         HStack(spacing: 10) {
-            Label("Trim", systemImage: "timeline.selection")
+            Label("Trim (seconds)", systemImage: "timeline.selection")
                 .font(.subheadline.weight(.semibold))
-            TextField("Start", text: $trimStartText)
+            TextField("Start (s)", text: $trimStartText)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 72)
                 .multilineTextAlignment(.trailing)
-            TextField("End", text: $trimEndText)
+            TextField("End (s)", text: $trimEndText)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 72)
                 .multilineTextAlignment(.trailing)

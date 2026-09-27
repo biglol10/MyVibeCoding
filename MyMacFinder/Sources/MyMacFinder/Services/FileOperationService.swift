@@ -147,9 +147,14 @@ public struct FileOperationService: @unchecked Sendable {
         guard FileSystemPathIdentity.entryExists(url) else {
             throw ExplorerError.operationFailed("Path does not exist: \(url.path)")
         }
+        return try await duplicateItems([url], progress: progress)
+    }
+
+    @discardableResult
+    public func duplicateItems(_ urls: [URL], progress: FileOperationProgressReporter? = nil) async throws -> FileOperationResult {
         return try await copyItems(
-            [url],
-            to: url.deletingLastPathComponent(),
+            urls,
+            destinationFolders: urls.map { $0.deletingLastPathComponent() },
             progress: progress
         )
     }
@@ -160,13 +165,23 @@ public struct FileOperationService: @unchecked Sendable {
         to destinationFolder: URL,
         progress: FileOperationProgressReporter? = nil
     ) async throws -> FileOperationResult {
-        try validateSourcesExist(urls)
-        let canonicalDestinationFolder = FileSystemPathIdentity.canonicalDirectory(destinationFolder)
-        try preflightTransferRelationships(
+        try await copyItems(
             urls,
-            canonicalDestinationFolder: canonicalDestinationFolder,
-            operation: .copy
+            destinationFolders: Array(repeating: destinationFolder, count: urls.count),
+            progress: progress
         )
+    }
+
+    private func copyItems(
+        _ urls: [URL],
+        destinationFolders: [URL],
+        progress: FileOperationProgressReporter?
+    ) async throws -> FileOperationResult {
+        try validateSourcesExist(urls)
+        let canonicalDestinations = destinationFolders.map(FileSystemPathIdentity.canonicalDirectory)
+        for (source, destination) in zip(urls, canonicalDestinations) {
+            try preflightTransferRelationships([source], canonicalDestinationFolder: destination, operation: .copy)
+        }
         let byteCounts = await progressByteCounts(for: urls, progress: progress)
         let totalByteCount = totalByteCount(from: byteCounts)
         var completedByteCount: Int64 = 0
@@ -179,6 +194,8 @@ public struct FileOperationService: @unchecked Sendable {
 
         do {
             for (index, source) in urls.enumerated() {
+                let destinationFolder = destinationFolders[index]
+                let canonicalDestinationFolder = canonicalDestinations[index]
                 try await progress?.checkCancellation()
                 await progress?.update(
                     phase: .running,
@@ -258,6 +275,7 @@ public struct FileOperationService: @unchecked Sendable {
                     totalBytes: totalByteCount
                 )
             }
+            try await progress?.checkCancellation()
         } catch {
             try rollbackCompletedCopies(completedMutations, originalError: error)
             throw operationError(error)

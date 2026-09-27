@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 public typealias FinderTagPrompt = @MainActor @Sendable (FileEntry) -> [FinderTag]?
 public typealias FilePasteboardReader = @MainActor @Sendable () -> [URL]
 public typealias FilePasteboardWriter = @MainActor @Sendable ([URL]) -> Void
+public typealias FilePasteboardChangeCount = @MainActor @Sendable () -> Int
 
 @MainActor
 public final class ExplorerStore: ObservableObject {
@@ -161,6 +162,9 @@ public final class ExplorerStore: ObservableObject {
     private let folderAccessService: any UserSelectedFolderAccessing
     private let filePasteboardReader: FilePasteboardReader
     private let filePasteboardWriter: FilePasteboardWriter
+    private let filePasteboardChangeCount: FilePasteboardChangeCount
+    private var fileClipboardChangeCount: Int?
+    private var folderSizeGeneration: UInt64 = 0
     private let watcherDebounceNanoseconds: UInt64
     private let operationProgressAutoDismissNanoseconds: UInt64
     private let sessionPersistenceDebounceNanoseconds: UInt64
@@ -218,6 +222,7 @@ public final class ExplorerStore: ObservableObject {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.writeObjects(urls.map { $0 as NSURL })
         },
+        filePasteboardChangeCount: @escaping FilePasteboardChangeCount = { NSPasteboard.general.changeCount },
         watcherDebounceNanoseconds: UInt64 = 250_000_000,
         operationProgressAutoDismissNanoseconds: UInt64 = 1_000_000_000,
         sessionPersistenceDebounceNanoseconds: UInt64 = 350_000_000,
@@ -342,6 +347,7 @@ public final class ExplorerStore: ObservableObject {
         self.quickLookService = quickLookService
         self.filePasteboardReader = filePasteboardReader
         self.filePasteboardWriter = filePasteboardWriter
+        self.filePasteboardChangeCount = filePasteboardChangeCount
         self.settingsStore = settingsStore
         self.sidebarFavoritesStore = sidebarFavoritesStore
         self.sessionStore = sessionStore
@@ -509,7 +515,7 @@ public final class ExplorerStore: ObservableObject {
         let selectedEntries = visibleEntries(forPaneAt: paneIndex).filter { pane.selectedURLs.contains($0.url) }
 
         return command.isEnabled(
-            selectionCount: pane.selectedURLs.count,
+            selectionCount: selectedEntries.count,
             canPaste: canPaste,
             canUndo: canUndo,
             canCloseTab: canCloseTab,
@@ -561,7 +567,7 @@ public final class ExplorerStore: ObservableObject {
     }
 
     public var canPaste: Bool {
-        fileClipboard?.isEmpty == false || !filePasteboardReader().isEmpty
+        !pasteSourceClipboard().isEmpty
     }
 
     public var canUndo: Bool {
@@ -1119,6 +1125,14 @@ public final class ExplorerStore: ObservableObject {
         setSearchQuery("")
     }
 
+    public func clearAllSearchCriteria() {
+        searchQuery = ""
+        searchOptions = ExplorerSearchOptions()
+        scheduleFinderTagPopulationIfNeeded()
+        scheduleSearchIfNeeded()
+        trimSelectionToVisibleEntries()
+    }
+
     public func setSearchScope(_ scope: SearchScope) {
         guard searchOptions.scope != scope else {
             return
@@ -1274,7 +1288,7 @@ public final class ExplorerStore: ObservableObject {
         do {
             let sourceURL = url.standardizedFileURL
             guard let paneIndex = panes.firstIndex(where: { $0.id == paneID }),
-                  panes[paneIndex].entries.contains(where: {
+                  visibleEntries(forPaneAt: paneIndex).contains(where: {
                       $0.url.standardizedFileURL == sourceURL && !$0.isArchiveBacked
                   }) else {
                 return
@@ -1296,6 +1310,9 @@ public final class ExplorerStore: ObservableObject {
                 if let reloadCommit,
                    let currentPaneIndex = currentPaneIndex(for: reloadCommit) {
                     panes[currentPaneIndex].selectedURLs = [renamedURL.standardizedFileURL]
+                    if currentPaneIndex == activePaneIndex {
+                        trimSelectionToVisibleEntries()
+                    }
                 }
             }
         } catch is FileOperationCancellation {
@@ -1387,32 +1404,11 @@ public final class ExplorerStore: ObservableObject {
                     kind: .duplicate,
                     title: operationTitle("Duplicating", count: urls.count)
                 )
-                var createdURLs: [URL] = []
-                var replacedItems: [FileTrashRecord] = []
-                var undoSourceIdentities: [URL: FileSystemPathIdentity.FileSystemEntryIdentity] = [:]
-                for (index, url) in urls.enumerated() {
-                    try await reporter.checkCancellation()
-                    await reporter.update(
-                        phase: .running,
-                        currentItemName: url.lastPathComponent,
-                        completedUnitCount: index,
-                        totalUnitCount: urls.count
-                    )
-                    let result = try await fileOperationService.duplicate(url)
-                    createdURLs.append(contentsOf: result.createdURLs)
-                    replacedItems.append(contentsOf: result.replacedItems)
-                    undoSourceIdentities.merge(result.undoSourceIdentities) { recorded, _ in recorded }
-                    await reporter.update(
-                        phase: .running,
-                        currentItemName: url.lastPathComponent,
-                        completedUnitCount: index + 1,
-                        totalUnitCount: urls.count
-                    )
-                }
-                if !createdURLs.isEmpty {
+                let result = try await fileOperationService.duplicateItems(urls, progress: reporter)
+                if !result.createdURLs.isEmpty {
                     recordUndo(
-                        undoAction(.copied(createdURLs), replacedItems: replacedItems),
-                        ownership: undoSourceIdentities
+                        undoAction(.copied(result.createdURLs), from: result),
+                        ownership: result.undoSourceIdentities
                     )
                 }
                 await refresh()
@@ -1424,11 +1420,13 @@ public final class ExplorerStore: ObservableObject {
             case .editTags:
                 try await editTagsForSelectedEntry()
             case .copy:
+                filePasteboardWriter(selectedURLs)
+                fileClipboardChangeCount = filePasteboardChangeCount()
                 fileClipboard = FileClipboard(urls: selectedURLs, mode: .copy)
-                filePasteboardWriter(selectedURLs)
             case .cut:
-                fileClipboard = FileClipboard(urls: selectedURLs, mode: .move)
                 filePasteboardWriter(selectedURLs)
+                fileClipboardChangeCount = filePasteboardChangeCount()
+                fileClipboard = FileClipboard(urls: selectedURLs, mode: .move)
             case .paste:
                 let clipboard = pasteSourceClipboard()
                 guard !clipboard.isEmpty else { return }
@@ -1680,7 +1678,11 @@ public final class ExplorerStore: ObservableObject {
     }
 
     private var selectedURLs: [URL] {
-        activePane.selectedURLs.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+        // Saved recursive selections are unavailable until the search has returned.
+        let urls = isShowingRecursiveSearchResults
+            ? activeSelectedEntries.map(\.url)
+            : Array(activePane.selectedURLs)
+        return urls.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
     }
 
     private func oppositePaneIndex(for paneIndex: Int) -> Int? {
@@ -2227,7 +2229,7 @@ public final class ExplorerStore: ObservableObject {
         )
     }
 
-    private var hasActiveSearchCriteria: Bool {
+    public var hasActiveSearchCriteria: Bool {
         !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || searchOptions.kind != .any
             || !searchOptions.fileExtension.isEmpty
@@ -2291,6 +2293,7 @@ public final class ExplorerStore: ObservableObject {
                     guard let self, self.isCurrentSearchContext(context) else { return }
                     self.recursiveSearchResults = []
                     self.isSearching = false
+                    self.trimSelectionToVisibleEntries()
                     self.present(error)
                 }
             } catch {
@@ -2298,6 +2301,7 @@ public final class ExplorerStore: ObservableObject {
                     guard let self, self.isCurrentSearchContext(context) else { return }
                     self.recursiveSearchResults = []
                     self.isSearching = false
+                    self.trimSelectionToVisibleEntries()
                     self.visibleError = .readFailed(error.localizedDescription)
                 }
             }
@@ -2325,10 +2329,13 @@ public final class ExplorerStore: ObservableObject {
     }
 
     private func pasteSourceClipboard() -> FileClipboard {
-        if let fileClipboard, !fileClipboard.isEmpty {
+        let systemURLs = filePasteboardReader()
+        if let fileClipboard, !fileClipboard.isEmpty,
+           fileClipboardChangeCount == filePasteboardChangeCount(),
+           Set(fileClipboard.urls.map(\.standardizedFileURL)) == Set(systemURLs.map(\.standardizedFileURL)) {
             return fileClipboard
         }
-        return FileClipboard(urls: filePasteboardReader(), mode: .copy)
+        return FileClipboard(urls: systemURLs, mode: .copy)
     }
 
     private func pasteClipboard(
@@ -2346,8 +2353,12 @@ public final class ExplorerStore: ObservableObject {
                 try await fileOperationService.copyItems(clipboard.urls, to: currentURL, progress: progress)
             )
         case .move:
+            let originalChangeCount = fileClipboardChangeCount
             let result = try await fileOperationService.moveItems(clipboard.urls, to: currentURL, progress: progress)
-            self.fileClipboard = nil
+            if fileClipboard == clipboard, fileClipboardChangeCount == originalChangeCount {
+                fileClipboard = nil
+                fileClipboardChangeCount = nil
+            }
             return (clipboard.mode, result)
         }
     }
@@ -2687,15 +2698,18 @@ public final class ExplorerStore: ObservableObject {
         guard
             activePane.selectedURLs.count == 1,
             let url = selectedURLs.first,
-            activePaneVisibleEntries.first(where: { $0.url == url })?.isDirectoryLike == true
+            let entry = activePaneVisibleEntries.first(where: { $0.url == url }),
+            entry.isDirectoryLike, !entry.isArchiveBacked
         else {
             return
         }
 
         let service = folderSizeService
+        let generation = folderSizeGeneration
         let size = try await Task.detached {
             try service.size(of: url)
         }.value
+        guard generation == folderSizeGeneration else { return }
         calculatedFolderSizes[url.standardizedFileURL] = size
     }
 
@@ -2845,6 +2859,8 @@ public final class ExplorerStore: ObservableObject {
                 return location.displayPath
             }
         }.joined(separator: "\n")
+        fileClipboard = nil
+        fileClipboardChangeCount = nil
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(paths, forType: .string)
     }
@@ -3321,6 +3337,9 @@ public final class ExplorerStore: ObservableObject {
         }
         let shouldShowHiddenFiles = showHiddenFiles
 
+        folderSizeGeneration &+= 1
+        calculatedFolderSizes.removeAll()
+
         panes[startingPaneIndex].isLoading = true
 
         let entries: [FileEntry]
@@ -3358,7 +3377,11 @@ public final class ExplorerStore: ObservableObject {
         }
         pane.location = location
         pane.entries = SortEngine.sorted(entries, descriptor: pane.sort)
-        pane.selectedURLs = pane.selectedURLs.intersection(visibleURLs(for: pane.entries, paneIndex: targetPaneIndex))
+        if didChangeLocation {
+            pane.selectedURLs = []
+        } else if !(targetPaneIndex == activePaneIndex && isShowingRecursiveSearchResults) {
+            pane.selectedURLs.formIntersection(visibleURLs(for: pane.entries, paneIndex: targetPaneIndex))
+        }
         pane.error = nil
         pane.isLoading = false
         panes[targetPaneIndex] = pane
@@ -3428,6 +3451,8 @@ public final class ExplorerStore: ObservableObject {
         guard panes.indices.contains(activePaneIndex) else {
             return
         }
+        // A pending recursive search is not evidence that a saved selection disappeared.
+        guard !isShowingRecursiveSearchResults || recursiveSearchResults != nil else { return }
         panes[activePaneIndex].selectedURLs = panes[activePaneIndex].selectedURLs
             .intersection(visibleURLs(for: panes[activePaneIndex].entries, paneIndex: activePaneIndex))
     }

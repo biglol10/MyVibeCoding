@@ -15,8 +15,9 @@ struct MonthGridView: View {
     let onCreateEvent: (Date) -> Void
     let onSelectEvent: (CalendarEvent) -> Void
     @State private var overflowDate: Date?
+    @FocusState private var isGridFocused: Bool
 
-    private let calendar = Calendar.current
+    private let calendar = Calendar.autoupdatingCurrent
     private let weekdaySymbols = ["일", "월", "화", "수", "목", "금", "토"]
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 7)
     private enum CalendarGridLayout {
@@ -58,15 +59,34 @@ struct MonthGridView: View {
             let cellHeight = max(92, (proxy.size.height - headerHeight) / 6)
             let preparedData = makePreparedData()
 
-            VStack(spacing: 0) {
-                weekdayHeader(height: headerHeight)
-                LazyVGrid(columns: columns, spacing: 0) {
-                    ForEach(preparedData.cells, id: \.date) { cell in
-                        dayCell(cell, height: cellHeight, preparedData: preparedData)
+            ScrollView {
+                VStack(spacing: 0) {
+                    weekdayHeader(height: headerHeight)
+                    LazyVGrid(columns: columns, spacing: 0) {
+                        ForEach(preparedData.cells, id: \.date) { cell in
+                            dayCell(cell, height: cellHeight, preparedData: preparedData)
+                        }
                     }
                 }
+                .frame(width: proxy.size.width, alignment: .top)
             }
-            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+        }
+        .focusable()
+        .focused($isGridFocused)
+        .onMoveCommand { direction in
+            let offset: Int
+            switch direction {
+            case .left: offset = -1
+            case .right: offset = 1
+            case .up: offset = -7
+            case .down: offset = 7
+            @unknown default: return
+            }
+            selectedDate = calendar.date(byAdding: .day, value: offset, to: selectedDate) ?? selectedDate
+        }
+        .onKeyPress(.return) {
+            onCreateEvent(selectedDate)
+            return .handled
         }
         .background(AppTheme.windowBackground)
     }
@@ -143,6 +163,7 @@ struct MonthGridView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             selectedDate = cell.date
+            isGridFocused = true
         }
         .onTapGesture(count: 2) {
             selectedDate = cell.date
@@ -153,6 +174,14 @@ struct MonthGridView: View {
             Rectangle()
                 .strokeBorder(isSelected ? AppTheme.selectedCellBorder : AppTheme.gridLine, lineWidth: isSelected ? 1.8 : 0.8)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(cell.date.formatted(date: .complete, time: .omitted)), \(dayEntries.count)개 항목")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction {
+            selectedDate = cell.date
+            isGridFocused = true
+        }
+        .accessibilityAction(named: "일정 추가") { onCreateEvent(cell.date) }
         .opacity(cell.isInDisplayedMonth ? 1 : 0.48)
     }
 
@@ -259,8 +288,8 @@ struct MonthGridView: View {
         var eventEntriesByDay: [Date: [CalendarEntry]] = [:]
 
         for occurrence in visibleOccurrences {
-            var currentDay = dayKey(for: occurrence.startDate)
-            let finalDay = dayKey(for: occurrence.endDate)
+            var currentDay = max(firstDate, dayKey(for: occurrence.startDate))
+            let finalDay = min(lastDate, dayKey(for: occurrence.endDate))
             while currentDay <= finalDay {
                 if dayKeys.contains(currentDay) {
                     eventEntriesByDay[currentDay, default: []].append(
@@ -292,7 +321,7 @@ struct MonthGridView: View {
                     kind: .holiday,
                     colorHex: nil,
                     eventID: nil,
-                    sortDate: holiday.date
+                    sortDate: holiday.localDate()
                 )
             }
             let eventEntries = (eventEntriesByDay[key] ?? []).sorted {
@@ -315,7 +344,7 @@ struct MonthGridView: View {
     private func makeHolidaysByDay() -> [Date: [HolidayRecord]] {
         var grouped: [Date: [HolidayRecord]] = [:]
         for holiday in holidays where holiday.isHidden == false {
-            grouped[dayKey(for: holiday.date), default: []].append(holiday)
+            grouped[dayKey(for: holiday.localDate()), default: []].append(holiday)
         }
         return grouped.mapValues { records in
             let manual = records.filter { $0.source == .manual }

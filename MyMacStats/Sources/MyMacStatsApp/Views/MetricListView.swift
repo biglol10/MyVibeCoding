@@ -4,17 +4,12 @@ import MyMacStatsCore
 
 struct MetricListView: View {
     @ObservedObject var viewModel: DashboardViewModel
-    @Binding var isSettingsSelected: Bool
 
     var body: some View {
         VStack(spacing: 0) {
-            if isSettingsSelected {
-                SettingsView(viewModel: viewModel)
-            } else {
-                header
-                Divider()
-                content
-            }
+            header
+            Divider()
+            processList
         }
         .navigationSplitViewColumnWidth(min: 360, ideal: 460, max: 560)
     }
@@ -39,28 +34,24 @@ struct MetricListView: View {
         }
     }
 
-    @ViewBuilder
-    private var content: some View {
-        switch viewModel.selectedKind {
-        case .cpu, .memory, .processes:
-            processList
-        case .disk:
-            diskList
-        case .network:
-            networkList
-        case .battery:
-            batteryList
-        }
-    }
-
     private var processList: some View {
-        VStack(spacing: 0) {
+        let groups = viewModel.displayedProcessGroups
+        let selectedGroupID = viewModel.selectedProcessGroup?.id
+        return VStack(spacing: 0) {
             if viewModel.showsProcessControls {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
                     TextField("Search apps, processes, PID, path", text: $viewModel.searchText)
                         .textFieldStyle(.plain)
+                    if !viewModel.searchText.isEmpty {
+                        Button { viewModel.searchText = "" } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Clear search")
+                        .help("Clear search")
+                    }
                 }
                 .padding(.horizontal, 12)
                 .frame(height: 38)
@@ -76,7 +67,7 @@ struct MetricListView: View {
             }
 
             HStack {
-                Text("App")
+                Text("App / Process")
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text("CPU")
                     .frame(width: 72, alignment: .trailing)
@@ -90,72 +81,43 @@ struct MetricListView: View {
             .padding(.horizontal, 28)
             .padding(.vertical, 7)
 
+            HStack {
+                Text("\(groups.count) \(groups.count == 1 ? "group" : "groups") · \(groups.reduce(0) { $0 + $1.processes.count }) processes")
+                Spacer()
+                Image(systemName: "info.circle")
+                    .help("Total CPU uses all cores as 100%. Each process uses one core as 100%, so process CPU can exceed 100%.")
+                    .accessibilityLabel("Process CPU uses one core as 100 percent")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+
+            if groups.isEmpty {
+                ContentUnavailableView {
+                    Label(viewModel.searchText.isEmpty ? "No Processes Available" : "No Search Results", systemImage: "magnifyingglass")
+                } description: {
+                    Text(viewModel.searchText.isEmpty ? "Waiting for a process sample." : "Try an app name, process name, or PID.")
+                } actions: {
+                    if !viewModel.searchText.isEmpty {
+                        Button("Clear Search") { viewModel.searchText = "" }
+                    }
+                }
+            }
             ScrollView {
                 LazyVStack(spacing: 5) {
-                    ForEach(viewModel.displayedProcessGroups.prefix(60)) { group in
+                    ForEach(groups) { group in
                         ProcessAppGroupRow(
                             group: group,
-                            isSelected: viewModel.selectedProcessGroup?.id == group.id
+                            isSelected: selectedGroupID == group.id
                         ) {
-                            if let process = group.processes.first {
-                                viewModel.selectProcess(pid: process.pid)
-                            }
+                            viewModel.selectProcessGroup(group)
                         }
                     }
                 }
                 .padding(.horizontal, 12)
                 .padding(.bottom, 16)
             }
-        }
-    }
-
-    private var diskList: some View {
-        VStack(spacing: 0) {
-            if let disk = viewModel.snapshot.disk {
-                InfoRow(title: disk.volumeName, value: "\(MetricFormatters.bytes(disk.freeBytes)) free")
-                InfoRow(title: "Mount Point", value: disk.mountPoint)
-                InfoRow(title: "Total", value: MetricFormatters.bytes(disk.totalBytes))
-                if !viewModel.snapshot.diskSpaceCandidates.isEmpty {
-                    Divider()
-                        .padding(.vertical, 6)
-                    InfoRow(title: "Space Candidates", value: "\(viewModel.snapshot.diskSpaceCandidates.count)")
-                    ForEach(viewModel.snapshot.diskSpaceCandidates.prefix(4)) { candidate in
-                        DiskCandidateRow(candidate: candidate)
-                    }
-                }
-            } else {
-                ContentUnavailableView("Disk Unavailable", systemImage: "internaldrive")
-            }
-            Spacer(minLength: 0)
-        }
-    }
-
-    private var networkList: some View {
-        VStack(spacing: 0) {
-            if let network = viewModel.snapshot.network {
-                InfoRow(title: "Interface", value: network.interfaceName ?? "Unavailable")
-                InfoRow(title: "Download", value: MetricFormatters.speed(network.downloadBytesPerSecond))
-                InfoRow(title: "Upload", value: MetricFormatters.speed(network.uploadBytesPerSecond))
-                InfoRow(title: "Received", value: MetricFormatters.bytes(network.receivedBytes))
-                InfoRow(title: "Sent", value: MetricFormatters.bytes(network.sentBytes))
-            } else {
-                ContentUnavailableView("Network Unavailable", systemImage: "network")
-            }
-            Spacer(minLength: 0)
-        }
-    }
-
-    private var batteryList: some View {
-        VStack(spacing: 0) {
-            if let battery = viewModel.snapshot.battery, battery.isPresent {
-                InfoRow(title: "Charge", value: battery.percentage.map { MetricFormatters.percent($0) } ?? "Unavailable")
-                InfoRow(title: "Power Source", value: battery.powerSource)
-                InfoRow(title: "Charging", value: battery.isCharging == true ? "Yes" : "No")
-                InfoRow(title: "Cycle Count", value: battery.cycleCount.map(String.init) ?? "Unavailable")
-            } else {
-                ContentUnavailableView("Battery Unavailable", systemImage: "battery.0")
-            }
-            Spacer(minLength: 0)
         }
     }
 

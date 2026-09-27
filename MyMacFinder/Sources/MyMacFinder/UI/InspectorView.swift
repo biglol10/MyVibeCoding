@@ -5,6 +5,7 @@ struct InspectorView: View {
     let calculatedFolderSizes: [URL: Int64]
     let previewMode: FilePreviewMode
     let previewByteLimit: Int
+    let isCommandEnabled: (ExplorerCommand) -> Bool
     let onCommand: (ExplorerCommand) -> Void
 
     init(
@@ -12,12 +13,14 @@ struct InspectorView: View {
         calculatedFolderSizes: [URL: Int64],
         previewMode: FilePreviewMode = .smart,
         previewByteLimit: Int,
+        isCommandEnabled: @escaping (ExplorerCommand) -> Bool = { _ in true },
         onCommand: @escaping (ExplorerCommand) -> Void
     ) {
         self.selection = selection
         self.calculatedFolderSizes = calculatedFolderSizes
         self.previewMode = previewMode
         self.previewByteLimit = previewByteLimit
+        self.isCommandEnabled = isCommandEnabled
         self.onCommand = onCommand
     }
 
@@ -82,7 +85,7 @@ struct InspectorView: View {
             if !entry.isArchiveBacked {
                 inspectorButton("Edit Tags", systemImage: "tag", command: .editTags)
             }
-            if entry.isDirectoryLike {
+            if entry.isDirectoryLike && !entry.isArchiveBacked {
                 inspectorButton("Calculate Size", systemImage: "sum", command: .calculateFolderSize)
             }
         }
@@ -96,6 +99,7 @@ struct InspectorView: View {
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(.bordered)
+        .disabled(!isCommandEnabled(command))
     }
 
     private func detailsGrid(_ details: InspectorItemDetails) -> some View {

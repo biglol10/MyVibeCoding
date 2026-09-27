@@ -12,7 +12,12 @@ public final class OrphanFilesViewModel {
     private let executor: DeletionExecutor
     private let verifier: DeletionVerifier
     private let receiptStore: DeletionReceiptStore
+    private var scanRevision = 0
 
+    public var searchText = ""
+    public var sortBySize = true
+    public var showSelectedOnly = false
+    public var selectedGroupID: OrphanFileGroup.ID?
     public var groups: [OrphanFileGroup] = []
     public var selectedCandidateIDs: Set<RelatedFileCandidate.ID> = []
     public var deletionReport: DeletionReportViewModel?
@@ -45,13 +50,17 @@ public final class OrphanFilesViewModel {
     }
 
     public func loadGroups() async {
+        guard !isScanning, !isDeleting else { return }
+        let revision = scanRevision
         isScanning = true
         defer { isScanning = false }
         groups = []
+        selectedGroupID = nil
         selectedCandidateIDs = []
         deletionReport = nil
         scanIssues = []
         let result = await orphanFileScanning.scan(installedApps)
+        guard revision == scanRevision else { return }
         groups = result.value
         scanIssues = result.issues
         selectedCandidateIDs = Set(groups.flatMap(\.candidates).filter(\.defaultSelected).map(\.id))
@@ -62,6 +71,26 @@ public final class OrphanFilesViewModel {
     public func updateInstalledApps(_ installedApps: [InstalledApp]) {
         self.installedApps = installedApps
         invalidateScanResults()
+    }
+
+    public var visibleGroups: [OrphanFileGroup] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return groups.filter { group in
+            (!showSelectedOnly || group.candidates.contains { selectedCandidateIDs.contains($0.id) }) &&
+            (query.isEmpty || group.inferredIdentifier.lowercased().contains(query) || group.candidates.contains { $0.url.path.lowercased().contains(query) })
+        }.sorted {
+            if sortBySize && $0.totalSize != $1.totalSize { return $0.totalSize > $1.totalSize }
+            return $0.inferredIdentifier.localizedStandardCompare($1.inferredIdentifier) == .orderedAscending
+        }
+    }
+
+    public var selectedGroup: OrphanFileGroup? {
+        visibleGroups.first { $0.id == selectedGroupID } ?? visibleGroups.first
+    }
+
+    public var hiddenSelectionCount: Int {
+        let visibleIDs = Set(visibleGroups.flatMap(\.candidates).map(\.id))
+        return selectedCandidates.filter { !visibleIDs.contains($0.id) }.count
     }
 
     public var selectedCandidates: [RelatedFileCandidate] {
@@ -135,6 +164,7 @@ public final class OrphanFilesViewModel {
             bundleIdentifier: nil,
             bundlePath: homeDirectory.path,
             action: .orphanCleanup,
+                deletionMode: mode,
             selectedCandidates: candidates.map {
                 DeletionReceiptCandidate(path: $0.url.path, kind: $0.kind, size: $0.size, safety: $0.safety, evidence: $0.evidence)
             },
@@ -174,7 +204,9 @@ public final class OrphanFilesViewModel {
     }
 
     private func invalidateScanResults() {
+        scanRevision += 1
         groups = []
+        selectedGroupID = nil
         selectedCandidateIDs = []
         deletionReport = nil
         scanIssues = []

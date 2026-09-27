@@ -32,7 +32,7 @@ final class CalendarEnhancementSourceTests: XCTestCase {
 
         XCTAssertTrue(viewSource.contains("let onShowAll: () -> Void"))
         XCTAssertTrue(viewSource.contains("Button { onShowAll() }"))
-        XCTAssertTrue(viewSource.contains("Text(\"+\\(overflowCount)개\")"))
+        XCTAssertTrue(viewSource.contains("Text(\"+\\(overflowCount)개 · 전체 보기\")"))
         XCTAssertTrue(controllerSource.contains("private var listWindow: NSWindow?"))
         XCTAssertTrue(controllerSource.contains("showAll(occurrences: [EventOccurrence]"))
         XCTAssertTrue(controllerSource.contains("FloatingWidgetAllEventsView"))

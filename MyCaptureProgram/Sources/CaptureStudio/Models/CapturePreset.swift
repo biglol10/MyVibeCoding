@@ -76,4 +76,12 @@ public struct CapturePreset: Codable, Equatable, Identifiable, Sendable {
             )
         ]
     }
+
+    /// Folders remain local preferences; all capture options round-trip through presets.
+    public func applyingOptions(to current: AppSettings) -> AppSettings {
+        var result = settings
+        result.screenshotFolderPath = current.screenshotFolderPath
+        result.recordingFolderPath = current.recordingFolderPath
+        return result
+    }
 }

@@ -55,17 +55,17 @@ swift run MyMacStatsApp
 
 - 메뉴바 상주 앱 + 대시보드 창
 - 메뉴바 미니 팝오버: CPU/RAM/Disk 요약과 Top Culprits 표시
-- 3-column 대시보드: 왼쪽 요약, 가운데 목록, 오른쪽 상세
+- CPU/RAM/Processes는 3-column 비교 화면, Disk/Network/Battery/Settings는 중복을 줄인 2-column 화면
 - CPU/RAM/Disk/Network/Battery/Processes 자동 갱신 및 metric별 sampling cadence
-- 앱 단위 프로세스 그룹화
+- 실제 앱 번들 경로 기준 프로세스 그룹화; 일반 프로세스는 PID별로 구분
 - CPU/RAM 원인 요약 배너
 - CPU 1분/5분 sparkline
 - RAM used/free/compressed/cached/swap/pressure 표시
 - Disk 메인 볼륨 정보, 읽기/쓰기 속도, 공간 후보 표시
 - Network 활성 인터페이스, 다운로드/업로드 속도, 누적 전송량 표시
-- Battery 충전 상태, 전원 소스, 사이클 수 표시 시도
+- Battery 충전/방전별 잔여 시간, 계산 중/완충 상태, 점검 필요 상태를 구분하며 미제공 정보는 Unavailable로 표시
 - Processes 검색 및 CPU/RAM/Name/PID 정렬, 동률 항목 이름/PID 기준 안정 정렬
-- 프로세스 또는 앱 그룹 단위 Quit / Force Quit 2단계 종료 흐름
+- 선택한 PID만 종료하는 Quit Process와 앱 전체를 종료하는 Quit App을 분리하고, 각각 확인 후 Force Quit 제공
 - 보호 프로세스 종료 차단
 - RAM critical 상태가 30초 이상 지속되면 macOS 알림 전송 시도
 - refresh interval 설정 저장 및 다음 실행 시 복원
@@ -104,6 +104,8 @@ swift run MyMacStatsApp
 └──────────────┴──────────────────────────┴──────────────────────────┘
 ```
 
+CPU/RAM/Processes는 목록과 상세를 함께 표시합니다. 그 외 화면은 중복 정보를 없앤 2-column 구성을 사용하며 macOS의 밝은/어두운 화면 설정을 따릅니다.
+
 사이드바는 상태 요약에 집중합니다. 가운데 목록은 비교 가능한 행 폭을 유지하고, 오른쪽 상세 패널은 선택된 앱 그룹이나 프로세스의 PID, CPU, 메모리, 경로, 번들 ID를 보여줍니다.
 
 ## 상태 색상
@@ -130,7 +132,7 @@ CPU 상태는 70%/90% 임계값이 10초 이상 유지될 때 warning/critical�
 
 ## 프로세스/앱 종료
 
-오른쪽 상세 패널에서 선택된 대상에 대해 `Quit Process` 또는 `Quit App`을 요청할 수 있습니다. 단일 프로세스는 해당 PID만 대상으로 하고, 앱 그룹으로 묶인 항목은 같은 앱의 관련 프로세스들을 함께 대상으로 합니다.
+오른쪽 상세 패널에서 선택된 대상에 대해 `Quit Process` 또는 `Quit App`을 요청할 수 있습니다. `Quit Process (PID …)`는 선택한 PID만 대상으로 하고, `Quit App`은 같은 실제 앱 번들 경로의 프로세스들을 함께 대상으로 합니다. 동명 앱이라도 경로가 다르면 분리하며, node 같은 일반 실행 파일은 이름이나 실행 경로가 같아도 PID마다 별도로 표시합니다.
 
 - 일반 Quit은 대상 프로세스들에 `SIGTERM`을 보냅니다.
 - 앱 그룹 Quit은 먼저 macOS 앱 종료 API를 사용해 정상 종료를 요청하고, 처리할 수 없을 때 `SIGTERM` 방식으로 fallback합니다.
@@ -149,7 +151,7 @@ Disk 화면은 용량 부족 원인 후보를 보여줍니다.
 
 Downloads, Desktop, Documents, Trash, `~/Library/Caches` 전체처럼 macOS 개인정보 보호 권한 프롬프트가 생길 수 있는 폴더는 기본 자동 스캔 대상에서 제외합니다.
 
-후보 스캔은 UI를 막지 않도록 백그라운드에서 수행되며, 오래 걸리는 대상은 timeout 후 다음 갱신으로 넘깁니다.
+후보 스캔은 UI를 막지 않도록 백그라운드에서 수행됩니다. 기본 측정 실패나 timeout 이후 제한된 파일만 확인한 경우 `Partial estimate`로 표시하며, 실제 전체 용량으로 취급하지 않습니다. `Scan Again`으로 다시 측정하고 `Show in Finder`로 해당 폴더를 확인할 수 있습니다.
 
 ## 메뉴바 팝오버
 
@@ -159,7 +161,7 @@ Downloads, Desktop, Documents, Trash, `~/Library/Caches` 전체처럼 macOS 개�
 CPU 12% RAM 15.4G / 16G
 ```
 
-메뉴바 항목을 클릭하면 미니 팝오버가 열리고 CPU/RAM/Disk 요약과 Top Culprits를 확인할 수 있습니다. `Open Dashboard` 버튼으로 대시보드 창을 다시 열 수 있습니다.
+메뉴바 항목을 클릭하면 미니 팝오버가 열리고 CPU/RAM/Disk 요약과 Top Culprits를 확인할 수 있습니다. `Top CPU Usage`는 대시보드의 검색·정렬과 무관하게 CPU 사용량 순위를 표시합니다. `Open Dashboard` 버튼으로 대시보드 창을 다시 열 수 있습니다.
 
 ## 개발 환경
 
@@ -287,3 +289,11 @@ MyMacStats/
 - 알림센터 위젯과 iCloud 동기화는 없습니다.
 - 프로세스별 네트워크 사용량은 아직 표시하지 않습니다.
 - 시스템 API가 값을 계속 제공하지 않거나 권한상 읽을 수 없는 항목은 unavailable로 표시됩니다. 이전 정상 값이 있으면 첫 due failure에서 마지막 값을 유지하며, retained last-success health가 `critical`이면 `critical`, 그 외에는 `warning`으로 표시합니다. 두 번째 연속 due failure에서 unavailable로 전환합니다.
+
+## 2026-09-27 사용성 및 신뢰성 수정
+
+- 목록과 하위 프로세스 표시 개수 제한을 제거하고, 검색한 PID를 상세 화면에서 우선 선택합니다. 검색 결과 수, 결과 없음 안내, 검색 초기화를 제공합니다.
+- CPU warning/critical 지속 시간을 각각 계산하여 부하가 높아지는 동안 기존 경고가 사라지지 않습니다. 전체 CPU는 모든 코어를 합쳐 100%, 프로세스 CPU는 코어 하나를 100%로 표시한다는 설명을 추가했습니다.
+- RAM 알림 권한 요청과 알림 전송을 측정 반복 및 종료 직전 검증과 분리했습니다. 권한 대기 중 RAM이 회복되면 오래된 경고는 발송하지 않습니다.
+- 배터리의 Time to Empty와 Time to Full Charge를 구분하고, -1을 계산 중 상태로 표시합니다. Poor 및 Check Battery/Permanent Battery Failure를 점검 필요 상태로 처리하며, 정보가 없으면 정상으로 단정하지 않습니다.
+- 설정 화면에 항목별 실제 측정 간격을 표시하고 개발 단계 문구를 제거했습니다. 상세 값과 경로는 선택해 복사할 수 있습니다.

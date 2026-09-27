@@ -26,17 +26,29 @@ export function headingSlug(title: string) {
   return title.toLowerCase().trim().replace(/[^\p{L}\p{N}\s-]/gu, '').replace(/\s+/g, '-').replace(/-+/g, '-');
 }
 
+export function headingIDs(titles: string[]) {
+  const used = new Set<string>();
+  return titles.map(title => {
+    const base = headingSlug(title) || 'section';
+    let id = base, number = 1;
+    while (used.has(id)) id = `${base}-${++number}`;
+    used.add(id); return id;
+  });
+}
+
+export function headingTargets(source: string) {
+  const headings = outlineFor(source);
+  const ids = headingIDs(headings.map(heading => heading.title));
+  return headings.map((heading, index) => ({ ...heading, id: ids[index] }));
+}
+
 export function tableOfContentsMarkdown(source: string) {
   const frontMatter = frontMatterFor(source);
-  const headings = outlineFor(source).filter(heading => heading.title && heading.level > 0 && (!frontMatter || heading.from >= frontMatter.bodyFrom));
+  const headings = headingTargets(source).filter(heading => heading.title && heading.level > 0 && (!frontMatter || heading.from >= frontMatter.bodyFrom));
   if (!headings.length) return '> 목차를 만들 제목이 없습니다.\n';
-  const used = new Map<string, number>();
   return headings.map(heading => {
-    const base = headingSlug(heading.title) || 'section', count = used.get(base) ?? 0;
-    used.set(base, count + 1);
-    const slug = count ? `${base}-${count + 1}` : base;
     const title = heading.title.replace(/([\\\[\]])/g, '\\$1');
-    return `${'  '.repeat(Math.max(0, heading.level - 1))}- [${title}](#${slug})`;
+    return `${'  '.repeat(Math.max(0, heading.level - 1))}- [${title}](#${heading.id})`;
   }).join('\n') + '\n';
 }
 

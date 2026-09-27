@@ -8,6 +8,7 @@ public struct CalendarEventSnapshot: Equatable, Sendable {
     public let colorHex: String
     public let recurrence: EventRecurrence
     public let notificationOffsetsDays: [Int]
+    public let dateTimeZoneIdentifier: String
 
     public init(
         id: UUID,
@@ -16,7 +17,8 @@ public struct CalendarEventSnapshot: Equatable, Sendable {
         endDate: Date,
         colorHex: String,
         recurrence: EventRecurrence,
-        notificationOffsetsDays: [Int]
+        notificationOffsetsDays: [Int],
+        dateTimeZoneIdentifier: String = ""
     ) {
         self.id = id
         self.title = title
@@ -25,6 +27,7 @@ public struct CalendarEventSnapshot: Equatable, Sendable {
         self.colorHex = colorHex
         self.recurrence = recurrence
         self.notificationOffsetsDays = notificationOffsetsDays
+        self.dateTimeZoneIdentifier = dateTimeZoneIdentifier
     }
 
     public init(event: CalendarEvent) {
@@ -35,7 +38,8 @@ public struct CalendarEventSnapshot: Equatable, Sendable {
             endDate: event.endDate,
             colorHex: event.colorHex,
             recurrence: event.recurrence,
-            notificationOffsetsDays: event.notificationOffsetsDays
+            notificationOffsetsDays: event.notificationOffsetsDays,
+            dateTimeZoneIdentifier: event.dateTimeZoneIdentifier
         )
     }
 }
@@ -48,13 +52,13 @@ public struct EventRecurrenceCalculator {
     }
 
     public func occurrences(for event: CalendarEventSnapshot, in interval: DateInterval) -> [EventOccurrence] {
-        let anchorDate = calendar.startOfDay(for: event.startDate)
+        let anchorDate = calendar.startOfDay(for: AllDayDate.resolve(event.startDate, storedTimeZone: event.dateTimeZoneIdentifier, calendar: calendar))
         let durationDays = max(
             0,
             calendar.dateComponents(
                 [.day],
                 from: anchorDate,
-                to: calendar.startOfDay(for: max(event.endDate, event.startDate))
+                to: calendar.startOfDay(for: AllDayDate.resolve(max(event.endDate, event.startDate), storedTimeZone: event.dateTimeZoneIdentifier, calendar: calendar))
             ).day ?? 0
         )
         var occurrenceIndex = firstOccurrenceIndex(for: event, near: interval.start)
@@ -93,13 +97,13 @@ public struct EventRecurrenceCalculator {
     }
 
     public func firstOccurrenceIndex(for event: CalendarEventSnapshot, near date: Date) -> Int {
-        let anchor = calendar.startOfDay(for: event.startDate)
+        let anchor = calendar.startOfDay(for: AllDayDate.resolve(event.startDate, storedTimeZone: event.dateTimeZoneIdentifier, calendar: calendar))
         let durationDays = max(
             0,
             calendar.dateComponents(
                 [.day],
                 from: anchor,
-                to: calendar.startOfDay(for: max(event.endDate, event.startDate))
+                to: calendar.startOfDay(for: AllDayDate.resolve(max(event.endDate, event.startDate), storedTimeZone: event.dateTimeZoneIdentifier, calendar: calendar))
             ).day ?? 0
         )
         let searchDate = calendar.date(byAdding: .day, value: -durationDays, to: date) ?? date

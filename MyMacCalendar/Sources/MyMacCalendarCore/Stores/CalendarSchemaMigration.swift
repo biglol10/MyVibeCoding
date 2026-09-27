@@ -364,8 +364,8 @@ enum CalendarSchemaV2: VersionedSchema {
     }
 }
 
-enum CalendarSchemaV3: VersionedSchema {
-    static var versionIdentifier: Schema.Version { Schema.Version(3, 0, 0) }
+enum CalendarSchemaV4: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(4, 0, 0) }
     static var models: [any PersistentModel.Type] {
         [CalendarEvent.self, HolidayRecord.self, AppSettings.self]
     }
@@ -373,7 +373,7 @@ enum CalendarSchemaV3: VersionedSchema {
 
 enum CalendarSchemaMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [CalendarSchemaV1.self, CalendarSchemaV1_1.self, CalendarSchemaV2.self, CalendarSchemaV3.self]
+        [CalendarSchemaV1.self, CalendarSchemaV1_1.self, CalendarSchemaV2.self, CalendarSchemaV3.self, CalendarSchemaV4.self]
     }
 
     static var stages: [MigrationStage] {
@@ -399,6 +399,23 @@ enum CalendarSchemaMigrationPlan: SchemaMigrationPlan {
             MigrationStage.lightweight(
                 fromVersion: CalendarSchemaV2.self,
                 toVersion: CalendarSchemaV3.self
+            ),
+            MigrationStage.custom(
+                fromVersion: CalendarSchemaV3.self,
+                toVersion: CalendarSchemaV4.self,
+                willMigrate: nil,
+                didMigrate: { context in
+                    // Older stores have no original zone. Preserve the dates visible on
+                    // this Mac at upgrade without changing any stored timestamps.
+                    let zone = TimeZone.current.identifier
+                    for event in try context.fetch(FetchDescriptor<CalendarEvent>()) {
+                        if event.dateTimeZoneIdentifier.isEmpty { event.dateTimeZoneIdentifier = zone }
+                    }
+                    for holiday in try context.fetch(FetchDescriptor<HolidayRecord>()) {
+                        if holiday.dateTimeZoneIdentifier.isEmpty { holiday.dateTimeZoneIdentifier = zone }
+                    }
+                    try PersistenceTransaction.save(context: context)
+                }
             )
         ]
     }

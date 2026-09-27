@@ -34,17 +34,14 @@ public struct DeletionVerifier: Sendable {
     }
 
     private func verifyExistingPath(_ url: URL) -> DeletionVerificationResult {
-        var isDirectory: ObjCBool = false
-        let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
-        guard exists else {
+        switch FilePresence.inspect(url) {
+        case .missing:
             return DeletionVerificationResult(path: url.path, status: .deleted, errorMessage: nil)
-        }
-
-        do {
-            _ = try FileManager.default.attributesOfItem(atPath: url.path)
+        case .present:
             return DeletionVerificationResult(path: url.path, status: .stillExists, errorMessage: nil)
-        } catch {
-            return DeletionVerificationResult(path: url.path, status: .permissionDenied, errorMessage: error.localizedDescription)
+        case .unavailable(let code):
+            return DeletionVerificationResult(path: url.path, status: .permissionDenied,
+                errorMessage: "Could not verify file removal: \(NSError(domain: NSPOSIXErrorDomain, code: Int(code)).localizedDescription)")
         }
     }
 }

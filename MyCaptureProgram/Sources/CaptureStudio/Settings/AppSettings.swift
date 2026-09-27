@@ -18,6 +18,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var countdownSeconds: Int
     public var recordingDurationSeconds: Int
     public var recordingQuality: RecordingQuality
+    public var recordUntilStopped: Bool
 
     public enum RecordingQuality: String, Codable, Equatable, CaseIterable, Identifiable, Sendable {
         case standard
@@ -51,7 +52,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         showCursorInRecordings: Bool,
         countdownSeconds: Int,
         recordingDurationSeconds: Int,
-        recordingQuality: RecordingQuality
+        recordingQuality: RecordingQuality,
+        recordUntilStopped: Bool = false
     ) {
         self.automaticallySaveScreenshots = automaticallySaveScreenshots
         self.automaticallySaveRecordings = automaticallySaveRecordings
@@ -68,6 +70,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.countdownSeconds = countdownSeconds
         self.recordingDurationSeconds = recordingDurationSeconds
         self.recordingQuality = recordingQuality
+        self.recordUntilStopped = recordUntilStopped
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -86,11 +89,13 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case countdownSeconds
         case recordingDurationSeconds
         case recordingQuality
+        case recordUntilStopped
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = AppSettings.defaults
+        recordUntilStopped = try container.decodeIfPresent(Bool.self, forKey: .recordUntilStopped) ?? false
         automaticallySaveScreenshots = try container.decodeIfPresent(Bool.self, forKey: .automaticallySaveScreenshots) ?? defaults.automaticallySaveScreenshots
         automaticallySaveRecordings = try container.decodeIfPresent(Bool.self, forKey: .automaticallySaveRecordings) ?? defaults.automaticallySaveRecordings
         screenshotFolderPath = try container.decodeIfPresent(String.self, forKey: .screenshotFolderPath) ?? defaults.screenshotFolderPath

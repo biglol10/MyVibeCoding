@@ -28,7 +28,7 @@ public struct FileSizeCalculator: Sendable {
         guard let enumerator = FileManager.default.enumerator(
             at: url,
             includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .totalFileAllocatedSizeKey],
-            options: [.skipsHiddenFiles],
+            options: [],
             errorHandler: { _, error in
                 traversalError = error
                 return false

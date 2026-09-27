@@ -70,7 +70,7 @@ public struct SafetyScorer: Sendable {
         }
 
         if evidence.contains(where: { $0.type == .exactAppName || $0.type == .executableName || $0.type == .knownUpdaterName }) && isKnownCleanupRoot {
-            return SafetyScore(level: .review, defaultSelected: true, requiresManualReview: true)
+            return SafetyScore(level: .review, defaultSelected: false, requiresManualReview: true)
         }
 
         return SafetyScore(level: .risky, defaultSelected: false, requiresManualReview: true)

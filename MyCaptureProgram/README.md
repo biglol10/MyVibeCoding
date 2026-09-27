@@ -1,5 +1,11 @@
 # Capture Studio
 
+## 다운로드
+
+[최신 개인용 macOS 설치 파일](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyCaptureProgram/CaptureStudio-personal-mac.zip) · [전체 앱 배포 안내](../docs/releases/2026-09-27-app-update.md)
+
+2026-09-27 변경을 반영한 개인 사용용 빌드입니다. Apple 공증을 받은 배포본은 아닙니다.
+
 Native macOS screenshot and screen recording app inspired by Windows Snipping Tool.
 
 ## Requirements
@@ -104,11 +110,13 @@ Files under `docs/superpowers/` are historical planning/specification artifacts 
 
 After a screenshot is captured, the editor toolbar can annotate, OCR, and redact the screenshot before saving or copying. Save and Copy flatten annotation layers into a PNG. OCR and Quick Redact run on demand.
 
+Use Fit or the zoom controls to inspect large captures. Selected annotations have color and size controls. Delete/Backspace removes only the selected annotation; deleting an entire capture uses the separate top-row Trash button and asks for confirmation. Cmd-Z, Shift-Cmd-Z, and Cmd-C operate on the canvas, while text fields retain their normal editing shortcuts. Cmd-S saves the current capture.
+
 ## Features
 
 - Native macOS app bundle with a compact Capture / Record first workflow
 - Rectangle, window, and full-screen screenshot capture with ESC cancel support
-- Rectangle, window, and full-screen recording with countdown delay, duration control, and stop handling
+- Rectangle, window, and full-screen recording with a cancellable countdown, timed duration or recording until Stop, and AAC system/microphone audio tracks
 - Multi-display selection overlay support
 - Persistent Settings window for output, capture, recording, shortcuts, and advanced options
 - Customizable shortcuts with per-action reset and reset-all defaults; global shortcuts require Command, Option, or Control so ordinary typing is never captured
@@ -116,11 +124,11 @@ After a screenshot is captured, the editor toolbar can annotate, OCR, and redact
 - Smart filenames using active app/window context when available
 - Screenshot annotation tools: pen, highlighter, arrow, rectangle, ellipse, text, solid redaction, OCR, undo/redo, copy, save, delete
 - Quick Redact for detected sensitive text
-- Recording preview, trim-copy export, and GIF export; a blank trim end uses the media's actual duration, while invalid or reversed times are rejected with an explanation
+- Recording preview, trim-copy export, and GIF export; Trim Copy keeps the original open and preserves unsaved recovery files. A blank trim end uses the media's actual duration, while invalid or reversed times are rejected with an explanation
 - Recovery of completed but unsaved recordings after an unexpected app exit; recovered files reopen as unsaved and still require Save or Delete
 - Capture history with thumbnails, search, open, per-item delete, and Clear History that keeps capture files
 - Floating pinned screenshot preview
-- Presets for quickly switching common workflows
+- Presets for switching capture options, including quality, timing, clipboard, and naming preferences, while preserving output folders
 - In-app guide modal for feature explanations
 
 ## Notes
@@ -132,4 +140,4 @@ After a screenshot is captured, the editor toolbar can annotate, OCR, and redact
 - If a configured output folder is missing or not writable, CaptureStudio does not silently fall back to Desktop. The new result stays open as unsaved so you can choose another folder and save it.
 - Quick Redact adds editable redaction layers. It does not alter an already saved original or the current clipboard; use Save or Copy to create the redacted version.
 - Integration tests that touch live screen capture require macOS permissions and are run with `CAPTURE_STUDIO_RUN_INTEGRATION=1`.
-- The latest hardening verification is in `docs/qa/2026-08-08-follow-up-hardening.md`. The broader feature matrix is in `docs/qa/2026-08-04-feature-verification-checklist.md`.
+- The latest usability fixes and verification are in [배포 변경 기록](../docs/releases/2026-09-27-app-update.md). Earlier hardening verification is in `docs/qa/2026-08-08-follow-up-hardening.md`.

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 public enum DeletionExecutionErrorMessage {
@@ -7,41 +8,55 @@ public enum DeletionExecutionErrorMessage {
 }
 
 public struct DeletionFileRemover: Sendable {
-    private let trashHandler: @Sendable (URL) throws -> Void
-    private let fallbackTrashHandler: (@Sendable (URL) throws -> Void)?
+    private let trashHandler: @Sendable (URL) throws -> URL?
+    private let fallbackTrashHandler: (@Sendable (URL) async throws -> URL)?
     private let removeHandler: @Sendable (URL) throws -> Void
 
     public init(
         trash: @escaping @Sendable (URL) throws -> Void,
-        fallbackTrash: (@Sendable (URL) throws -> Void)? = nil,
+        fallbackTrash: (@Sendable (URL) async throws -> URL)? = nil,
         remove: @escaping @Sendable (URL) throws -> Void
     ) {
-        self.trashHandler = trash
+        self.trashHandler = { url in try trash(url); return nil }
         self.fallbackTrashHandler = fallbackTrash
         self.removeHandler = remove
     }
 
-    public func trash(_ url: URL, allowsFallback: Bool = true) throws {
+    public init(
+        recycle: @escaping @Sendable (URL) throws -> URL,
+        fallbackTrash: (@Sendable (URL) async throws -> URL)? = nil,
+        remove: @escaping @Sendable (URL) throws -> Void
+    ) {
+        self.trashHandler = { try recycle($0) }
+        self.fallbackTrashHandler = fallbackTrash
+        self.removeHandler = remove
+    }
+
+    @discardableResult
+    public func trash(_ url: URL, allowsFallback: Bool = true) async throws -> URL? {
         do {
-            try trashHandler(url)
+            let destination = try trashHandler(url)
+            if let destination { try verifyMove(from: url, to: destination) }
+            return destination
         } catch {
-            if !FileManager.default.fileExists(atPath: url.path) {
-                return
-            }
-            guard allowsFallback, let fallbackTrashHandler else {
-                throw error
+            let primaryError = error
+            guard case .present = FilePresence.inspect(url), allowsFallback, let fallbackTrashHandler else {
+                throw primaryError
             }
             do {
-                try fallbackTrashHandler(url)
+                let recycledURL = try await fallbackTrashHandler(url)
+                try verifyMove(from: url, to: recycledURL)
+                return recycledURL
             } catch {
-                if !FileManager.default.fileExists(atPath: url.path) {
-                    return
-                }
-                throw error
+                throw TrashFallbackError.bothFailed(primaryError: primaryError, fallbackError: error)
             }
-            if FileManager.default.fileExists(atPath: url.path) {
-                throw error
-            }
+        }
+    }
+
+    private func verifyMove(from source: URL, to destination: URL) throws {
+        guard case .missing = FilePresence.inspect(source),
+              case .present = FilePresence.inspect(destination) else {
+            throw TrashFallbackError.unverifiedRecycle(sourceURL: source, recycledURL: destination)
         }
     }
 
@@ -50,12 +65,14 @@ public struct DeletionFileRemover: Sendable {
     }
 
     public static let live = DeletionFileRemover(
-        trash: { url in
+        recycle: { url in
             var resultingURL: NSURL?
             try FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
+            guard let resultingURL else { throw TrashFallbackError.missingRecycleMapping(sourceURL: url) }
+            return resultingURL as URL
         },
         fallbackTrash: { url in
-            try FinderTrashFallback.moveToTrash(url)
+            try await WorkspaceTrashFallback.moveToTrash(url)
         },
         remove: { url in
             try FileManager.default.removeItem(at: url)
@@ -63,43 +80,45 @@ public struct DeletionFileRemover: Sendable {
     )
 }
 
-private enum FinderTrashFallback {
-    static func moveToTrash(_ url: URL) throws {
-        let scriptSource = """
-        tell application "Finder"
-            delete (POSIX file \(appleScriptStringLiteral(url.path)) as alias)
-        end tell
-        """
-        guard let script = NSAppleScript(source: scriptSource) else {
-            throw FinderTrashFallbackError(message: "Finder fallback script could not be created.")
-        }
+enum WorkspaceTrashFallback {
+    static func moveToTrash(_ url: URL) async throws -> URL {
+        try await withCheckedThrowingContinuation { continuation in
+            NSWorkspace.shared.recycle([url]) { resultingURLs, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
 
-        var errorInfo: NSDictionary?
-        _ = script.executeAndReturnError(&errorInfo)
-        if let errorInfo {
-            let message = errorInfo["NSAppleScriptErrorMessage"] as? String
-                ?? errorInfo.description
-            throw FinderTrashFallbackError(message: "Finder Automation could not move item to Trash: \(message)")
+                guard let recycledURL = resultingURLs.first(where: {
+                    $0.key.standardizedFileURL == url.standardizedFileURL
+                })?.value else {
+                    continuation.resume(throwing: TrashFallbackError.missingRecycleMapping(sourceURL: url))
+                    return
+                }
+                continuation.resume(returning: recycledURL)
+            }
         }
-    }
-
-    private static func appleScriptStringLiteral(_ value: String) -> String {
-        let escaped = value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        return "\"\(escaped)\""
     }
 }
 
-private struct FinderTrashFallbackError: LocalizedError {
-    let message: String
+private enum TrashFallbackError: LocalizedError {
+    case missingRecycleMapping(sourceURL: URL)
+    case unverifiedRecycle(sourceURL: URL, recycledURL: URL)
+    case bothFailed(primaryError: Error, fallbackError: Error)
 
     var errorDescription: String? {
-        message
+        switch self {
+        case let .missingRecycleMapping(sourceURL):
+            "App bundle Trash fallback completed without a recycle mapping for \(sourceURL.path)."
+        case let .unverifiedRecycle(sourceURL, recycledURL):
+            "App bundle Trash fallback could not verify that \(sourceURL.path) moved to \(recycledURL.path)."
+        case let .bothFailed(primaryError, fallbackError):
+            "Standard Trash failed: \(primaryError.localizedDescription). App bundle Trash fallback failed: \(fallbackError.localizedDescription)"
+        }
     }
 }
 
-public enum DeletionMode: Equatable, Sendable {
+public enum DeletionMode: String, Codable, Equatable, Sendable {
     case moveToTrash
     case permanent
 }
@@ -159,30 +178,47 @@ public struct DeletionExecutor: Sendable {
             }
         }
 
-        return plan.candidates.map { candidate in
+        var results: [DeletionItemResult] = []
+        for candidate in plan.candidates {
             guard !candidate.isProtected, !deletionProtectionPolicy.isProtected(candidate.url) else {
-                return DeletionItemResult(path: candidate.url.path, success: false, errorMessage: DeletionExecutionErrorMessage.protectedPathSkipped)
+                results.append(DeletionItemResult(path: candidate.url.path, success: false, errorMessage: DeletionExecutionErrorMessage.protectedPathSkipped))
+                continue
             }
 
             do {
-                guard FileManager.default.fileExists(atPath: candidate.url.path) else {
-                    return DeletionItemResult(path: candidate.url.path, success: false, errorMessage: DeletionExecutionErrorMessage.pathNotFoundBeforeDelete)
+                switch FilePresence.inspect(candidate.url) {
+                case .missing:
+                    results.append(DeletionItemResult(path: candidate.url.path, success: false, errorMessage: DeletionExecutionErrorMessage.pathNotFoundBeforeDelete))
+                    continue
+                case .unavailable(let code):
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(code))
+                case .present:
+                    break
                 }
 
                 if force {
                     try prepareForForcedRemoval(at: candidate.url)
                 }
+                let trashURL: URL?
                 switch mode {
                 case .moveToTrash:
-                    try fileRemover.trash(candidate.url, allowsFallback: allowsTrashFallback(for: candidate))
+                    trashURL = try await fileRemover.trash(candidate.url, allowsFallback: allowsTrashFallback(for: candidate))
                 case .permanent:
                     try fileRemover.remove(candidate.url)
+                    trashURL = nil
                 }
-                return DeletionItemResult(path: candidate.url.path, success: true, errorMessage: nil)
+                results.append(DeletionItemResult(path: candidate.url.path, success: true, errorMessage: nil, trashPath: trashURL?.path))
             } catch {
-                return DeletionItemResult(path: candidate.url.path, success: false, errorMessage: error.localizedDescription)
+                let permissionDenied: Bool
+                if case let TrashFallbackError.bothFailed(primary, fallback) = error {
+                    permissionDenied = FilePermissionFailure.matches(primary) || FilePermissionFailure.matches(fallback)
+                } else {
+                    permissionDenied = FilePermissionFailure.matches(error)
+                }
+                results.append(DeletionItemResult(path: candidate.url.path, success: false, errorMessage: error.localizedDescription, permissionDenied: permissionDenied))
             }
         }
+        return results
     }
 
     private func prepareForForcedRemoval(at url: URL) throws {

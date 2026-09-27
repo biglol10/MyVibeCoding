@@ -12,7 +12,7 @@ public struct DeletionToastPresentation: Equatable, Identifiable, Sendable {
     public let message: String
     public let detailLines: [String]
     public let showsFullDiskAccessAction: Bool
-    public let showsAutomationSettingsAction: Bool
+    public let showsAppManagementSettingsAction: Bool
 
     public init(
         id: UUID = UUID(),
@@ -21,7 +21,7 @@ public struct DeletionToastPresentation: Equatable, Identifiable, Sendable {
         message: String,
         detailLines: [String] = [],
         showsFullDiskAccessAction: Bool = false,
-        showsAutomationSettingsAction: Bool = false
+        showsAppManagementSettingsAction: Bool = false
     ) {
         self.id = id
         self.severity = severity
@@ -29,7 +29,7 @@ public struct DeletionToastPresentation: Equatable, Identifiable, Sendable {
         self.message = message
         self.detailLines = detailLines
         self.showsFullDiskAccessAction = showsFullDiskAccessAction
-        self.showsAutomationSettingsAction = showsAutomationSettingsAction
+        self.showsAppManagementSettingsAction = showsAppManagementSettingsAction
     }
 
     public init(report: DeletionReportViewModel, id: UUID = UUID()) {
@@ -40,14 +40,14 @@ public struct DeletionToastPresentation: Equatable, Identifiable, Sendable {
         } else {
             self.title = report.isFullySuccessful ? "Deletion succeeded" : "Deletion failed"
         }
-        self.message = report.summaryLine
+        self.message = report.hasAppManagementFailure
+            ? "\(report.summaryLine). App Management permission or administrator authentication may be required."
+            : report.summaryLine
         self.detailLines = report.errorLogLines.isEmpty
             ? report.remainingPaths.map { "Remaining: \($0)" }
             : report.errorLogLines
-        self.showsFullDiskAccessAction = report.hasPermissionFailure
-        self.showsAutomationSettingsAction = report.errorLogs.contains { log in
-            Self.isAutomationFailureMessage(log.message)
-        }
+        self.showsFullDiskAccessAction = report.hasFullDiskAccessFailure
+        self.showsAppManagementSettingsAction = report.hasAppManagementFailure
     }
 
     public static func error(message: String, report: DeletionReportViewModel? = nil) -> DeletionToastPresentation {
@@ -56,10 +56,8 @@ public struct DeletionToastPresentation: Equatable, Identifiable, Sendable {
             title: report?.isFullySuccessful == true ? "Deletion completed with warning" : "Deletion failed",
             message: message,
             detailLines: report?.errorLogLines ?? [],
-            showsFullDiskAccessAction: report?.hasPermissionFailure ?? isPermissionFailureMessage(message),
-            showsAutomationSettingsAction: report.map { report in
-                report.errorLogs.contains { Self.isAutomationFailureMessage($0.message) }
-            } ?? isAutomationFailureMessage(message)
+            showsFullDiskAccessAction: report?.hasFullDiskAccessFailure ?? isPermissionFailureMessage(message),
+            showsAppManagementSettingsAction: report?.hasAppManagementFailure ?? isAppManagementFailureMessage(message)
         )
     }
 
@@ -67,12 +65,12 @@ public struct DeletionToastPresentation: Equatable, Identifiable, Sendable {
         "Open Full Disk Access Settings"
     }
 
-    public var automationSettingsButtonTitle: String {
-        "Open Automation Settings"
+    public var appManagementSettingsButtonTitle: String {
+        "Open App Management Settings"
     }
 
     private static func isPermissionFailureMessage(_ message: String) -> Bool {
-        if isAutomationFailureMessage(message) {
+        if isAppManagementFailureMessage(message) {
             return false
         }
         let normalized = message.lowercased()
@@ -82,11 +80,9 @@ public struct DeletionToastPresentation: Equatable, Identifiable, Sendable {
             || normalized.contains("not authorized")
     }
 
-    private static func isAutomationFailureMessage(_ message: String) -> Bool {
+    private static func isAppManagementFailureMessage(_ message: String) -> Bool {
         let normalized = message.lowercased()
-        return normalized.contains("finder automation")
-            || normalized.contains("automation")
-            || normalized.contains("apple events")
-            || normalized.contains("appleevents")
+        return normalized.contains("app bundle")
+            || normalized.contains("app management")
     }
 }

@@ -121,7 +121,7 @@ struct SafetyBadge: View {
 
     private var title: String {
         switch safety {
-        case .safe: "Safe"
+        case .safe: "Matched"
         case .review: "Review"
         case .risky: "Risky"
         }
@@ -170,7 +170,7 @@ struct RelatedFileRow: View {
                 HStack(spacing: 18) {
                     SafetyBadge(safety: candidate.safety)
                         .frame(minWidth: 88, alignment: .trailing)
-                    SizeText(bytes: candidate.size)
+                    Text(candidate.sizeIsKnown ? ByteCountFormatter.string(fromByteCount: candidate.size, countStyle: .file) : "Size unavailable")
                         .font(.callout.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .frame(minWidth: 56, alignment: .trailing)
@@ -201,7 +201,36 @@ struct RelatedFileRow: View {
 
     private var evidenceText: String {
         guard let evidence = candidate.evidence.first else { return candidate.matchReason }
-        return "\(evidence.type.rawValue): \(evidence.matchedValue)"
+        switch evidence.type {
+        case .selectedAppBundle: return "Selected application"
+        case .bundleIdentifier: return "App identifier matches · Removing data may erase settings"
+        case .exactAppName, .executableName: return "Name matches · Review ownership before selecting"
+        default: return "Possible related item · Review before selecting"
+        }
+    }
+}
+
+struct SelectionReviewControls: View {
+    let selectedCount: Int
+    let hiddenCount: Int
+    @Binding var selectedOnly: Bool
+    let clear: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Toggle("Selected only", isOn: $selectedOnly).toggleStyle(.checkbox)
+                Spacer()
+                Button("Clear selection", action: clear).disabled(selectedCount == 0)
+            }
+            if hiddenCount > 0 {
+                Text("\(hiddenCount) selected items are hidden by this search.")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+        }
+        .font(.callout)
+        .padding(.horizontal)
+        .padding(.bottom, 10)
     }
 }
 

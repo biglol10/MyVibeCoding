@@ -33,18 +33,19 @@ struct EventEditorView: View {
     @State private var dateSelectionRole: DateSelectionRole
     @State private var displayedDateMonth: Date
     @State private var showingDeleteConfirmation = false
+    @State private var showingSeriesSaveConfirmation = false
     @State private var errorMessage: String?
 
     init(event: CalendarEvent? = nil, defaultDate: Date = Date()) {
         self.event = event
-        let initialDate = event?.startDate ?? defaultDate
+        let initialDate = event?.localStartDate() ?? defaultDate
         _title = State(initialValue: event?.title ?? "")
         _startDate = State(initialValue: initialDate)
-        _endDate = State(initialValue: event?.endDate ?? initialDate)
+        _endDate = State(initialValue: event?.localEndDate() ?? initialDate)
         _category = State(initialValue: event?.category ?? .personal)
         _notes = State(initialValue: event?.notes ?? "")
         _recurrence = State(initialValue: event?.recurrence ?? .none)
-        _notificationOffsets = State(initialValue: Set(event?.notificationOffsetsDays ?? [1]))
+        _notificationOffsets = State(initialValue: Set(event?.notificationOffsetsDays ?? CalendarEvent.defaultReminderOffsets))
         _dateSelectionRole = State(initialValue: .start)
         _displayedDateMonth = State(initialValue: initialDate)
     }
@@ -72,7 +73,13 @@ struct EventEditorView: View {
             Button("삭제", role: .destructive) { delete() }
             Button("취소", role: .cancel) {}
         } message: {
-            Text(recurrence == .none ? "이 일정이 삭제됩니다." : "반복 일정 전체가 삭제됩니다.")
+            Text(event?.recurrence == EventRecurrence.none ? "이 일정이 삭제됩니다." : "반복 일정 전체가 삭제됩니다.")
+        }
+        .confirmationDialog("반복 일정 전체에 적용할까요?", isPresented: $showingSeriesSaveConfirmation, titleVisibility: .visible) {
+            Button("전체 반복 일정에 저장") { save() }
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text("제목, 메모, 알림과 날짜 변경이 과거 및 이후의 모든 반복 일정에 적용됩니다. 날짜를 바꾸면 반복 기준일도 바뀝니다.")
         }
         .alert("저장할 수 없습니다", isPresented: errorBinding) {
             Button("확인", role: .cancel) {}
@@ -84,11 +91,16 @@ struct EventEditorView: View {
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 5) {
-                Text(event == nil ? "새 일정" : "일정 편집")
+                Text(event == nil ? "새 일정" : (isEditingSeries ? "반복 일정 전체 편집" : "일정 편집"))
                     .font(.system(size: 18, weight: .bold))
-                Text("하루종일 일정 · \(dateRangeSummary)")
+                Text("\(isEditingSeries ? "반복 기준일" : "하루종일 일정") · \(dateRangeSummary)")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
+                if isEditingSeries {
+                    Text("이번 날짜만 수정하는 기능은 아직 지원하지 않습니다. 저장하면 전체 반복 일정이 변경됩니다.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
             Spacer()
         }
@@ -228,12 +240,18 @@ struct EventEditorView: View {
             }
             Spacer()
             Button("취소") { dismiss() }
-            Button("저장") { save() }
+                .keyboardShortcut(.cancelAction)
+            Button("저장") {
+                if isEditingSeries { showingSeriesSaveConfirmation = true }
+                else { save() }
+            }
                 .keyboardShortcut(.defaultAction)
                 .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
         .padding(18)
     }
+
+    private var isEditingSeries: Bool { event.map { $0.recurrence != .none } ?? false }
 
     private var inputBackground: some View {
         RoundedRectangle(cornerRadius: 8)
@@ -276,7 +294,7 @@ struct EventEditorView: View {
     private func formattedDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "ko_KR")
-        formatter.dateFormat = "M월 d일 (E)"
+        formatter.dateFormat = "yyyy.MM.dd (E)"
         return formatter.string(from: date)
     }
 
@@ -324,8 +342,7 @@ struct EventEditorView: View {
 
         if let event {
             event.title = normalizedTitle
-            event.startDate = normalizedStart
-            event.endDate = normalizedEnd
+            event.setDateRange(start: normalizedStart, end: normalizedEnd)
             event.category = category
             event.colorHex = category.colorHex
             event.notes = notes

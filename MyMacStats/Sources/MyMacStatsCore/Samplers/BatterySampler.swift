@@ -17,26 +17,44 @@ public struct BatterySampler {
             return desktopSnapshot(powerSource: powerSource)
         }
 
+        return Self.snapshot(from: description, powerSource: powerSource)
+    }
+
+    static func snapshot(from description: [String: Any], powerSource: String) -> BatterySnapshot {
         let current = numericValue(description[kIOPSCurrentCapacityKey as String])
         let maximum = numericValue(description[kIOPSMaxCapacityKey as String])
         let percentage: Double? = {
-            guard let current, let maximum, maximum > 0 else { return nil }
-            return (current / maximum) * 100
+            guard let current, let maximum, current.isFinite, maximum.isFinite, current >= 0, maximum > 0 else { return nil }
+            return min(100, (current / maximum) * 100)
         }()
-        let healthText = description[kIOPSBatteryHealthKey as String] as? String
-            ?? description["BatteryHealth"] as? String
-            ?? ""
-        let serviceRecommended = healthText.localizedCaseInsensitiveContains("service")
-            || healthText.localizedCaseInsensitiveContains("replace")
+        let healthText = description[kIOPSBatteryHealthKey as String] as? String ?? ""
+        let condition = description[kIOPSBatteryHealthConditionKey as String] as? String ?? ""
+        let serviceRecommended = healthText == kIOPSPoorValue
+            || condition == kIOPSCheckBatteryValue
+            || condition == kIOPSPermanentFailureValue
+            || [healthText, condition].contains { $0.localizedCaseInsensitiveContains("service") || $0.localizedCaseInsensitiveContains("replace") }
+        let healthDescription: String? = healthText == kIOPSGoodValue ? "OK"
+            : healthText == kIOPSFairValue ? "Limited capacity" : nil
+        let charging = description[kIOPSIsChargingKey as String] as? Bool
+        let source = description[kIOPSPowerSourceStateKey as String] as? String ?? powerSource
+        let fullyCharged = description[kIOPSIsChargedKey as String] as? Bool ?? false
+        let timeKey = charging == true ? kIOPSTimeToFullChargeKey : kIOPSTimeToEmptyKey
+        let rawMinutes = description[timeKey as String] as? Int
+        let canEstimate = charging == true || (source == kIOPSBatteryPowerValue && charging == false)
+        let minutes = canEstimate ? rawMinutes.flatMap { $0 >= 0 ? $0 : nil } : nil
 
         return BatterySnapshot(
             isPresent: true,
             percentage: percentage,
-            isCharging: description[kIOPSIsChargingKey as String] as? Bool,
-            powerSource: description[kIOPSPowerSourceStateKey as String] as? String ?? powerSource,
-            timeRemainingMinutes: description[kIOPSTimeToEmptyKey as String] as? Int,
+            isCharging: charging,
+            powerSource: source,
+            timeRemainingMinutes: charging == false ? minutes : nil,
             cycleCount: description["Cycle Count"] as? Int,
-            serviceRecommended: serviceRecommended
+            serviceRecommended: serviceRecommended,
+            timeToFullChargeMinutes: charging == true ? minutes : nil,
+            isFullyCharged: fullyCharged,
+            isCalculatingTime: canEstimate && rawMinutes == -1,
+            healthDescription: healthDescription
         )
     }
 
@@ -52,7 +70,7 @@ public struct BatterySampler {
         )
     }
 
-    private func numericValue(_ value: Any?) -> Double? {
+    private static func numericValue(_ value: Any?) -> Double? {
         if let number = value as? NSNumber {
             return number.doubleValue
         }

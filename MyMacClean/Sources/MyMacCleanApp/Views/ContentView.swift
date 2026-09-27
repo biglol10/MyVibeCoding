@@ -25,8 +25,9 @@ struct ContentView: View {
     @State private var permanentDelete = false
     @State private var deletionToast: DeletionToastPresentation?
     @State private var isFullDiskAccessPromptPresented = false
-    @State private var isFinderAutomationPromptPresented = false
-    @State private var hasAcknowledgedFinderAutomationPrompt = false
+    @State private var permissionRecoveryReceipt: DeletionReceipt?
+    @State private var permissionCheckMessage = "After changing permissions, restart MyMacClean and review the remaining items."
+    @State private var isReviewingPermissionRetry = false
 
     private static var deletionProtectionPolicy: ProtectionPolicy {
         ProtectionPolicy(additionalProtectedRoots: currentApplicationProtectedRoots)
@@ -48,6 +49,10 @@ struct ContentView: View {
             await viewModel.loadApps()
             orphanFilesViewModel.updateInstalledApps(viewModel.apps)
             showFullDiskAccessPromptIfNeeded()
+            restorePermissionRecovery()
+        }
+        .safeAreaInset(edge: .bottom) {
+            if let receipt = permissionRecoveryReceipt { permissionRecoveryPanel(receipt) }
         }
         .overlay(alignment: .topTrailing) {
             if let deletionToast {
@@ -60,8 +65,8 @@ struct ContentView: View {
                     withAnimation(.easeInOut(duration: 0.18)) {
                         self.deletionToast = nil
                     }
-                } openAutomationSettings: {
-                    openAutomationSettings()
+                } openAppManagementSettings: {
+                    openAppManagementSettings()
                     withAnimation(.easeInOut(duration: 0.18)) {
                         self.deletionToast = nil
                     }
@@ -429,10 +434,25 @@ struct ContentView: View {
                     Task { await orphanFilesViewModel.loadGroups() }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(orphanFilesViewModel.isScanning || orphanFilesViewModel.isDeleting)
+                .disabled(orphanFilesViewModel.isScanning || orphanFilesViewModel.isDeleting || !viewModel.hasLoadedApps || viewModel.isLoadingApps || !viewModel.applicationDiscoveryIssues.isEmpty)
             }
             .padding()
 
+            if !viewModel.hasLoadedApps || viewModel.isLoadingApps {
+                Text("Wait for the installed app list to finish loading.").font(.caption).padding(.horizontal)
+            } else if !viewModel.applicationDiscoveryIssues.isEmpty {
+                Text("Refresh Applications and resolve incomplete app discovery before checking leftovers.")
+                    .font(.caption).foregroundStyle(.orange).padding(.horizontal)
+                scanCoverageBanner(viewModel.applicationDiscoveryIssues)
+            }
+            TextField("Search leftover groups or paths", text: $orphanFilesViewModel.searchText)
+                .textFieldStyle(.roundedBorder).padding(.horizontal)
+            Toggle("Largest groups first", isOn: $orphanFilesViewModel.sortBySize)
+                .toggleStyle(.checkbox).padding(.horizontal).padding(.vertical, 8)
+            SelectionReviewControls(selectedCount: orphanFilesViewModel.selectedCandidates.count,
+                hiddenCount: orphanFilesViewModel.hiddenSelectionCount, selectedOnly: $orphanFilesViewModel.showSelectedOnly) {
+                orphanFilesViewModel.selectedCandidateIDs = []
+            }
             scanCoverageBanner(orphanFilesViewModel.scanIssues)
 
             Divider()
@@ -447,11 +467,11 @@ struct ContentView: View {
                     description: Text("Run a scan to find leftovers from apps that are no longer installed.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if orphanFilesViewModel.groups.isEmpty {
+            } else if orphanFilesViewModel.visibleGroups.isEmpty {
                 ContentUnavailableView("No Orphan Files", systemImage: "folder.badge.questionmark")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(orphanFilesViewModel.groups) { group in
+                List(orphanFilesViewModel.visibleGroups, selection: $orphanFilesViewModel.selectedGroupID) { group in
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             Text(group.inferredIdentifier)
@@ -467,6 +487,7 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 8)
+                    .tag(group.id)
                 }
             }
         }
@@ -578,6 +599,13 @@ struct ContentView: View {
                     .disabled(largeFilesViewModel.isScanning || largeFilesViewModel.isDeleting)
                 }
 
+                Picker("Minimum file size", selection: $largeFilesViewModel.minimumSize) {
+                    ForEach([100, 250, 500, 1024, 5120], id: \.self) { megabytes in
+                        Text("\(megabytes) MiB").tag(Int64(megabytes) * 1_024 * 1_024)
+                    }
+                }
+                .disabled(largeFilesViewModel.isScanning || largeFilesViewModel.isDeleting)
+
                 Toggle("Include Subfolders", isOn: $largeFilesViewModel.includeSubfolders)
                     .toggleStyle(.checkbox)
                     .font(.callout.weight(.medium))
@@ -599,6 +627,10 @@ struct ContentView: View {
             .padding(.horizontal)
             .padding(.bottom, 12)
 
+            SelectionReviewControls(selectedCount: largeFilesViewModel.selectedCandidates.count,
+                hiddenCount: largeFilesViewModel.hiddenSelectionCount, selectedOnly: $largeFilesViewModel.showSelectedOnly) {
+                largeFilesViewModel.selectedCandidateIDs = []
+            }
             scanCoverageBanner(largeFilesViewModel.scanIssues)
 
             Divider()
@@ -614,7 +646,7 @@ struct ContentView: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if largeFilesViewModel.visibleCandidates.isEmpty {
-                ContentUnavailableView("No Large Files", systemImage: "internaldrive")
+                ContentUnavailableView(largeFilesViewModel.candidates.isEmpty ? "No Files Above the Minimum Size" : "No Matching Files", systemImage: "internaldrive")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(largeFilesViewModel.visibleCandidates) { candidate in
@@ -706,6 +738,10 @@ struct ContentView: View {
             .padding(.horizontal)
             .padding(.bottom, 12)
 
+            SelectionReviewControls(selectedCount: developerCacheViewModel.selectedCandidates.count,
+                hiddenCount: developerCacheViewModel.hiddenSelectionCount, selectedOnly: $developerCacheViewModel.showSelectedOnly) {
+                developerCacheViewModel.selectedCandidateIDs = []
+            }
             scanCoverageBanner(developerCacheViewModel.scanIssues)
 
             Divider()
@@ -911,6 +947,21 @@ struct ContentView: View {
             Text(summary.actionTitle)
                 .font(.callout.weight(.semibold))
                 .foregroundStyle(.secondary)
+            Text(report.deletionMethodTitle).font(.caption).foregroundStyle(.secondary)
+            DisclosureGroup("All processed paths (\(receipt.selectedCandidates.count))") {
+                ForEach(Array(receipt.selectedCandidates.enumerated()), id: \.offset) { _, candidate in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(candidate.path).font(.caption).textSelection(.enabled)
+                        Text(receipt.verificationResults.first { $0.path == candidate.path }?.status.rawValue ?? "Unverified")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if let trashPath = receipt.executionResults.first(where: { $0.path == candidate.path })?.trashPath {
+                            Text("Trash: \(trashPath)").font(.caption).textSelection(.enabled)
+                            Button("Show in Trash") { revealInFinder(URL(fileURLWithPath: trashPath)) }
+                                .disabled(!FileManager.default.fileExists(atPath: trashPath))
+                        }
+                    }.padding(.vertical, 4)
+                }
+            }
 
             HStack(spacing: 18) {
                 HistoryMetric(title: "Selected", value: "\(receipt.selectedCandidates.count)")
@@ -988,7 +1039,7 @@ struct ContentView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {
-                        ForEach(orphanFilesViewModel.groups) { group in
+                        ForEach(orphanFilesViewModel.selectedGroup.map { [$0] } ?? []) { group in
                             VStack(alignment: .leading, spacing: 10) {
                                 HStack(alignment: .center, spacing: 12) {
                                     VStack(alignment: .leading, spacing: 4) {
@@ -1430,6 +1481,19 @@ struct ContentView: View {
                     .stroke(Color.primary.opacity(0.08), lineWidth: 1)
             }
             .clipShape(RoundedRectangle(cornerRadius: 8))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(confirmationSelectedCandidates(for: mode)) { candidate in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(candidate.url.lastPathComponent).font(.callout.weight(.semibold))
+                            Text(candidate.url.path).font(.caption).foregroundStyle(.secondary)
+                                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        }
+                        Divider()
+                    }
+                }
+            }
+            .frame(maxHeight: 180)
             Text(confirmationInstruction(for: mode, effectivePermanentDelete: effectivePermanentDelete))
                 .foregroundStyle(.secondary)
             TextField(requiredConfirmation, text: $confirmationText)
@@ -1461,20 +1525,6 @@ struct ContentView: View {
         }
         .padding()
         .frame(width: 460)
-        .alert(FinderAutomationPromptPresentation().title, isPresented: $isFinderAutomationPromptPresented) {
-            Button(FinderAutomationPromptPresentation().cancelButtonTitle, role: .cancel) {}
-            Button(FinderAutomationPromptPresentation().primaryButtonTitle) {
-                hasAcknowledgedFinderAutomationPrompt = true
-                Task {
-                    await performConfirmedDeletion(
-                        for: mode,
-                        effectivePermanentDelete: confirmationEffectivePermanentDelete(for: mode)
-                    )
-                }
-            }
-        } message: {
-            Text(FinderAutomationPromptPresentation().message)
-        }
     }
 
     private var selectedCandidates: [RelatedFileCandidate] {
@@ -1530,21 +1580,10 @@ struct ContentView: View {
         confirmationText = ""
         forceDelete = false
         permanentDelete = false
-        hasAcknowledgedFinderAutomationPrompt = false
         confirmationMode = mode
     }
 
     private func handleConfirmedDeletionTap(for mode: DeletionConfirmationMode, effectivePermanentDelete: Bool) {
-        let deletionMode: DeletionMode = effectivePermanentDelete ? .permanent : .moveToTrash
-        if !hasAcknowledgedFinderAutomationPrompt,
-           FinderAutomationPromptPresentation.requiresPrompt(
-                candidates: confirmationSelectedCandidates(for: mode),
-                mode: deletionMode
-           ) {
-            isFinderAutomationPromptPresented = true
-            return
-        }
-
         Task {
             await performConfirmedDeletion(for: mode, effectivePermanentDelete: effectivePermanentDelete)
         }
@@ -1566,6 +1605,13 @@ struct ContentView: View {
             report = await developerCacheViewModel.moveSelectedToTrash(confirmation: confirmationText)
         }
         let errorMessage = consumeDeletionError(for: mode)
+        if let report {
+            if report.hasPermissionFailure || report.hasAppManagementFailure {
+                permissionRecoveryReceipt = report.receipt
+            } else if report.isFullySuccessful {
+                permissionRecoveryReceipt = nil
+            }
+        }
         confirmationMode = nil
         presentDeletionToast(report: report, errorMessage: errorMessage)
     }
@@ -1613,6 +1659,94 @@ struct ContentView: View {
         }
     }
 
+    private func restorePermissionRecovery() {
+        guard let receipt = try? DeletionReceiptStore.default().readReceipts().max(by: { $0.completedAt < $1.completedAt }) else { return }
+        let report = DeletionReportViewModel(receipt: receipt)
+        if report.hasPermissionFailure || report.hasAppManagementFailure { permissionRecoveryReceipt = receipt }
+    }
+
+    private func permissionRecoveryPanel(_ receipt: DeletionReceipt) -> some View {
+        let report = DeletionReportViewModel(receipt: receipt)
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Permission required: \(receipt.appName)").font(.headline)
+            Text(permissionCheckMessage).font(.callout).foregroundStyle(.secondary)
+            HStack {
+                if report.hasAppManagementFailure {
+                    Button("Open App Management") { openAppManagementSettings() }
+                }
+                if report.hasFullDiskAccessFailure {
+                    Button("Open Full Disk Access") { openFullDiskAccessSettings() }
+                }
+                Button("Check Access") {
+                    switch FullDiskAccessProbe().status() {
+                    case .granted: permissionCheckMessage = "Protected folder access is available. App Management is checked by macOS when deleting an app. Review again before retrying."
+                    case .missing: permissionCheckMessage = "Protected folder access is still unavailable. Enable Full Disk Access, then restart MyMacClean."
+                    case .undetermined: permissionCheckMessage = "Access could not be confirmed. Check System Settings, then restart and review again."
+                    }
+                }
+                Button("Restart MyMacClean") { restartForPermissionChange() }
+                Button("Review Again") { Task { await reviewPermissionRetry(receipt) } }
+                    .disabled(isReviewingPermissionRetry || viewModel.isLoadingApps || viewModel.isScanning)
+                Spacer()
+                Button("Dismiss") { permissionRecoveryReceipt = nil }
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(14)
+        .background(.regularMaterial)
+    }
+
+    private func restartForPermissionChange() {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { _, error in
+            Task { @MainActor in
+                if let error { viewModel.errorMessage = error.localizedDescription }
+                else { NSApplication.shared.terminate(nil) }
+            }
+        }
+    }
+
+    private func reviewPermissionRetry(_ receipt: DeletionReceipt) async {
+        isReviewingPermissionRetry = true
+        defer { isReviewingPermissionRetry = false }
+        let failedPaths = Set(receipt.executionResults.filter { !$0.success }.map(\.path))
+            .union(receipt.verificationResults.filter { $0.status == .stillExists || $0.status == .permissionDenied }.map(\.path))
+        switch receipt.action {
+        case .uninstall, .appReset:
+            navigationState.select(.applications)
+            await refreshApplications()
+            guard let app = viewModel.apps.first(where: { $0.bundleURL.standardizedFileURL.path == URL(fileURLWithPath: receipt.bundlePath).standardizedFileURL.path }) else {
+                navigationState.select(.deleteHistory)
+                permissionCheckMessage = "The app bundle is no longer installed. Review remaining paths in Delete History."
+                return
+            }
+            viewModel.selectApp(app)
+            viewModel.cleanupMode = receipt.action == .appReset ? .resetData : .uninstall
+            await viewModel.scanSelectedApp()
+            viewModel.selectedCandidateIDs = Set(viewModel.reviewCandidates.filter { failedPaths.contains($0.url.path) && !$0.isProtected }.map(\.id))
+        case .largeFileCleanup:
+            navigationState.select(.largeFiles)
+            guard largeFilesViewModel.setScanRoot(URL(fileURLWithPath: receipt.bundlePath)) else { return }
+            await largeFilesViewModel.scan()
+            largeFilesViewModel.selectedCandidateIDs = Set(largeFilesViewModel.candidates.filter { failedPaths.contains($0.url.path) }.map(\.id))
+        case .developerCacheCleanup:
+            navigationState.select(.maintenance)
+            await developerCacheViewModel.scan()
+            developerCacheViewModel.selectedCandidateIDs = Set(developerCacheViewModel.candidates.filter { failedPaths.contains($0.url.path) && $0.isDeletable }.map(\.id))
+        case .orphanCleanup:
+            navigationState.select(.orphanFiles)
+            await refreshApplications()
+            guard viewModel.applicationDiscoveryIssues.isEmpty else { return }
+            orphanFilesViewModel.updateInstalledApps(viewModel.apps)
+            await orphanFilesViewModel.loadGroups()
+            orphanFilesViewModel.selectedCandidateIDs = Set(orphanFilesViewModel.groups.flatMap(\.candidates).filter { failedPaths.contains($0.url.path) && !$0.isProtected }.map(\.id))
+        default:
+            navigationState.select(.deleteHistory)
+        }
+        permissionCheckMessage = "Remaining items were reviewed again. Check their paths before confirming a new deletion."
+    }
+
     private func showFullDiskAccessPromptIfNeeded() {
         guard FullDiskAccessProbe().status() == .missing else { return }
         isFullDiskAccessPromptPresented = true
@@ -1635,8 +1769,8 @@ struct ContentView: View {
         NSWorkspace.shared.open(FullDiskAccessPromptPresentation().settingsURL)
     }
 
-    private func openAutomationSettings() {
-        NSWorkspace.shared.open(FinderAutomationPromptPresentation().settingsURL)
+    private func openAppManagementSettings() {
+        NSWorkspace.shared.open(AppManagementPromptPresentation().settingsURL)
     }
 
     private func confirmationSelectedCandidates(for mode: DeletionConfirmationMode) -> [RelatedFileCandidate] {
@@ -2046,7 +2180,7 @@ private struct DeletionToastView: View {
     let toast: DeletionToastPresentation
     let dismiss: () -> Void
     let openFullDiskAccessSettings: () -> Void
-    let openAutomationSettings: () -> Void
+    let openAppManagementSettings: () -> Void
 
     private var tint: Color {
         switch toast.severity {
@@ -2125,11 +2259,11 @@ private struct DeletionToastView: View {
                 .controlSize(.regular)
             }
 
-            if toast.showsAutomationSettingsAction {
+            if toast.showsAppManagementSettingsAction {
                 Button {
-                    openAutomationSettings()
+                    openAppManagementSettings()
                 } label: {
-                    Label(toast.automationSettingsButtonTitle, systemImage: "gearshape.2")
+                    Label(toast.appManagementSettingsButtonTitle, systemImage: "gearshape.2")
                         .font(.callout.weight(.semibold))
                         .frame(maxWidth: .infinity, minHeight: 34)
                 }

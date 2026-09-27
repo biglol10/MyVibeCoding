@@ -121,9 +121,12 @@ final class DeletionReportViewModelTests: XCTestCase {
         App: Cursor
         Bundle ID: com.todesktop.230313mzl4w4u92
         Action: uninstall
+        Method: Method not recorded in this older receipt
         Status: Deleted with remaining items
         Deleted: 1
         Remaining: 1
+
+        Selected paths:
 
         Remaining Paths:
         /Users/me/Library/Caches/com.todesktop.230313mzl4w4u92
@@ -208,11 +211,11 @@ final class DeletionReportViewModelTests: XCTestCase {
 
         XCTAssertEqual(toast.severity, .error)
         XCTAssertEqual(toast.title, "Deletion failed")
-        XCTAssertEqual(toast.message, "0 deleted, 1 remaining")
+        XCTAssertEqual(toast.message, "0 deleted, 1 remaining. App Management permission or administrator authentication may be required.")
         XCTAssertEqual(toast.detailLines, ["/Applications/Cursor.app - Operation not permitted"])
     }
 
-    func testPermissionFailureToastOffersFullDiskAccessAction() {
+    func testAppBundlePermissionFailureToastOffersAppManagementAction() {
         let report = DeletionReportViewModel(
             receipt: DeletionReceipt(
                 appName: "Cursor",
@@ -231,11 +234,16 @@ final class DeletionReportViewModelTests: XCTestCase {
         )
 
         XCTAssertTrue(report.hasPermissionFailure)
+        XCTAssertTrue(report.hasAppManagementFailure)
+        XCTAssertFalse(report.hasFullDiskAccessFailure)
 
         let toast = DeletionToastPresentation(report: report)
 
-        XCTAssertTrue(toast.showsFullDiskAccessAction)
-        XCTAssertEqual(toast.fullDiskAccessButtonTitle, "Open Full Disk Access Settings")
+        XCTAssertTrue(toast.showsAppManagementSettingsAction)
+        XCTAssertFalse(toast.showsFullDiskAccessAction)
+        XCTAssertEqual(toast.appManagementSettingsButtonTitle, "Open App Management Settings")
+        XCTAssertTrue(toast.message.contains("App Management"))
+        XCTAssertTrue(toast.message.contains("administrator"))
     }
 
     func testPlainFailureToastDoesNotOfferFullDiskAccessAction() {
@@ -244,12 +252,35 @@ final class DeletionReportViewModelTests: XCTestCase {
         XCTAssertFalse(toast.showsFullDiskAccessAction)
     }
 
-    func testFinderAutomationFailureToastOffersAutomationSettingsAction() {
-        let toast = DeletionToastPresentation.error(message: "Finder Automation could not move item to Trash: Not authorized to send Apple events to Finder.")
+    func testAppBundleFallbackFailureToastOffersAppManagementSettingsAction() {
+        let toast = DeletionToastPresentation.error(message: "Standard Trash failed: permission denied. App bundle Trash fallback failed: permission denied")
 
-        XCTAssertTrue(toast.showsAutomationSettingsAction)
+        XCTAssertTrue(toast.showsAppManagementSettingsAction)
         XCTAssertFalse(toast.showsFullDiskAccessAction)
-        XCTAssertEqual(toast.automationSettingsButtonTitle, "Open Automation Settings")
+        XCTAssertEqual(toast.appManagementSettingsButtonTitle, "Open App Management Settings")
+    }
+
+    func testProtectedLibraryPermissionFailureToastOffersFullDiskAccessAction() {
+        let report = DeletionReportViewModel(
+            receipt: DeletionReceipt(
+                appName: "Cursor",
+                bundleIdentifier: "com.example.cursor",
+                bundlePath: "/Applications/Cursor.app",
+                action: .uninstall,
+                selectedCandidates: [],
+                executionResults: [
+                    DeletionItemResult(path: "/Users/me/Library/Mail/V10/state", success: false, errorMessage: "Operation not permitted")
+                ],
+                verificationResults: [
+                    DeletionVerificationResult(path: "/Users/me/Library/Mail/V10/state", status: .permissionDenied, errorMessage: nil)
+                ],
+                confirmationMatched: true
+            )
+        )
+
+        XCTAssertTrue(report.hasFullDiskAccessFailure)
+        XCTAssertFalse(report.hasAppManagementFailure)
+        XCTAssertTrue(DeletionToastPresentation(report: report).showsFullDiskAccessAction)
     }
 
     func testSummarizesStartupItemChangeWithoutDeletionLanguage() {

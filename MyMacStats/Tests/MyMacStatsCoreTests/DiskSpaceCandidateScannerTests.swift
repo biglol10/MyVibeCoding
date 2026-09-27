@@ -24,6 +24,7 @@ final class DiskSpaceCandidateScannerTests: XCTestCase {
         XCTAssertEqual(candidates.count, 2)
         XCTAssertGreaterThan(candidates[0].sizeBytes, candidates[1].sizeBytes)
         XCTAssertGreaterThan(candidates[1].sizeBytes, 0)
+        XCTAssertTrue(candidates.allSatisfy { !$0.isPartial })
     }
 
     func testSlowDuCommandTimesOutAndFallsBackToLimitedScan() throws {
@@ -53,6 +54,20 @@ final class DiskSpaceCandidateScannerTests: XCTestCase {
         XCTAssertLessThan(elapsed, 1)
         XCTAssertEqual(candidates.map(\.title), ["Caches"])
         XCTAssertGreaterThan(candidates[0].sizeBytes, 0)
+        XCTAssertTrue(candidates[0].isPartial)
+    }
+
+    func testTruncatedFallbackIsExplicitlyPartial() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("disk-partial-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for index in 0..<2_100 {
+            try Data([1]).write(to: root.appendingPathComponent("\(index)"))
+        }
+        let candidate = try XCTUnwrap(DiskSpaceCandidateScanner(duExecutableURL: URL(fileURLWithPath: "/usr/bin/false"))
+            .scan(targets: [.init(title: "Fixture", url: root)]).first)
+        XCTAssertEqual(candidate.sizeBytes, 2_000)
+        XCTAssertTrue(candidate.isPartial)
     }
 
     func testDefaultTargetsAvoidBroadPrivacySensitiveFolders() {

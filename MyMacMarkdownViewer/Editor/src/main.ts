@@ -7,7 +7,9 @@ import { languages } from '@codemirror/language-data';
 import { syntaxHighlighting, HighlightStyle, bracketMatching } from '@codemirror/language';
 import { GFM } from '@lezer/markdown';
 import { classHighlighter, tags } from '@lezer/highlight';
-import { clearTableComposition, isTableComposing, livePreview, previewOptions, setSourceMode, setComposition, updateSettings } from './livePreview';
+import { clearTableComposition, commitTableDraft, hasTableDraft, isTableComposing, livePreview, previewOptions, setSourceMode, setComposition, updateSettings } from './livePreview';
+import { followLink } from './navigation';
+import { installInputHistory, undoInput } from './inputHistory';
 import { outlineFor, rebaseMarkdown } from './markdown';
 import { post, session, setSession, defaultSettings, accepts, type Settings } from './protocol';
 import { frontMatterFor, nextFootnoteLabel, tableOfContentsMarkdown } from './semantic';
@@ -108,6 +110,7 @@ function insertFootnote() {
     selection: EditorSelection.cursor(selection.from + reference.length), userEvent: 'input' }); view.focus();
 }
 
+installInputHistory();
 const view = new EditorView({
   parent: document.querySelector('#editor')!,
   state: makeState(welcome),
@@ -144,7 +147,7 @@ function makeState(text: string, anchor = 0, head = anchor) {
     EditorView.domEventHandlers({
       mousedown(event) {
         const link = (event.target as HTMLElement).closest<HTMLElement>('.md-link[data-href]');
-        if (link && (event.metaKey || event.ctrlKey)) { event.preventDefault(); post('openLink', { href: link.dataset.href }); return true; }
+        if (link && (event.metaKey || event.ctrlKey)) { event.preventDefault(); followLink(view, link.dataset.href ?? '', view.state.field(livePreview).context); return true; }
         return false;
       },
       compositionstart() { view.dispatch({ effects: setComposition.of(true) }); post('composition', { active: true }); },
@@ -205,7 +208,7 @@ view.dom.addEventListener('compositionend', () => {
 });
 function applySettings(next: Partial<Settings>) {
   if (isTableComposing()) { pendingTableSettings = { ...pendingTableSettings, ...next }; return; }
-  flushTableDraft();
+  flushTableDraft(false);
   settings = { ...settings, ...next };
   document.documentElement.dataset.theme = settings.theme;
   const style = document.documentElement.style;
@@ -235,13 +238,16 @@ function canEdit() {
   return !view.state.readOnly && !view.composing && !view.state.field(previewOptions).composing && !isTableComposing();
 }
 
-function flushTableDraft() {
-  const input = document.activeElement;
-  if (!isTableComposing() && input instanceof HTMLInputElement && input.classList.contains('table-cell-input')) input.blur();
-}
+function flushTableDraft(preserveFocus = true) { commitTableDraft(view, preserveFocus); }
 
 function command(name: string) {
   const tableInput = document.activeElement;
+  if ((tableInput instanceof HTMLInputElement || tableInput instanceof HTMLTextAreaElement)
+      && !tableInput.classList.contains('table-cell-input')) {
+    if (name === 'undo' || name === 'redo') {
+      undoInput(tableInput, name); return;
+    }
+  }
   if (tableInput instanceof HTMLInputElement && tableInput.classList.contains('table-cell-input')) {
     if (isTableComposing()) return;
     if (name === 'selectAll') { tableInput.select(); return; }
@@ -251,12 +257,13 @@ function command(name: string) {
       const [left, right] = inline[name], from = tableInput.selectionStart ?? 0, to = tableInput.selectionEnd ?? from;
       tableInput.setRangeText(left + tableInput.value.slice(from, to) + right, from, to, 'select');
       tableInput.setSelectionRange(from + left.length, to + left.length);
+      tableInput.dispatchEvent(new Event('input', { bubbles: true }));
       return;
     }
-    if (['source', 'undo', 'redo', 'find', 'replace'].includes(name)) flushTableDraft();
+    if (['source', 'undo', 'redo', 'find', 'replace'].includes(name)) flushTableDraft(false);
     else { post('error', { message: '표 셀에서는 글자 서식을 사용할 수 있습니다. 블록을 삽입하려면 표 밖의 문단을 선택하세요.' }); return; }
   }
-  if (name === 'source') flushTableDraft();
+  if (name === 'source') flushTableDraft(false);
   if (!canEdit() && !['find', 'copy', 'selectAll'].includes(name)) return;
   switch (name) {
     case 'undo': undo(view); break;
@@ -317,6 +324,7 @@ const host = {
       loading = false; emitMetadata(); post('opened'); return;
     }
     if (message.type === 'command') command(message.command);
+    if (message.type === 'navigateFragment') followLink(view, message.href, view.state.field(livePreview).context);
     if (message.type === 'jump') {
       navigationAnchor = Math.min(view.state.doc.length, message.from);
       view.dispatch({ selection: { anchor: navigationAnchor, head: Math.min(view.state.doc.length, message.to ?? navigationAnchor) }, effects: EditorView.scrollIntoView(navigationAnchor, { y: 'start', yMargin: 32 }) }); view.focus();
@@ -325,9 +333,15 @@ const host = {
       if (!canEdit()) return;
       view.dispatch(view.state.replaceSelection(String(message.text))); view.focus();
     }
-    if (message.type === 'lock') view.dispatch({ effects: [readOnly.reconfigure(EditorState.readOnly.of(message.locked)), updateSettings.of(settings)] });
+    if (message.type === 'lock') {
+      // The host checks snapshot.composing and aborts the transition. Keep the
+      // composing input alive until then instead of destroying its IME draft.
+      if (isTableComposing() || view.composing || view.state.field(previewOptions).composing) return;
+      flushTableDraft(false);
+      view.dispatch({ effects: [readOnly.reconfigure(EditorState.readOnly.of(message.locked)), updateSettings.of(settings)] });
+    }
   },
-  snapshot() { flushTableDraft(); return { ...session, text: view.state.doc.toString(), anchor: view.state.selection.main.anchor, head: view.state.selection.main.head, scrollTop: view.scrollDOM.scrollTop, visibleFrom: visibleFrom(), composing: view.composing || view.state.field(previewOptions).composing || isTableComposing() }; },
+  snapshot() { flushTableDraft(); return { ...session, text: view.state.doc.toString(), tableDraft: hasTableDraft(), anchor: view.state.selection.main.anchor, head: view.state.selection.main.head, scrollTop: view.scrollDOM.scrollTop, visibleFrom: visibleFrom(), composing: view.composing || view.state.field(previewOptions).composing || isTableComposing() }; },
   prepareSaveAs(newBase: string) { return { ...host.snapshot(), text: rebaseMarkdown(view.state.doc.toString(), session.baseURL, newBase) }; },
   rebaseMoved(text: string, oldBase: string, newBase: string, source: string, destination: string, directory: boolean) {
     return rebaseMarkdown(text, oldBase, newBase, { source, destination, directory });

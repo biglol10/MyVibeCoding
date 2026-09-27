@@ -15,6 +15,10 @@ enum AppQA {
         let allowedRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("MyMarkdownViewer/QA", isDirectory: true).standardizedFileURL
         guard root.path == allowedRoot.path || root.path.hasPrefix(allowedRoot.path + "/") else { return }
+        if args.contains("--qa-ux-fixes") {
+            await uxFixChecks(model: model, web: web, root: root)
+            return
+        }
         if args.contains("--qa-reveal-current") {
             await FileRevealQA.run(model: model, root: root)
             return
@@ -507,5 +511,104 @@ private final class QAWriteHold: NSObject, NSFilePresenter, @unchecked Sendable 
         lock.withLock { entered = true }
         _ = release.wait(timeout: .now() + 8)
         writer(nil)
+    }
+}
+
+extension AppQA {
+    static func uxFixChecks(model: AppModel, web: WKWebView, root: URL) async {
+        var report: [String: Any] = ["platform": "macOS WKWebView", "realIMEVerified": false]
+        let settings = model.settings
+        defer { model.settings = settings }
+        let fixture = root.appendingPathComponent("ux-table.md")
+        let source = "# Audit\n\n| Name | Value |\n| --- | --- |\n| First | Initial |\n| Second | Initial |\n\n## 제목: 설치?\n\n설치\n\n## 반복\n\n첫째\n\n## 반복\n\n둘째\n"
+        func check(_ name: String, _ passed: Bool) throws {
+            report[name] = passed
+            if !passed { throw NSError(domain: "UXFixQA", code: 1, userInfo: [NSLocalizedDescriptionKey: name]) }
+        }
+        func load() async throws {
+            try Data(source.utf8).write(to: fixture, options: .atomic)
+            try await model.resetQAFixture(fixture)
+            _ = try await model.bridge.snapshot()
+        }
+        func draft(_ text: String) async throws {
+            _ = try await web.callAsyncJavaScript("""
+                document.querySelector('.table-edit-toggle')?.click();
+                const cell = document.querySelector('.table-cell-input[data-row="2"][data-column="1"]');
+                cell.focus(); cell.value = text; cell.setSelectionRange(2, 2);
+                cell.dispatchEvent(new InputEvent('input', {bubbles: true}));
+                """, arguments: ["text": text], in: nil, contentWorld: .page)
+        }
+        do {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            model.settings.autosave = true
+            try await load(); try await draft("TRANSITION_DRAFT")
+            await model.newDocument()
+            try check("tableDraftSavedBeforeNewDocument", model.documentURL == nil && (try String(contentsOf: fixture, encoding: .utf8)).contains("TRANSITION_DRAFT"))
+
+            model.settings.autosave = false
+            try await load(); try await draft("RECOVERY_DRAFT")
+            try await Task.sleep(for: .milliseconds(900))
+            let records = try await model.store.recoveries()
+            try check("tableDraftCheckpointed", records.contains { $0.path == fixture.path && $0.text.contains("RECOVERY_DRAFT") })
+            try check("tableDraftMarkedUnsaved", model.isDirty)
+            _ = await model.save()
+
+            model.settings.autosave = true
+            try await load(); try await draft("ab|cd")
+            try await Task.sleep(for: .seconds(3))
+            let focus = try await web.callAsyncJavaScript("""
+                const cell = document.activeElement;
+                return {cell: cell?.classList.contains('table-cell-input'), value: cell?.value, caret: cell?.selectionStart};
+                """, arguments: [:], in: nil, contentWorld: .page) as? [String: Any]
+            try check("autosaveRetainsTableFocusAndCaret", focus?["cell"] as? Bool == true && focus?["value"] as? String == "ab|cd" && focus?["caret"] as? Int == 2)
+            try check("tableAutosaveCompletes", !model.isDirty && (try String(contentsOf: fixture, encoding: .utf8)).contains("ab\\|cd"))
+
+            try await load()
+            _ = try await web.callAsyncJavaScript("""
+                document.querySelector('.table-edit-toggle').click();
+                const cell = document.querySelector('.table-cell-input[data-row="2"][data-column="1"]');
+                cell.focus(); cell.dispatchEvent(new CompositionEvent('compositionstart', {bubbles: true}));
+                cell.value = '한글 조합'; cell.dispatchEvent(new InputEvent('input', {bubbles: true, isComposing: true}));
+                """, arguments: [:], in: nil, contentWorld: .page)
+            await model.newDocument()
+            let composing = try await model.bridge.snapshot()
+            try check("compositionBlocksTransition", model.documentURL == fixture && composing["composing"] as? Bool == true)
+            _ = try await web.callAsyncJavaScript("document.activeElement.dispatchEvent(new CompositionEvent('compositionend', {bubbles:true, data:'한글'}))", arguments: [:], in: nil, contentWorld: .page)
+            try await Task.sleep(for: .milliseconds(100))
+            let composed = try await model.bridge.snapshot()
+            try check("compositionTextPreserved", (composed["text"] as? String)?.contains("한글 조합") == true)
+            _ = await model.save()
+
+            try await load()
+            model.receive(["type": "openLink", "sessionID": model.sessionID, "documentID": model.documentID, "href": "#제목-설치"])
+            let linked = try await model.bridge.snapshot()
+            let heading = (source as NSString).range(of: "## 제목: 설치?").location
+            try check("nativePunctuationLink", linked["head"] as? Int == heading)
+            model.receive(["type": "openLink", "sessionID": model.sessionID, "documentID": model.documentID, "href": "#반복-2"])
+            let duplicate = try await model.bridge.snapshot()
+            let second = (source as NSString).range(of: "## 반복", options: .backwards).location
+            try check("nativeDuplicateHeadingLink", duplicate["head"] as? Int == second)
+
+            model.settings.autosave = false
+            try await load()
+            model.bridge.send(["type": "insert", "sessionID": model.sessionID, "documentID": model.documentID, "text": "LOCAL_EDIT "])
+            _ = try await model.bridge.snapshot()
+            try await Task.sleep(for: .milliseconds(100))
+            try Data("# External change\n".utf8).write(to: fixture, options: .atomic)
+            await model.checkExternalChange()
+            try check("externalConflictDetected", model.hasConflict)
+            model.errorMessage = nil
+            let saved = await model.save()
+            try check("saveReopensConflictResolution", !saved && model.errorMessage != nil && model.hasConflict)
+            model.errorMessage = nil; model.showConflictResolution()
+            try check("statusCanReopenConflictResolution", model.errorMessage != nil)
+            try check("conflictDoesNotOverwriteDisk", try String(contentsOf: fixture, encoding: .utf8) == "# External change\n")
+            try await load()
+            report["completed"] = true
+        } catch { report["error"] = error.localizedDescription; report["completed"] = false }
+        do {
+            try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+                .write(to: root.appendingPathComponent("ux-fixes-qa.json"), options: .atomic)
+        } catch { FileHandle.standardError.write(Data("UX QA report: \(error)\n".utf8)) }
     }
 }

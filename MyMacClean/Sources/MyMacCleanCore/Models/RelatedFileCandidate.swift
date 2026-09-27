@@ -28,6 +28,7 @@ public struct RelatedFileCandidate: Identifiable, Equatable, Sendable {
     public let url: URL
     public let kind: RelatedFileKind
     public let size: Int64
+    public let sizeIsKnown: Bool
     public let matchReason: String
     public let confidence: MatchConfidence
     public let evidence: [MatchEvidence]
@@ -41,6 +42,7 @@ public struct RelatedFileCandidate: Identifiable, Equatable, Sendable {
         url: URL,
         kind: RelatedFileKind,
         size: Int64,
+        sizeIsKnown: Bool = true,
         matchReason: String,
         confidence: MatchConfidence,
         evidence: [MatchEvidence] = [],
@@ -53,6 +55,7 @@ public struct RelatedFileCandidate: Identifiable, Equatable, Sendable {
         self.url = url
         self.kind = kind
         self.size = size
+        self.sizeIsKnown = sizeIsKnown
         self.matchReason = matchReason
         self.confidence = confidence
         self.evidence = evidence
@@ -82,7 +85,12 @@ public struct DeletionItemResult: Codable, Equatable, Sendable {
     public let success: Bool
     public let errorMessage: String?
 
-    public init(path: String, success: Bool, errorMessage: String?) {
+    public let trashPath: String?
+    public let permissionDenied: Bool?
+
+    public init(path: String, success: Bool, errorMessage: String?, trashPath: String? = nil, permissionDenied: Bool? = nil) {
+        self.trashPath = trashPath
+        self.permissionDenied = permissionDenied
         self.path = path
         self.success = success
         self.errorMessage = errorMessage

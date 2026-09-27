@@ -91,7 +91,7 @@ final class CandidateMatcherTests: XCTestCase {
         )
 
         XCTAssertEqual(match?.confidence, .medium)
-        XCTAssertEqual(match?.defaultSelected, true)
+        XCTAssertEqual(match?.defaultSelected, false)
     }
 
     func testBundleIdentifierMatchCarriesStrongEvidence() {

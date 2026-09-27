@@ -10,8 +10,8 @@ final class CalendarSearchSourceTests: XCTestCase {
         XCTAssertTrue(source.contains("CalendarSearchField("))
         XCTAssertTrue(source.contains("CalendarSearchResultsView("))
         XCTAssertTrue(source.contains("EventService().search(searchQuery, in: events)"))
-        XCTAssertTrue(source.contains("selectedDate = event.startDate"))
-        XCTAssertTrue(source.contains("displayedMonth = event.startDate"))
+        XCTAssertTrue(source.contains("selectedDate = event.localStartDate()"))
+        XCTAssertTrue(source.contains("displayedMonth = event.localStartDate()"))
         XCTAssertTrue(source.contains("activeSheet = .editEvent(event)"))
     }
 

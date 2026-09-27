@@ -150,7 +150,7 @@ struct DayAgendaPanelView: View {
 
     private var dayHolidays: [HolidayRecord] {
         let visible = holidays.filter { holiday in
-            holiday.isHidden == false && calendar.isDate(holiday.date, inSameDayAs: selectedDate)
+            holiday.isHidden == false && calendar.isDate(holiday.localDate(), inSameDayAs: selectedDate)
         }
         let manual = visible.filter { $0.source == .manual }
         return manual.isEmpty ? visible : manual

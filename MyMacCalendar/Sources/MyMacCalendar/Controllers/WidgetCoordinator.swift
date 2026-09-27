@@ -38,13 +38,13 @@ final class WidgetCoordinator {
             return
         }
 
-        let occurrences = EventService().upcomingOccurrences(
+        let occurrences = EventService().upcomingYearOccurrences(
             from: Date(),
-            events: currentEvents,
-            limit: currentSettings.visibleCount
+            events: currentEvents
         )
         controller.show(
             occurrences: occurrences,
+            visibleCount: currentSettings.visibleCount,
             opacity: currentSettings.opacity,
             alwaysOnTop: currentSettings.alwaysOnTop,
             onSelect: { [weak self] occurrence in

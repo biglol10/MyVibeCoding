@@ -7,6 +7,8 @@ public struct ProcessAppGroup: Equatable, Identifiable, Sendable {
     public let memoryBytes: UInt64
     public let processes: [ProcessMetric]
 
+    public var isApplicationTarget: Bool { id.hasPrefix("app:") }
+
     public init(id: String, name: String, cpuPercent: Double, memoryBytes: UInt64, processes: [ProcessMetric]) {
         self.id = id
         self.name = name
@@ -97,27 +99,29 @@ public enum ProcessGrouping {
     }
 
     private static func groupIdentity(for process: ProcessMetric) -> ProcessGroupIdentity {
-        if let appName = owningApplicationName(from: process.path) {
-            return ProcessGroupIdentity(id: "app:\(appName.localizedLowercase)", name: appName)
+        if let application = owningApplication(from: process.path) {
+            return application
         }
-        if let bundleIdentifier = process.bundleIdentifier, !bundleIdentifier.isEmpty {
-            return ProcessGroupIdentity(id: "bundle:\(bundleIdentifier)", name: normalizedName(process.name))
-        }
-        let name = normalizedName(process.name)
-        return ProcessGroupIdentity(id: "name:\(name.localizedLowercase)", name: name)
+        // A shared executable name or bundle ID does not prove shared ownership.
+        return ProcessGroupIdentity(id: "pid:\(process.pid)", name: process.name)
     }
 
-    private static func owningApplicationName(from path: String?) -> String? {
-        guard let path else { return nil }
-        let components = URL(fileURLWithPath: path).pathComponents
-        guard let appComponent = components.first(where: { $0.hasSuffix(".app") }) else { return nil }
-        return String(appComponent.dropLast(4))
-    }
-
-    private static func normalizedName(_ name: String) -> String {
-        name
-            .replacingOccurrences(of: " Helper", with: "")
-            .replacingOccurrences(of: " \\([^)]*\\)", with: "", options: .regularExpression)
+    private static func owningApplication(from path: String?) -> ProcessGroupIdentity? {
+        guard let path, path.hasPrefix("/") else { return nil }
+        // This runs while rendering live rows. Normalize lexically: URL construction
+        // can probe the filesystem for each executable and stall the main thread.
+        var components: [Substring] = []
+        for component in path.split(separator: "/") {
+            if component == "." { continue }
+            if component == ".." {
+                if !components.isEmpty { components.removeLast() }
+            } else {
+                components.append(component)
+            }
+        }
+        guard let index = components.firstIndex(where: { $0.hasSuffix(".app") }) else { return nil }
+        let appPath = "/" + components[...index].joined(separator: "/")
+        return ProcessGroupIdentity(id: "app:\(appPath)", name: String(components[index].dropLast(4)))
     }
 }
 

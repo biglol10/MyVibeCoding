@@ -20,10 +20,10 @@ struct MenuBarPopoverView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Top Culprits")
+                Text("Top CPU Usage")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                ForEach(viewModel.displayedProcessGroups.prefix(3)) { group in
+                ForEach(viewModel.topCPUProcessGroups) { group in
                     HStack(spacing: 8) {
                         Text(group.name)
                             .lineLimit(1)
@@ -49,7 +49,6 @@ struct MenuBarPopoverView: View {
         }
         .padding(14)
         .frame(width: 320)
-        .preferredColorScheme(.dark)
         .task {
             viewModel.start()
         }

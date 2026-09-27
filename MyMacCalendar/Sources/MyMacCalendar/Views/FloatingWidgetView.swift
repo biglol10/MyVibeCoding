@@ -4,17 +4,18 @@ import MyMacCalendarCore
 
 struct FloatingWidgetView: View {
     let occurrences: [EventOccurrence]
+    let visibleCount: Int
     let onSelect: (EventOccurrence) -> Void
     let onShowAll: () -> Void
     @State private var now = Date()
 
     var body: some View {
-        let visibleOccurrences = Array(occurrences.prefix(FloatingWidgetConstants.visibleOccurrenceLimit))
+        let visibleOccurrences = Array(occurrences.prefix(visibleCount))
         let overflowCount = max(0, occurrences.count - visibleOccurrences.count)
 
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("다가오는 일정")
+                Text("다가오는 일정 · 1년")
                     .font(.subheadline.weight(.bold))
                 Spacer()
                 Text("\(occurrences.count)")
@@ -23,43 +24,48 @@ struct FloatingWidgetView: View {
             }
 
             if occurrences.isEmpty {
-                Text("예정된 일정이 없습니다")
+                Text("향후 1년 내 예정된 일정이 없습니다")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(visibleOccurrences, id: \.occurrenceID) { occurrence in
-                    Button { onSelect(occurrence) } label: {
-                        HStack(spacing: 10) {
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(isToday(occurrence) ? Color.red : Color.accentColor)
-                                .frame(width: 4, height: 34)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(occurrence.title)
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
+                ScrollView {
+                    VStack(spacing: 8) {
+                        ForEach(visibleOccurrences, id: \.occurrenceID) { occurrence in
+                            Button { onSelect(occurrence) } label: {
+                                HStack(spacing: 10) {
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(isToday(occurrence) ? Color.red : Color.accentColor)
+                                        .frame(width: 4, height: 34)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(occurrence.title)
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .lineLimit(1)
+                                            .truncationMode(.tail)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                        Text(occurrence.startDate.formatted(date: .abbreviated, time: .omitted))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                            .truncationMode(.tail)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                Text(occurrence.startDate.formatted(date: .abbreviated, time: .omitted))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.vertical, 2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            Spacer(minLength: 0)
+                            .buttonStyle(.plain)
+                            .help("일정 상세 보기")
                         }
-                        .padding(.vertical, 2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
-                    .help("일정 상세 보기")
                 }
+                .frame(maxHeight: .infinity)
 
                 if overflowCount > 0 {
                     Button { onShowAll() } label: {
-                        Text("+\(overflowCount)개")
+                        Text("+\(overflowCount)개 · 전체 보기")
                             .font(.system(size: 12, weight: .bold))
                             .foregroundStyle(.secondary)
                             .padding(.leading, 14)
@@ -102,7 +108,7 @@ struct FloatingWidgetAllEventsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("다가오는 일정")
+                Text("다가오는 일정 · 1년")
                     .font(.system(size: 16, weight: .bold))
                 Spacer()
                 Text("\(occurrences.count)")
@@ -112,7 +118,7 @@ struct FloatingWidgetAllEventsView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    ForEach(Array(occurrences.enumerated()), id: \.offset) { _, occurrence in
+                    ForEach(occurrences, id: \.occurrenceID) { occurrence in
                         Button {
                             onSelect(occurrence)
                         } label: {
@@ -149,7 +155,6 @@ struct FloatingWidgetAllEventsView: View {
 private enum FloatingWidgetConstants {
     static let width: CGFloat = 260
     static let height: CGFloat = 260
-    static let visibleOccurrenceLimit = 3
     static let dragHandleHeight: CGFloat = 42
 }
 
@@ -204,41 +209,46 @@ struct FloatingEventDetailView: View {
     let detail: EventOccurrenceDetail
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 10) {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(Color(hex: detail.colorHex))
-                    .frame(width: 5, height: 44)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 10) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color(hex: detail.colorHex))
+                        .frame(width: 5, height: 44)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(detail.title)
-                        .font(.system(size: 17, weight: .bold))
-                        .lineLimit(2)
-                    Text(dateSummary)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(detail.title)
+                            .font(.system(size: 17, weight: .bold))
+                            .lineLimit(2)
+                        Text(dateSummary)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Divider()
+
+                detailRow("반복", recurrenceText)
+                detailRow("알림", reminderText)
+
+                if detail.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("메모")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.secondary)
+                        Text(detail.notes)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             }
-
-            Divider()
-
-            detailRow("반복", recurrenceText)
-            detailRow("알림", reminderText)
-
-            if detail.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("메모")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
-                    Text(detail.notes)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .padding(18)
-        .frame(width: 320, alignment: .topLeading)
+        .frame(minWidth: 320, minHeight: 260)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 

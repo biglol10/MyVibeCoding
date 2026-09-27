@@ -5,7 +5,9 @@ import MyMacCleanCore
 @MainActor
 @Observable
 public final class LargeFilesViewModel {
-    private let minimumSize: Int64
+    public var minimumSize: Int64 {
+        didSet { if minimumSize != oldValue { invalidateScanState() } }
+    }
     private let planner: DeletionPlanner
     private let executorOverride: DeletionExecutor?
     private let verifier: DeletionVerifier
@@ -15,6 +17,7 @@ public final class LargeFilesViewModel {
     public var candidates: [LargeFileCandidate] = []
     public var selectedCandidateIDs: Set<LargeFileCandidate.ID> = []
     public var searchText = ""
+    public var showSelectedOnly = false
     public var sort: LargeFileSort = .sizeDescending
     public var isScanning = false
     public var isDeleting = false
@@ -63,16 +66,21 @@ public final class LargeFilesViewModel {
     public var visibleCandidates: [LargeFileCandidate] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let filtered = candidates.filter { candidate in
-            query.isEmpty
+            (!showSelectedOnly || selectedCandidateIDs.contains(candidate.id)) && (query.isEmpty
                 || candidate.url.lastPathComponent.lowercased().contains(query)
                 || candidate.url.path.lowercased().contains(query)
-                || candidate.kind.rawValue.lowercased().contains(query)
+                || candidate.kind.rawValue.lowercased().contains(query))
         }
         return sorted(filtered)
     }
 
     public var selectedCandidates: [LargeFileCandidate] {
         candidates.filter { selectedCandidateIDs.contains($0.id) }
+    }
+
+    public var hiddenSelectionCount: Int {
+        let visibleIDs = Set(visibleCandidates.map(\.id))
+        return selectedCandidates.filter { !visibleIDs.contains($0.id) }.count
     }
 
     public var selectedBytes: Int64 {
@@ -161,6 +169,7 @@ public final class LargeFilesViewModel {
                 bundleIdentifier: nil,
                 bundlePath: app.bundleURL.path,
                 action: .largeFileCleanup,
+                deletionMode: .moveToTrash,
                 selectedCandidates: plan.candidates.map {
                     DeletionReceiptCandidate(path: $0.url.path, kind: $0.kind, size: $0.size, safety: $0.safety, evidence: $0.evidence)
                 },

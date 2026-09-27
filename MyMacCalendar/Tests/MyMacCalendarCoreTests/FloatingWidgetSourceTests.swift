@@ -41,10 +41,10 @@ final class FloatingWidgetSourceTests: XCTestCase {
         let occurrenceSource = try String(contentsOfFile: sourcePath("Sources/MyMacCalendarCore/Services/RecurrenceExpander.swift"), encoding: .utf8)
 
         XCTAssertTrue(viewSource.contains("let onSelect: (EventOccurrence) -> Void"))
-        XCTAssertTrue(viewSource.contains("static let visibleOccurrenceLimit = 3"))
-        XCTAssertTrue(viewSource.contains("let visibleOccurrences = Array(occurrences.prefix(FloatingWidgetConstants.visibleOccurrenceLimit))"))
+        XCTAssertTrue(viewSource.contains("let visibleCount: Int"))
+        XCTAssertTrue(viewSource.contains("let visibleOccurrences = Array(occurrences.prefix(visibleCount))"))
         XCTAssertTrue(viewSource.contains("ForEach(visibleOccurrences, id: \\.occurrenceID)"))
-        XCTAssertTrue(viewSource.contains("Text(\"+\\(overflowCount)개\")"))
+        XCTAssertTrue(viewSource.contains("Text(\"+\\(overflowCount)개 · 전체 보기\")"))
         XCTAssertTrue(viewSource.contains("Button { onSelect(occurrence) }"))
         XCTAssertTrue(viewSource.contains(".frame(width: FloatingWidgetConstants.width, height: FloatingWidgetConstants.height, alignment: .topLeading)"))
         XCTAssertTrue(viewSource.contains(".truncationMode(.tail)"))

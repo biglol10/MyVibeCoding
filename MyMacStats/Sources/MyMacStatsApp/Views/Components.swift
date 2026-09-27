@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import MyMacStatsAppSupport
 import MyMacStatsCore
 
@@ -60,6 +61,8 @@ struct InfoRow: View {
                 .multilineTextAlignment(.trailing)
                 .truncationMode(.middle)
                 .lineLimit(2)
+                .textSelection(.enabled)
+                .help(value)
         }
         .font(.callout.weight(.medium))
         .padding(.horizontal, 16)
@@ -113,7 +116,7 @@ struct ProcessAppGroupRow: View {
                         .font(.callout.weight(.semibold))
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    Text("\(group.processes.count) process\(group.processes.count == 1 ? "" : "es")")
+                    Text(group.isApplicationTarget ? "\(group.processes.count) process\(group.processes.count == 1 ? "" : "es")" : "PID \(group.processes.first?.pid ?? 0)")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -154,8 +157,23 @@ struct DiskCandidateRow: View {
     let candidate: DiskSpaceCandidate
 
     var body: some View {
-        InfoRow(title: candidate.title, value: MetricFormatters.bytes(candidate.sizeBytes))
-            .help(candidate.path)
+        VStack(alignment: .leading, spacing: 4) {
+            InfoRow(title: candidate.title, value: "\(candidate.isPartial ? "Partial estimate: " : "")\(MetricFormatters.bytes(candidate.sizeBytes))")
+            HStack {
+                Text(candidate.path)
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+                    .help(candidate.path)
+                Spacer()
+                Button("Show in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: candidate.path)])
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+        }
     }
 }
 

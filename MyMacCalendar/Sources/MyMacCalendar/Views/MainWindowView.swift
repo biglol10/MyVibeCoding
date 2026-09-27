@@ -12,12 +12,15 @@ struct MainWindowView: View {
     @State private var selectedDate = Date()
     @State private var activeSheet: ActiveSheet?
     @State private var searchQuery = ""
+    @State private var showingDateJump = false
+    @State private var jumpDate = Date()
+    @ObservedObject private var notifications = AppNotificationCoordinator.shared
     @FocusState private var isSearchFocused: Bool
     @State private var notificationRefreshEpoch = 0
     @State private var holidayRefreshEpoch = 0
     @State private var attemptedAutomaticHolidayYears = Set<Int>()
     private let notificationRefreshTimer = Timer.publish(
-        every: 12 * 60 * 60,
+        every: 5 * 60,
         on: .main,
         in: .common
     ).autoconnect()
@@ -30,6 +33,12 @@ struct MainWindowView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            if notifications.status.needsAttention {
+                NotificationStatusView()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, 10)
+            }
             HStack(spacing: 0) {
                 MonthGridView(
                     displayedMonth: displayedMonth,
@@ -79,7 +88,7 @@ struct MainWindowView: View {
                 .frame(width: 280)
             }
         }
-        .frame(minWidth: 1240, minHeight: 680)
+        .frame(minWidth: 1000, minHeight: 680)
         .background(AppTheme.windowBackground)
         .background(MainWindowCloseAccessor())
         .preferredColorScheme(.dark)
@@ -116,6 +125,19 @@ struct MainWindowView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in
             holidayRefreshEpoch &+= 1
+            notificationRefreshEpoch &+= 1
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            notificationRefreshEpoch &+= 1
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .refreshCalendarNotifications)) { _ in
+            notificationRefreshEpoch &+= 1
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in
+            selectedDate = Date()
+            displayedMonth = Date()
+            notificationRefreshEpoch &+= 1
+            holidayRefreshEpoch &+= 1
         }
         .onReceive(NotificationCenter.default.publisher(for: .openQuickAddSheet)) { _ in
             activeSheet = .quickAdd
@@ -129,6 +151,11 @@ struct MainWindowView: View {
         .onAppear {
             notifyAppSettingsChanged()
         }
+        .onChange(of: selectedDate) {
+            if !Calendar.current.isDate(selectedDate, equalTo: displayedMonth, toGranularity: .month) {
+                displayedMonth = selectedDate
+            }
+        }
         .onChange(of: appSettingsRefreshToken) {
             notifyAppSettingsChanged()
         }
@@ -136,7 +163,28 @@ struct MainWindowView: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: 12) {
-            Text(monthTitle)
+            Button {
+                jumpDate = selectedDate
+                showingDateJump = true
+            } label: {
+                Text(monthTitle)
+            }
+                .buttonStyle(.plain)
+                .help("날짜로 이동")
+                .popover(isPresented: $showingDateJump) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("날짜로 이동").font(.headline)
+                        DatePicker("날짜", selection: $jumpDate, displayedComponents: .date)
+                            .datePickerStyle(.field)
+                        Button("이동") {
+                            selectedDate = jumpDate
+                            displayedMonth = jumpDate
+                            showingDateJump = false
+                        }
+                        .keyboardShortcut(.defaultAction)
+                    }
+                    .padding(18)
+                }
                 .font(.system(size: MainWindowTypography.monthTitleFontSize, weight: .bold, design: .default))
                 .foregroundStyle(AppTheme.primaryText)
                 .lineLimit(1)
@@ -150,27 +198,27 @@ struct MainWindowView: View {
             )
 
             Button {
-                displayedMonth = Calendar.current.date(byAdding: .month, value: -1, to: displayedMonth) ?? displayedMonth
+                moveMonth(-1)
             } label: {
                 Image(systemName: "chevron.left")
             }
             .buttonStyle(CalendarToolbarButtonStyle(size: MainWindowTypography.toolbarIconSize))
-            .help("Previous month")
+            .help("이전 달")
 
             Button("오늘") {
                 displayedMonth = Date()
                 selectedDate = Date()
             }
             .buttonStyle(CalendarTextToolbarButtonStyle(size: MainWindowTypography.toolbarTextFontSize))
-            .help("Today")
+            .help("오늘")
 
             Button {
-                displayedMonth = Calendar.current.date(byAdding: .month, value: 1, to: displayedMonth) ?? displayedMonth
+                moveMonth(1)
             } label: {
                 Image(systemName: "chevron.right")
             }
             .buttonStyle(CalendarToolbarButtonStyle(size: MainWindowTypography.toolbarIconSize))
-            .help("Next month")
+            .help("다음 달")
 
             Divider()
                 .frame(height: 24)
@@ -182,7 +230,7 @@ struct MainWindowView: View {
                 Image(systemName: "bolt.fill")
             }
             .buttonStyle(CalendarToolbarButtonStyle(size: MainWindowTypography.toolbarIconSize))
-            .help("Quick add")
+            .help("빠른 추가")
 
             Button {
                 activeSheet = .newEvent(selectedDate)
@@ -190,7 +238,7 @@ struct MainWindowView: View {
                 Image(systemName: "plus")
             }
             .buttonStyle(CalendarToolbarButtonStyle(size: MainWindowTypography.toolbarIconSize))
-            .help("New event")
+            .help("선택한 날짜에 일정 추가")
 
             Button {
                 activeSheet = .settings
@@ -198,12 +246,18 @@ struct MainWindowView: View {
                 Image(systemName: "gearshape")
             }
             .buttonStyle(CalendarToolbarButtonStyle(size: MainWindowTypography.toolbarIconSize))
-            .help("Settings")
+            .help("설정")
         }
         .padding(.horizontal, 22)
         .padding(.top, 16)
         .padding(.bottom, 18)
         .background(AppTheme.headerBackground)
+    }
+
+    private func moveMonth(_ offset: Int) {
+        let date = CalendarNavigation.movingMonth(from: displayedMonth, selectedDate: selectedDate, by: offset)
+        selectedDate = date
+        displayedMonth = date
     }
 
     private var monthTitle: String {
@@ -222,8 +276,8 @@ struct MainWindowView: View {
     }
 
     private func selectSearchResult(_ event: CalendarEvent) {
-        selectedDate = event.startDate
-        displayedMonth = event.startDate
+        selectedDate = event.localStartDate()
+        displayedMonth = event.localStartDate()
         activeSheet = .editEvent(event)
     }
 

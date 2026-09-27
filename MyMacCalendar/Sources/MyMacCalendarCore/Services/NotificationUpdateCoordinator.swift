@@ -1,7 +1,10 @@
 import Foundation
+import Combine
 
 @MainActor
-public final class NotificationUpdateCoordinator {
+public final class NotificationUpdateCoordinator: ObservableObject {
+    @Published public private(set) var status: NotificationRefreshStatus = .idle
+    private let client: NotificationClient
     private struct EventOperation {
         let generation: UInt64
         let task: Task<NotificationReconcileOutcome, Error>
@@ -14,12 +17,14 @@ public final class NotificationUpdateCoordinator {
     private var operations: [UUID: EventOperation] = [:]
     private var deletedEventIDs = Set<UUID>()
     private var refreshGeneration: UInt64 = 0
+    private var groupedOwnersByMember: [UUID: Set<UUID>] = [:]
 
     public init(
         client: NotificationClient,
         planner: NotificationPlanner = NotificationPlanner(),
         betweenEvents: @escaping @MainActor () async -> Void = {}
     ) {
+        self.client = client
         self.reconciler = NotificationReconciler(client: client)
         self.planner = planner
         self.betweenEvents = betweenEvents
@@ -58,7 +63,20 @@ public final class NotificationUpdateCoordinator {
 
     @discardableResult
     public func delete(eventID: UUID) async throws -> NotificationReconcileOutcome {
+        refreshGeneration &+= 1
         deletedEventIDs.insert(eventID)
+        // A reminder can share a request with other events. Cancel its owners
+        // too so an in-flight aggregate cannot reintroduce the deleted title.
+        let owners = (groupedOwnersByMember[eventID] ?? []).union([eventID])
+        for owner in owners where owner != eventID {
+            let ownerGeneration = nextGeneration(for: owner)
+            let operation = operations.removeValue(forKey: owner)?.task
+            operation?.cancel()
+            if let operation { _ = await operation.result }
+            _ = try await reconciler.removeAll(eventID: owner, isCurrent: { [weak self] in
+                self?.generations[owner] == ownerGeneration
+            })
+        }
         let previous = operations[eventID]?.task
         let generation = nextGeneration(for: eventID)
         operations.removeValue(forKey: eventID)
@@ -106,6 +124,7 @@ public final class NotificationUpdateCoordinator {
                 isCurrent: { [weak self] in self?.refreshGeneration == generation }
             )
         } catch {
+            if refreshGeneration == generation && !Task.isCancelled { status = .failed }
             logRefreshError(eventID: nil, error: error)
             return
         }
@@ -116,35 +135,70 @@ public final class NotificationUpdateCoordinator {
             defaultMinute: defaultMinute,
             now: now,
             horizonDays: horizonDays,
-            maximumPlans: maximumPlans,
+            maximumPlans: Int.max,
             batchID: batchID
         )
-        let plansByEvent = Dictionary(grouping: plans, by: \.eventID)
+        let schedule = NotificationSchedule(plans: plans, maximumRequests: maximumPlans, batchID: batchID)
+        var newOwnersByMember: [UUID: Set<UUID>] = [:]
+        for request in schedule.requests {
+            for member in schedule.eventIDsByRequest[request.identifier] ?? [] {
+                groupedOwnersByMember[member, default: []].insert(request.eventID)
+                newOwnersByMember[member, default: []].insert(request.eventID)
+            }
+        }
+        let requestsByEvent = Dictionary(grouping: schedule.requests, by: \.eventID)
+        var failed = false
+        var denied = false
 
         for event in events {
             guard refreshGeneration == generation,
                   deletedEventIDs.contains(event.id) == false else {
                 continue
             }
-            let requests = (plansByEvent[event.id] ?? []).map { plan in
-                ScheduledNotificationRequest(
-                    identifier: plan.identifier,
-                    eventID: plan.eventID,
-                    title: plan.title,
-                    body: plan.offsetDays == 0 ? "오늘 일정입니다." : "\(plan.offsetDays)일 전 알림입니다.",
-                    fireDate: plan.fireDate
-                )
+            let requests = (requestsByEvent[event.id] ?? []).filter {
+                schedule.eventIDsByRequest[$0.identifier, default: []].isDisjoint(with: deletedEventIDs)
             }
             do {
-                _ = try await replace(eventID: event.id, requests: requests)
+                let outcome = try await replace(eventID: event.id, requests: requests)
+                denied = denied || outcome == .notAuthorized
             } catch is CancellationError {
-                if refreshGeneration != generation { return }
+                if refreshGeneration != generation || Task.isCancelled { return }
             } catch {
+                failed = true
                 logRefreshError(eventID: event.id, error: error)
             }
 
             await betweenEvents()
-            if refreshGeneration != generation { return }
+            if refreshGeneration != generation || Task.isCancelled { return }
+        }
+        guard refreshGeneration == generation, !Task.isCancelled else { return }
+        do {
+            let authorization = try await client.authorizationState()
+            guard refreshGeneration == generation, !Task.isCancelled else { return }
+            if authorization == .denied {
+                status = .denied
+            } else if authorization == .notDetermined {
+                status = .permissionRequired
+            } else if failed {
+                status = .failed
+            } else if denied {
+                status = .denied
+            } else {
+                groupedOwnersByMember = newOwnersByMember
+                status = .scheduled(reminders: schedule.scheduledReminderCount,
+                                    requests: schedule.requests.count,
+                                    deferred: schedule.deferredReminderCount)
+            }
+        } catch {
+            if refreshGeneration == generation && !Task.isCancelled { status = .failed }
+        }
+    }
+
+    public func requestPermission() async {
+        do {
+            status = try await client.requestAuthorization() ? .idle : .denied
+        } catch {
+            status = .failed
         }
     }
 

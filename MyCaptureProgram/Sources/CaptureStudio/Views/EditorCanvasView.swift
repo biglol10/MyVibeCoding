@@ -4,6 +4,7 @@ import SwiftUI
 struct EditorCanvasView: View {
     let document: EditorDocument
     @ObservedObject var editorViewModel: EditorViewModel
+    var onCopy: () -> Void = {}
     @State private var draftStart: CGPoint?
     @State private var draftEnd: CGPoint?
     @State private var draftPoints: [CGPoint] = []
@@ -30,7 +31,10 @@ struct EditorCanvasView: View {
             }
             .contentShape(Rectangle())
             .gesture(canvasDragGesture(geometry: geometry))
+            .background(EditorCanvasCommandBridge(viewModel: editorViewModel, onCopy: onCopy))
         }
+        .onAppear { editorViewModel.focusCanvas() }
+        .onChange(of: document.id) { editorViewModel.focusCanvas() }
     }
 
     private var nsImage: NSImage? {
@@ -93,14 +97,13 @@ struct EditorCanvasView: View {
                 .position(x: rect.midX, y: rect.midY)
                 .overlay(selectionOverlay(rect: rect, layer: layer))
         case .text(let text):
-            Text(text.text)
-                .font(.system(size: max(10, text.fontSize * rect.height / max(text.frame.height, 1))))
-                .foregroundStyle(text.style.strokeColor.color)
-                .padding(4)
-                .frame(width: rect.width, height: rect.height, alignment: .topLeading)
-                .background(text.style.fillColor.color)
-                .position(x: rect.midX, y: rect.midY)
-                .overlay(selectionOverlay(rect: rect, layer: layer))
+            if let image = TextLayerRasterizer.image(for: text) {
+                Image(decorative: image, scale: 1)
+                    .resizable()
+                    .frame(width: rect.width, height: rect.height)
+                    .position(x: rect.midX, y: rect.midY)
+                    .overlay(selectionOverlay(rect: rect, layer: layer))
+            }
         case .arrow(let arrow):
             arrowView(arrow, geometry: geometry)
                 .overlay(selectionOverlay(rect: rect, layer: layer))
@@ -179,13 +182,13 @@ struct EditorCanvasView: View {
                 return nil
             }
 
-            return .freehand(FreehandLayer(points: draftPoints, style: editorViewModel.style))
+            return .freehand(FreehandLayer(points: draftPoints, style: editorViewModel.drawingStyle))
         case .highlighter:
             guard draftPoints.count > 1 else {
                 return nil
             }
 
-            return .highlighter(FreehandLayer(points: draftPoints, style: editorViewModel.style))
+            return .highlighter(FreehandLayer(points: draftPoints, style: editorViewModel.drawingStyle))
         case .select, .text, .ocr:
             return nil
         }
@@ -201,11 +204,11 @@ struct EditorCanvasView: View {
 
         switch editorViewModel.activeTool {
         case .rectangle:
-            return .rectangle(ShapeLayer(frame: frame, style: editorViewModel.style))
+            return .rectangle(ShapeLayer(frame: frame, style: editorViewModel.drawingStyle))
         case .ellipse:
-            return .ellipse(ShapeLayer(frame: frame, style: editorViewModel.style))
+            return .ellipse(ShapeLayer(frame: frame, style: editorViewModel.drawingStyle))
         case .arrow:
-            return .arrow(ArrowLayer(start: start, end: end, style: editorViewModel.style))
+            return .arrow(ArrowLayer(start: start, end: end, style: editorViewModel.drawingStyle))
         case .redaction:
             return .redaction(
                 RedactionLayer(
@@ -221,6 +224,7 @@ struct EditorCanvasView: View {
     private func canvasDragGesture(geometry: EditorCanvasGeometry) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
+                editorViewModel.focusCanvas()
                 let point = geometry.imagePoint(forViewPoint: value.location)
                 switch editorViewModel.activeTool {
                 case .pen, .highlighter:

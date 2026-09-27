@@ -14,8 +14,8 @@ import sql from 'highlight.js/lib/languages/sql';
 import yaml from 'highlight.js/lib/languages/yaml';
 import { session } from './protocol';
 import type { Settings } from './protocol';
-import { blocksFor, markdownParser, outlineFor } from './markdown';
-import { frontMatterFor, headingSlug, tableOfContentsMarkdown } from './semantic';
+import { blocksFor, markdownParser } from './markdown';
+import { frontMatterFor, headingIDs, headingTargets, tableOfContentsMarkdown } from './semantic';
 import { finishExportAssets } from './exportAssets';
 
 export interface RenderContext { env: Record<string, unknown>; source: string; footnotesHTML?: string; footnoteRefs: Map<number, { number: number; occurrence: number }>; jumps: Map<string, number>; definitions: number[] }
@@ -134,11 +134,7 @@ export function renderBlock(source: string, settings: Settings, context?: Render
   if (/^\[toc\]\s*$/i.test(source)) {
     element.classList.add('table-of-contents');
     element.innerHTML = `<nav aria-label="문서 목차">${md.render(tableOfContentsMarkdown(context?.source ?? source))}</nav>`;
-    const headings = outlineFor(context?.source ?? source), used = new Map<string, number>(), positions = new Map<string, number>();
-    for (const heading of headings) {
-      const base = headingSlug(heading.title) || 'section', count = used.get(base) ?? 0;
-      used.set(base, count + 1); positions.set(count ? `${base}-${count + 1}` : base, heading.from);
-    }
+    const positions = new Map(headingTargets(context?.source ?? source).map(heading => [heading.id, heading.from]));
     element.querySelectorAll('a[href^="#"]').forEach(anchor => {
       const slug = decodeURIComponent(anchor.getAttribute('href')!.slice(1));
       const from = positions.get(slug);
@@ -279,11 +275,9 @@ export async function renderStandaloneHTML(source: string, settings: Settings, e
       root.append(element);
     }
   }
-  const headingCounts = new Map<string, number>();
-  root.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach(heading => {
-    const base = headingSlug(heading.textContent ?? '') || 'section', count = headingCounts.get(base) ?? 0;
-    headingCounts.set(base, count + 1); heading.id = count ? `${base}-${count + 1}` : base;
-  });
+  const headings = [...root.querySelectorAll('h1,h2,h3,h4,h5,h6')];
+  const ids = headingIDs(headings.map(heading => heading.textContent ?? ''));
+  headings.forEach((heading, index) => { heading.id = ids[index]; });
   for (const image of [...root.querySelectorAll('img')]) {
     const src = image.getAttribute('src') ?? '';
     if (!embedLocalAssets || !src.startsWith('app://assets/')) continue;

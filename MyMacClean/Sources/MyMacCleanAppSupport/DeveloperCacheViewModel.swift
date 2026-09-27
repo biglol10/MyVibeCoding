@@ -17,6 +17,7 @@ public final class DeveloperCacheViewModel {
     public var candidates: [DeveloperCacheCandidate] = []
     public var selectedCandidateIDs: Set<DeveloperCacheCandidate.ID> = []
     public var searchText = ""
+    public var showSelectedOnly = false
     public var sort: DeveloperCacheSort = .tool
     public var isScanning = false
     public var isDeleting = false
@@ -71,17 +72,22 @@ public final class DeveloperCacheViewModel {
     public var visibleCandidates: [DeveloperCacheCandidate] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let filtered = candidates.filter { candidate in
-            query.isEmpty
+            (!showSelectedOnly || selectedCandidateIDs.contains(candidate.id)) && (query.isEmpty
                 || candidate.tool.title.lowercased().contains(query)
                 || candidate.tool.groupTitle.lowercased().contains(query)
                 || candidate.url.path.lowercased().contains(query)
-                || candidate.safety.rawValue.lowercased().contains(query)
+                || candidate.safety.rawValue.lowercased().contains(query))
         }
         return sorted(filtered)
     }
 
     public var selectedCandidates: [DeveloperCacheCandidate] {
         candidates.filter { selectedCandidateIDs.contains($0.id) && $0.isDeletable }
+    }
+
+    public var hiddenSelectionCount: Int {
+        let visibleIDs = Set(visibleCandidates.map(\.id))
+        return selectedCandidates.filter { !visibleIDs.contains($0.id) }.count
     }
 
     public var selectedBytes: Int64 {
@@ -162,6 +168,7 @@ public final class DeveloperCacheViewModel {
                 bundleIdentifier: nil,
                 bundlePath: app.bundleURL.path,
                 action: .developerCacheCleanup,
+                deletionMode: .moveToTrash,
                 selectedCandidates: plan.candidates.map {
                     DeletionReceiptCandidate(path: $0.url.path, kind: $0.kind, size: $0.size, safety: $0.safety, evidence: $0.evidence)
                 },

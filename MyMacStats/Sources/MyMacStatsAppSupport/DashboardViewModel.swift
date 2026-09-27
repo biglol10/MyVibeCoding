@@ -28,11 +28,21 @@ private struct ProcessSortPreference: Equatable {
     let ascending: Bool
 }
 
+public enum ProcessTerminationScope: Sendable {
+    case process
+    case application
+}
+
 @MainActor
 public final class DashboardViewModel: ObservableObject {
     @Published public private(set) var snapshot: SystemMetricsSnapshot
     @Published public var selectedKind: MetricKind
-    @Published public var searchText: String
+    @Published public var searchText: String {
+        didSet {
+            selectedProcessID = nil
+            selectedProcessGroupID = nil
+        }
+    }
     @Published public var sortKey: ProcessSortKey {
         didSet { saveSelectedSortPreference() }
     }
@@ -48,6 +58,7 @@ public final class DashboardViewModel: ObservableObject {
     @Published public private(set) var pendingTerminationGroup: ProcessAppGroup?
     @Published public private(set) var pendingTerminationMode: ProcessTerminationMode
     @Published public var terminationMessage: String?
+    @Published public private(set) var isScanningDisk = false
 
     private let service: SystemMetricsService
     private let healthAlertController: HealthAlertController
@@ -56,6 +67,7 @@ public final class DashboardViewModel: ObservableObject {
     private var terminator: ProcessTerminator
     private var terminationMessageProcessID: Int32?
     private var forceQuitCandidateGroupID: String?
+    private var forceQuitCandidateProcess: ProcessMetric?
     private var refreshTask: Task<Void, Never>?
     private var displayedProcessesCacheKey: ProcessDisplayCacheKey?
     private var displayedProcessesCache: [ProcessMetric] = []
@@ -152,6 +164,10 @@ public final class DashboardViewModel: ObservableObject {
         selectedKind.usesProcessList
     }
 
+    public var topCPUProcessGroups: [ProcessAppGroup] {
+        Array(ProcessGrouping.groups(snapshot.processes, searchText: "", sortKey: .cpu).prefix(3))
+    }
+
     public var selectedProcessGroup: ProcessAppGroup? {
         if let selectedProcessGroupID,
            let selected = displayedProcessGroups.first(where: { $0.id == selectedProcessGroupID }) {
@@ -162,6 +178,10 @@ public final class DashboardViewModel: ObservableObject {
                group.processes.contains { $0.pid == selectedProcessID }
            }) {
             return selected
+        }
+        if let pid = Int32(searchText.trimmingCharacters(in: .whitespacesAndNewlines)),
+           let exactMatch = displayedProcessGroups.first(where: { $0.processes.contains { $0.pid == pid } }) {
+            return exactMatch
         }
         return displayedProcessGroups.first
     }
@@ -189,11 +209,35 @@ public final class DashboardViewModel: ObservableObject {
     }
 
     public var selectedProcess: ProcessMetric? {
+        guard let group = selectedProcessGroup else { return nil }
         if let selectedProcessID,
-           let selected = displayedProcesses.first(where: { $0.pid == selectedProcessID }) {
+           let selected = group.processes.first(where: { $0.pid == selectedProcessID }) {
             return selected
         }
-        return selectedProcessGroup?.processes.first ?? displayedProcesses.first
+        return preferredProcess(in: group)
+    }
+
+    private func preferredProcess(in group: ProcessAppGroup) -> ProcessMetric? {
+        if let pid = Int32(searchText.trimmingCharacters(in: .whitespacesAndNewlines)),
+           let exactMatch = group.processes.first(where: { $0.pid == pid }) {
+            return exactMatch
+        }
+        return ProcessSorting.filtered(group.processes, searchText: searchText, sortKey: sortKey, ascending: sortAscending).first
+            ?? group.processes.first
+    }
+
+    public func selectProcessGroup(_ group: ProcessAppGroup) {
+        if let process = preferredProcess(in: group) { selectProcess(pid: process.pid) }
+    }
+
+    public var individualProcessTerminationAvailability: ProcessTerminationAvailability {
+        guard let selectedProcess else { return .denied("No process selected") }
+        return terminator.canTerminate(selectedProcess)
+    }
+
+    public var selectedIndividualProcessCanForceQuit: Bool {
+        guard let selectedProcess, let candidate = forceQuitCandidateProcess else { return false }
+        return candidate.matchesTerminationIdentity(of: selectedProcess) && terminator.canTerminate(selectedProcess).isAllowed
     }
 
     public var selectedProcessTerminationAvailability: ProcessTerminationAvailability {
@@ -271,8 +315,8 @@ public final class DashboardViewModel: ObservableObject {
         sortPreferences[selectedKind] = ProcessSortPreference(key: sortKey, ascending: sortAscending)
     }
 
-    public func requestTermination(for process: ProcessMetric) {
-        let targets = terminationTargets(for: process)
+    public func requestTermination(for process: ProcessMetric, scope: ProcessTerminationScope = .application) {
+        let targets = scope == .process ? [process] : terminationTargets(for: process)
         let availability = terminator.canTerminate(targets)
         guard availability.isAllowed else {
             terminationMessage = availability.reason
@@ -282,14 +326,14 @@ public final class DashboardViewModel: ObservableObject {
             return
         }
         pendingTerminationProcess = process
-        pendingTerminationGroup = terminationGroup(for: process)
+        pendingTerminationGroup = scope == .process ? nil : terminationGroup(for: process)
         pendingTerminationMode = .quit
         terminationMessage = nil
         terminationMessageProcessID = nil
     }
 
-    public func requestForceTermination(for process: ProcessMetric) {
-        let targets = terminationTargets(for: process)
+    public func requestForceTermination(for process: ProcessMetric, scope: ProcessTerminationScope = .application) {
+        let targets = scope == .process ? [process] : terminationTargets(for: process)
         let availability = terminator.canTerminate(targets)
         guard availability.isAllowed else {
             terminationMessage = availability.reason
@@ -300,7 +344,7 @@ public final class DashboardViewModel: ObservableObject {
             return
         }
         pendingTerminationProcess = process
-        pendingTerminationGroup = terminationGroup(for: process)
+        pendingTerminationGroup = scope == .process ? nil : terminationGroup(for: process)
         pendingTerminationMode = .forceQuit
         terminationMessage = nil
         terminationMessageProcessID = nil
@@ -328,18 +372,19 @@ public final class DashboardViewModel: ObservableObject {
         guard let process else { return }
         let originalTargets = group?.processes ?? [process]
         let targetDescription = pendingTerminationTargetDescription(process: process, group: group)
-        let targetGroupID = group?.id ?? terminationGroup(for: process)?.id
+        let targetGroupID = group?.id
 
         let latestSnapshot = await service.refresh(
             reason: .terminationValidation(baseInterval: refreshInterval.seconds)
         )
         snapshot = latestSnapshot
-        await healthAlertController.observe(snapshot: latestSnapshot)
+        healthAlertController.submit(snapshot: latestSnapshot)
 
         guard latestSnapshot.processesAreFresh else {
             terminationMessage = "Could not refresh the process list. No termination signal was sent."
             terminationMessageProcessID = process.pid
             forceQuitCandidateGroupID = nil
+            forceQuitCandidateProcess = nil
             pendingTerminationProcess = nil
             pendingTerminationGroup = nil
             pendingTerminationMode = .quit
@@ -361,6 +406,7 @@ public final class DashboardViewModel: ObservableObject {
             }
             terminationMessageProcessID = process.pid
             forceQuitCandidateGroupID = nil
+            forceQuitCandidateProcess = nil
             pendingTerminationProcess = nil
             pendingTerminationGroup = nil
             pendingTerminationMode = .quit
@@ -373,6 +419,7 @@ public final class DashboardViewModel: ObservableObject {
                applicationTerminator.terminateApplicationProcesses(targets, mode: mode) {
                 terminationMessage = "Termination requested for \(targetDescription)."
                 forceQuitCandidateGroupID = targetGroupID
+                forceQuitCandidateProcess = nil
                 terminationMessageProcessID = process.pid
                 pendingTerminationProcess = nil
                 pendingTerminationGroup = nil
@@ -386,9 +433,11 @@ public final class DashboardViewModel: ObservableObject {
             case .quit:
                 terminationMessage = "Termination requested for \(targetDescription)."
                 forceQuitCandidateGroupID = targetGroupID
+                forceQuitCandidateProcess = group == nil ? process : nil
             case .forceQuit:
                 terminationMessage = "Force quit requested for \(targetDescription)."
                 forceQuitCandidateGroupID = nil
+                forceQuitCandidateProcess = nil
             }
             terminationMessageProcessID = process.pid
             pendingTerminationProcess = nil
@@ -467,7 +516,15 @@ public final class DashboardViewModel: ObservableObject {
         )
         guard !Task.isCancelled else { return }
         snapshot = refreshed
-        await healthAlertController.observe(snapshot: refreshed)
+        healthAlertController.submit(snapshot: refreshed)
+    }
+
+    public func rescanDiskSpaceCandidates() async {
+        guard !isScanningDisk else { return }
+        isScanningDisk = true
+        defer { isScanningDisk = false }
+        await service.rescanDiskSpaceCandidates()
+        await refreshNow()
     }
 
     public func start() {
@@ -491,12 +548,6 @@ public final class DashboardViewModel: ObservableObject {
     public func stop() {
         refreshTask?.cancel()
         refreshTask = nil
-    }
-}
-
-private extension ProcessAppGroup {
-    var isApplicationTarget: Bool {
-        id.hasPrefix("app:") || processes.count > 1
     }
 }
 

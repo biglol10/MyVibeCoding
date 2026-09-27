@@ -79,6 +79,7 @@ final class AppModel: ObservableObject {
     private var text = "# 조용한 문서 공간\n\n문서나 폴더를 열어 시작하세요. 읽던 흐름에서 필요한 부분만 자연스럽게 고칠 수 있습니다.\n\n## 읽기와 편집\n\n- **⌘O** 문서 열기 · **⌘⇧O** 폴더 열기\n- **⌘P** 빠른 파일 열기 · **⌘F** 문서 검색\n- **⌘⇧M** 원문 모드 전환\n\n> 기본 테마는 다크 모드입니다. 설정에서 글꼴과 읽기 폭을 조절할 수 있습니다.\n"
     private var codec: DocumentCodec
     private var composing = false
+    private var tableDraftPending = false
     private var desynchronized = false
     private var transitioning = false
     private var anchor = 0
@@ -156,7 +157,17 @@ final class AppModel: ObservableObject {
     private func message(_ type: String, _ values: [String: Any] = [:]) -> [String: Any] {
         ["type": type, "documentID": documentID, "sessionID": sessionID, "revision": revision].merging(values) { _, new in new }
     }
-    func command(_ name: String) { bridge.send(message("command", ["command": name])) }
+    func command(_ name: String) {
+        // Native search/name fields have their own undo history. Never send
+        // their shortcuts to the document behind the field or sheet.
+        if ["undo", "redo"].contains(name), let field = NSApp.keyWindow?.firstResponder as? NSTextView,
+           field.isFieldEditor {
+            if name == "undo" { field.undoManager?.undo() } else { field.undoManager?.redo() }
+            return
+        }
+        bridge.send(message("command", ["command": name]))
+    }
+    func showConflictResolution() { errorMessage = DocumentError.conflict.localizedDescription }
     func jump(_ from: Int) { bridge.send(message("jump", ["from": from])) }
     func toggleRemoteImages() { remoteImages.toggle(); sendSettings() }
     func showError(_ error: Error) { errorMessage = error.localizedDescription }
@@ -287,10 +298,15 @@ final class AppModel: ObservableObject {
                 text = try TextChange.apply(changes, to: text); revision = next
                 navigationGeneration += 1
                 composing = body["composing"] as? Bool ?? false
-                let dirty = text != codec.originalText
+                let dirty = text != codec.originalText || tableDraftPending
                 if isDirty != dirty { isDirty = dirty }
                 scheduleRecovery(); scheduleAutosave()
             } catch { desynchronized = true; showError(error) }
+        case "tableDraft":
+            tableDraftPending = body["dirty"] as? Bool ?? false
+            isDirty = text != codec.originalText || tableDraftPending
+            navigationGeneration += 1
+            scheduleRecovery(); scheduleAutosave()
         case "metadata":
             guard body["revision"] as? Int == revision else { return }
             let nextOutline: [OutlineEntry] = (body["headings"] as? [[String: Any]] ?? []).compactMap {
@@ -325,7 +341,11 @@ final class AppModel: ObservableObject {
         let snapshot = try await bridge.snapshot()
         guard snapshot["sessionID"] as? String == sessionID, let next = snapshot["revision"] as? Int,
               let source = snapshot["text"] as? String else { throw DocumentError.invalidChange }
-        if next >= revision { text = source; revision = next; desynchronized = false; isDirty = text != codec.originalText }
+        if next >= revision {
+            text = source; revision = next; desynchronized = false
+            tableDraftPending = snapshot["tableDraft"] as? Bool ?? false
+            isDirty = text != codec.originalText || tableDraftPending
+        }
         composing = snapshot["composing"] as? Bool ?? false
         anchor = snapshot["anchor"] as? Int ?? anchor; head = snapshot["head"] as? Int ?? head
         scrollTop = snapshot["scrollTop"] as? Double ?? scrollTop
@@ -349,6 +369,8 @@ final class AppModel: ObservableObject {
             do {
                 try await Task.sleep(for: .milliseconds(250))
                 guard current == sessionID, !composing else { return }
+                if tableDraftPending { try await syncSnapshot() }
+                guard current == sessionID, !Task.isCancelled, !composing else { return }
                 if isDirty { try await store.writeRecovery(recoveryRecord) }
                 else { try await store.removeRecovery(recoveryID) }
             } catch is CancellationError {} catch { showError(error) }
@@ -366,7 +388,8 @@ final class AppModel: ObservableObject {
     func save(automatic: Bool = false, workspace: Bool = false) async -> Bool {
         guard !workspaceBusy || workspace else { return false }
         while isSaving { try? await Task.sleep(for: .milliseconds(30)); if Task.isCancelled { return false } }
-        guard !hasConflict, !desynchronized else { return false }
+        if hasConflict { if !automatic { showConflictResolution() }; return false }
+        guard !desynchronized else { return false }
         if documentURL == nil { return automatic ? false : await saveAs() }
         do {
             try await syncSnapshot()
@@ -379,7 +402,7 @@ final class AppModel: ObservableObject {
             try await store.writeRecovery(recoveryRecord)
             let saved = try await store.save(savingURL, text: savingText, codec: savingCodec, expectedHash: DocumentCodec.hash(savingCodec.originalData))
             guard current == sessionID else { return false }
-            codec = saved.codec; isDirty = text != codec.originalText
+            codec = saved.codec; isDirty = text != codec.originalText || tableDraftPending
             if isDirty { try await store.writeRecovery(recoveryRecord); scheduleAutosave() }
             else { try await store.removeRecovery(recoveryID) }
             errorMessage = nil
@@ -481,7 +504,7 @@ final class AppModel: ObservableObject {
     private func resetDocument(url: URL?, codec: DocumentCodec) {
         autosaveTask?.cancel(); recoveryTask?.cancel(); positionTask?.cancel()
         documentURL = url; documentID = url?.path ?? UUID().uuidString; sessionID = UUID().uuidString; recoveryID = UUID().uuidString
-        self.codec = codec; text = codec.originalText; revision = 0; isDirty = false; hasConflict = false; desynchronized = false; composing = false
+        self.codec = codec; text = codec.originalText; revision = 0; isDirty = false; hasConflict = false; desynchronized = false; composing = false; tableDraftPending = false
         outlineNavigation.reset()
         errorMessage = nil; remoteImages = false; sourceMode = false; outline = []; anchor = 0; head = 0; scrollTop = 0
         access.retainAccess(for: [url, folderURL].compactMap { $0 })
@@ -679,8 +702,7 @@ final class AppModel: ObservableObject {
     }
     private func openLink(_ href: String) {
         if href.hasPrefix("#") {
-            let fragment = String(href.dropFirst()).removingPercentEncoding ?? String(href.dropFirst())
-            if let heading = outline.first(where: { $0.title.lowercased().replacingOccurrences(of: " ", with: "-") == fragment || $0.title == fragment }) { jump(heading.from) }; return
+            bridge.send(message("navigateFragment", ["href": href])); return
         }
         guard let url = URL(string: href, relativeTo: documentURL?.deletingLastPathComponent())?.absoluteURL else { return }
         if ["https", "http", "mailto"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) }

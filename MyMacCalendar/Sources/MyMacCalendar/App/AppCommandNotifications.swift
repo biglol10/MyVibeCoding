@@ -1,6 +1,7 @@
 import Foundation
 
 extension Notification.Name {
+    static let refreshCalendarNotifications = Notification.Name("MyMacCalendar.refreshNotifications")
     static let openQuickAddSheet = Notification.Name("MyMacCalendar.openQuickAddSheet")
     static let openSettingsSheet = Notification.Name("MyMacCalendar.openSettingsSheet")
     static let focusCalendarSearch = Notification.Name("MyMacCalendar.focusCalendarSearch")

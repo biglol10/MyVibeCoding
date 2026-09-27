@@ -329,6 +329,15 @@ public final class SystemMetricsService {
         )
     }
 
+    public func rescanDiskSpaceCandidates() async {
+        if let task = diskSpaceCandidateRefreshTask {
+            await task.value
+        }
+        lastDiskSpaceCandidateRefreshStartedAt = nil
+        refreshDiskSpaceCandidatesIfNeeded(now: Date())
+        await diskSpaceCandidateRefreshTask?.value
+    }
+
     private func refreshDiskSpaceCandidatesIfNeeded(now: Date) {
         guard diskSpaceCandidateRefreshTask == nil else { return }
         if let lastDiskSpaceCandidateRefreshStartedAt,
@@ -375,14 +384,16 @@ public final class SystemMetricsService {
                 guard let cpu else {
                     return unavailableSummary(kind: .cpu, now: now)
                 }
-                let threshold = cpu.totalUsagePercent >= evaluator.cpuCriticalThreshold
-                    ? evaluator.cpuCriticalThreshold
-                    : evaluator.cpuWarningThreshold
-                let sustainedSeconds = sustainedCPUSeconds(above: threshold, now: now)
-                let health = evaluator.cpuHealth(
-                    usagePercent: cpu.totalUsagePercent,
-                    sustainedSecondsAboveThreshold: sustainedSeconds
-                )
+                let health: HealthState
+                if cpu.totalUsagePercent >= evaluator.cpuCriticalThreshold,
+                   sustainedCPUSeconds(above: evaluator.cpuCriticalThreshold, now: now) >= evaluator.cpuSustainedSeconds {
+                    health = .critical
+                } else if cpu.totalUsagePercent >= evaluator.cpuWarningThreshold,
+                          sustainedCPUSeconds(above: evaluator.cpuWarningThreshold, now: now) >= evaluator.cpuSustainedSeconds {
+                    health = .warning
+                } else {
+                    health = .normal
+                }
                 summary = MetricSummary(
                     kind: .cpu,
                     title: MetricKind.cpu.title,

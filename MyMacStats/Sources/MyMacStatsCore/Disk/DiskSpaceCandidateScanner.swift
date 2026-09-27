@@ -5,13 +5,15 @@ public struct DiskSpaceCandidate: Equatable, Identifiable, Sendable {
     public let title: String
     public let path: String
     public let sizeBytes: UInt64
+    public let isPartial: Bool
 
     public var id: String { path }
 
-    public init(title: String, path: String, sizeBytes: UInt64) {
+    public init(title: String, path: String, sizeBytes: UInt64, isPartial: Bool = false) {
         self.title = title
         self.path = path
         self.sizeBytes = sizeBytes
+        self.isPartial = isPartial
     }
 }
 
@@ -45,8 +47,8 @@ public struct DiskSpaceCandidateScanner {
         return scanTargets.compactMap { target in
             guard fileManager.fileExists(atPath: target.url.path) else { return nil }
             let size = folderSize(at: target.url)
-            guard size > 0 else { return nil }
-            return DiskSpaceCandidate(title: target.title, path: target.url.path, sizeBytes: size)
+            guard size.bytes > 0 || size.isPartial else { return nil }
+            return DiskSpaceCandidate(title: target.title, path: target.url.path, sizeBytes: size.bytes, isPartial: size.isPartial)
         }
         .sorted {
             $0.sizeBytes == $1.sizeBytes
@@ -55,12 +57,12 @@ public struct DiskSpaceCandidateScanner {
         }
     }
 
-    private func folderSize(at url: URL) -> UInt64 {
+    private func folderSize(at url: URL) -> (bytes: UInt64, isPartial: Bool) {
         if let size = duSize(at: url) {
-            return size
+            return (size, false)
         }
 
-        return limitedFolderSize(at: url)
+        return (limitedFolderSize(at: url), true)
     }
 
     private func duSize(at url: URL) -> UInt64? {

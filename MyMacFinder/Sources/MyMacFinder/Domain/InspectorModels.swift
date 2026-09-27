@@ -22,7 +22,11 @@ public struct InspectorItemDetails: Equatable, Sendable {
         self.dateCreatedText = Self.dateText(entry.dateCreated)
         self.dateModifiedText = Self.dateText(entry.dateModified)
         self.dateAccessedText = Self.dateText(entry.dateAccessed)
-        self.path = entry.url.path
+        if case .archive(let location) = entry.source {
+            self.path = location.displayPath
+        } else {
+            self.path = entry.url.path
+        }
         self.isHiddenText = entry.isHidden ? "Yes" : "No"
         self.isReadableText = entry.isReadable ? "Yes" : "No"
         self.finderTagsText = entry.finderTags.isEmpty ? "--" : entry.finderTags.map(\.name).joined(separator: ", ")
@@ -52,15 +56,7 @@ public struct InspectorItemDetails: Equatable, Sendable {
     }
 
     public static func dateText(_ date: Date?) -> String {
-        guard let date else {
-            return "--"
-        }
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "yyyy-MM-dd HH:mm"
-        return formatter.string(from: date)
+        FileMetadataFormatter.dateText(date)
     }
 }
 

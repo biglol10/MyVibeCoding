@@ -42,7 +42,12 @@ struct WorkspaceView: View {
             Divider()
             HStack(spacing: 14) {
                 Circle().fill(model.hasConflict ? Color.orange : (model.isDirty ? Color.secondary : Color.secondary.opacity(0.35))).frame(width: 5, height: 5)
-                Text(model.status)
+                if model.hasConflict {
+                    Button { model.showConflictResolution() } label: {
+                        Label(model.status + " · 해결하기", systemImage: "exclamationmark.circle")
+                    }.buttonStyle(.plain).foregroundStyle(.orange)
+                        .accessibilityIdentifier("resolve-document-conflict")
+                } else { Text(model.status) }
                 Spacer()
                 Text("\(model.characters.formatted())자")
                 Text("\(model.words.formatted())단어")
@@ -295,10 +300,20 @@ private struct RecoveryView: View {
             Text("복구할 문서").font(.title2.bold())
             Text("저장이 끝나지 않은 편집본입니다. 원본을 덮어쓰지 않고 내용을 확인할 수 있습니다.").foregroundStyle(.secondary)
             List(model.recoveries) { record in
-                HStack { VStack(alignment: .leading) {
-                    Text(record.path.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "새 문서")
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(record.path.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "새 문서")
+                        Spacer(); Button("복구") { Task { await model.restore(record) } }
+                    }
+                    Text(record.path ?? "저장 위치가 정해지지 않은 문서")
+                        .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                     Text(record.date.formatted()).font(.caption).foregroundStyle(.secondary)
-                }; Spacer(); Button("복구") { Task { await model.restore(record) } } }
+                    DisclosureGroup("내용 미리보기") {
+                        Text(String(record.text.prefix(4_000))).font(.system(.caption, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                        if record.text.count > 4_000 { Text("앞부분 4,000자 표시").font(.caption).foregroundStyle(.secondary) }
+                    }
+                }.padding(.vertical, 4)
             }.frame(height: 240)
             HStack { Spacer(); Button("나중에") { model.showRecovery = false }.keyboardShortcut(.cancelAction) }
         }.padding(24).frame(width: 570)

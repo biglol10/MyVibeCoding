@@ -55,6 +55,7 @@ struct FileTableView: NSViewRepresentable {
     var currentLocation: PaneLocation
     var currentSort: EntrySortDescriptor
     var showsPathColumn: Bool
+    var usesCompactColumns: Bool = false
     var paneID: PaneID = PaneID()
     var inlineRenameRequest: InlineRenameRequest?
     var requestsInitialFocus: Bool = false
@@ -118,9 +119,13 @@ struct FileTableView: NSViewRepresentable {
     }
 
     var columnDefinitions: [FileTableColumnDefinition] {
-        var columns = [
+        var columns = usesCompactColumns ? [
+            FileTableColumnDefinition(key: "name", title: "Name", width: 180, minWidth: 140),
+            FileTableColumnDefinition(key: "size", title: "Size", width: 90, minWidth: 80),
+            FileTableColumnDefinition(key: "modified", title: "Date Modified", width: 140, minWidth: 140)
+        ] : [
             FileTableColumnDefinition(key: "name", title: "Name", width: 300, minWidth: 220),
-            FileTableColumnDefinition(key: "size", title: "Size", width: 60, minWidth: 50),
+            FileTableColumnDefinition(key: "size", title: "Size", width: 90, minWidth: 80),
             FileTableColumnDefinition(key: "modified", title: "Date Modified", width: 150, minWidth: 140),
             FileTableColumnDefinition(key: "kind", title: "Kind", width: 170, minWidth: 150),
             FileTableColumnDefinition(key: "tags", title: "Tags", width: 60, minWidth: 50)
@@ -154,6 +159,7 @@ struct FileTableView: NSViewRepresentable {
         private var renderedEntries: [FileEntry] = []
         private var renderedLocation: PaneLocation?
         private var isSyncingSortDescriptor = false
+        private var isApplyingModelState = false
         private var didRequestInitialFocus = false
         private var iconCache: [IconCacheKey: NSImage] = [:]
         private var handledInlineRenameRequestID: UUID?
@@ -201,6 +207,7 @@ struct FileTableView: NSViewRepresentable {
             let cell = tableView.makeView(withIdentifier: cellIdentifier, owner: self) as? NSTableCellView
                 ?? makeReusableCell(identifier: cellIdentifier, column: identifier)
             cell.textField?.stringValue = value(for: entry, column: identifier)
+            cell.toolTip = identifier == "name" ? entry.name : cell.textField?.stringValue
             if identifier == "name" {
                 cell.imageView?.image = icon(for: entry)
             }
@@ -208,6 +215,7 @@ struct FileTableView: NSViewRepresentable {
         }
 
         func tableViewSelectionDidChange(_ notification: Notification) {
+            guard !isApplyingModelState else { return }
             handleTableFocus()
             publishSelection()
         }
@@ -478,6 +486,8 @@ struct FileTableView: NSViewRepresentable {
             })
 
             if tableView.selectedRowIndexes != indexes {
+                isApplyingModelState = true
+                defer { isApplyingModelState = false }
                 tableView.selectRowIndexes(indexes, byExtendingSelection: false)
             }
         }
@@ -486,6 +496,8 @@ struct FileTableView: NSViewRepresentable {
             guard renderedEntries != parent.entries else {
                 return
             }
+            isApplyingModelState = true
+            defer { isApplyingModelState = false }
 
             let previousEntries = renderedEntries
             renderedEntries = parent.entries
@@ -1166,8 +1178,7 @@ struct FileTableView: NSViewRepresentable {
                 guard let size = entry.size else { return "--" }
                 return ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
             case "modified":
-                guard let date = entry.dateModified else { return "--" }
-                return Self.compactDateFormatter.string(from: date)
+                return FileMetadataFormatter.dateText(entry.dateModified)
             case "kind":
                 return entry.typeDescription
             case "tags":
@@ -1179,11 +1190,6 @@ struct FileTableView: NSViewRepresentable {
             }
         }
 
-        private static let compactDateFormatter: DateFormatter = {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd HH:mm"
-            return formatter
-        }()
     }
 
     @MainActor

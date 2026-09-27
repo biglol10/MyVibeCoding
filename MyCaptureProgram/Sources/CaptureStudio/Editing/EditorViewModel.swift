@@ -9,6 +9,15 @@ public final class EditorViewModel: ObservableObject {
     @Published public var activeTool: EditorTool = .select
     @Published public var style = LayerStyle(strokeColor: .red, fillColor: .clear, lineWidth: 3)
     @Published public var textSize: CGFloat = 20
+    @Published public var textColor: LayerColor = .black
+    @Published public var canvasFocusRequest = 0
+
+    public var canUndo: Bool { appState.currentDocument?.undoStack.isEmpty == false }
+    public var canRedo: Bool { appState.currentDocument?.redoStack.isEmpty == false }
+    public var canDeleteSelectedLayer: Bool { selectedLayer != nil }
+    public var isInteractionBlocked: Bool { appState.isInteractionBlocked }
+
+    public func focusCanvas() { canvasFocusRequest &+= 1 }
 
     public init(appState: AppState) {
         self.appState = appState
@@ -36,6 +45,32 @@ public final class EditorViewModel: ObservableObject {
         selectedLayer?.lineWidth ?? style.lineWidth
     }
 
+    public var drawingStyle: LayerStyle {
+        var result = style
+        result.lineWidth = displayedLineWidth
+        result.strokeColor = displayedStrokeColor
+        return result
+    }
+
+    public var displayedStrokeColor: LayerColor {
+        selectedLayer?.strokeColor ?? (activeTool == .text ? textColor : style.strokeColor)
+    }
+
+    public func updateDisplayedStrokeColor(_ color: LayerColor) {
+        if activeTool == .text || selectedLayer?.textContent != nil { textColor = color }
+        else { style.strokeColor = color }
+        mutateSelectedLayer { $0.setStrokeColor(color) }
+    }
+
+    public func resizeSelectedLayer(width: CGFloat, height: CGFloat) {
+        guard width.isFinite, height.isFinite else { return }
+        mutateSelectedLayer { layer in
+            guard layer.isResizable else { return }
+            layer.resize(to: CGRect(origin: layer.frame.origin,
+                size: CGSize(width: min(max(width, 2), 8192), height: min(max(height, 2), 8192))))
+        }
+    }
+
     public func addLayer(_ layer: EditorLayer) {
         mutateDocument { document in
             let snapshot = document.currentSnapshot
@@ -49,6 +84,7 @@ public final class EditorViewModel: ObservableObject {
     }
 
     public func addLayer(for tool: EditorTool, from start: CGPoint, to end: CGPoint) {
+        let style = drawingStyle
         let frame = CGRect(
             x: min(start.x, end.x),
             y: min(start.y, end.y),
@@ -82,6 +118,7 @@ public final class EditorViewModel: ObservableObject {
     }
 
     public func addFreehandLayer(for tool: EditorTool, points: [CGPoint]) {
+        let style = drawingStyle
         guard points.count > 1 else {
             return
         }
@@ -102,8 +139,8 @@ public final class EditorViewModel: ObservableObject {
                 TextLayer(
                     frame: CGRect(x: point.x, y: point.y, width: 160, height: 48),
                     text: text,
-                    fontSize: textSize,
-                    style: LayerStyle(strokeColor: .black, fillColor: .yellow, lineWidth: 1)
+                    fontSize: displayedTextSize,
+                    style: LayerStyle(strokeColor: displayedStrokeColor, fillColor: .yellow, lineWidth: 1)
                 )
             )
         )

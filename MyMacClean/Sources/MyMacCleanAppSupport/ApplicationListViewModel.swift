@@ -46,6 +46,7 @@ public final class ApplicationListViewModel {
     private let verifier: DeletionVerifier
     private let runningApplicationMonitor: RunningApplicationMonitor
     private let receiptStore: DeletionReceiptStore
+    private var reviewRevision = 0
 
     public var apps: [InstalledApp] = [] {
         didSet { reconcileVisibleSelection() }
@@ -164,14 +165,17 @@ public final class ApplicationListViewModel {
     }
 
     public func scanSelectedApp() async {
-        guard let selectedApp else { return }
+        guard !isScanning, !isDeleting, let selectedApp else { return }
         isScanning = true
         defer { isScanning = false }
-        clearReviewState()
+        clearReviewState(preservingMode: true)
+        let revision = reviewRevision
         let result = await relatedFileScanning.scan(selectedApp)
+        guard revision == reviewRevision,
+              self.selectedApp.map({ isSameApp($0, selectedApp) }) == true else { return }
         candidates = result.value
         relatedFileScanIssues = result.issues
-        selectedCandidateIDs = Set(candidates.filter(\.defaultSelected).map(\.id))
+        selectedCandidateIDs = Set(reviewCandidates.filter { $0.defaultSelected && !$0.isProtected }.map(\.id))
         errorMessage = nil
     }
 
@@ -211,6 +215,7 @@ public final class ApplicationListViewModel {
                 bundleIdentifier: plan.app.bundleIdentifier,
                 bundlePath: plan.app.bundleURL.path,
                 action: .uninstall,
+                deletionMode: mode,
                 selectedCandidates: plan.candidates.map {
                     DeletionReceiptCandidate(path: $0.url.path, kind: $0.kind, size: $0.size, safety: $0.safety, evidence: $0.evidence)
                 },
@@ -271,6 +276,7 @@ public final class ApplicationListViewModel {
                 bundleIdentifier: plan.app.bundleIdentifier,
                 bundlePath: plan.app.bundleURL.path,
                 action: .appReset,
+                deletionMode: .moveToTrash,
                 selectedCandidates: plan.candidates.map {
                     DeletionReceiptCandidate(path: $0.url.path, kind: $0.kind, size: $0.size, safety: $0.safety, evidence: $0.evidence)
                 },
@@ -351,11 +357,12 @@ public final class ApplicationListViewModel {
         clearReviewState()
     }
 
-    private func clearReviewState() {
+    private func clearReviewState(preservingMode: Bool = false) {
+        reviewRevision += 1
         candidates = []
         selectedCandidateIDs = []
         relatedFileScanIssues = []
-        cleanupMode = .uninstall
+        if !preservingMode { cleanupMode = .uninstall }
         clearDeletionOutcome()
     }
 
@@ -374,7 +381,10 @@ public final class ApplicationListViewModel {
 
     private func refreshReviewAfterReset(app: InstalledApp) async {
         guard selectedApp.map({ isSameApp($0, app) }) == true else { return }
+        let revision = reviewRevision
         let result = await relatedFileScanning.scan(app)
+        guard revision == reviewRevision,
+              selectedApp.map({ isSameApp($0, app) }) == true else { return }
         candidates = result.value
         relatedFileScanIssues = result.issues
         selectedCandidateIDs = Set(

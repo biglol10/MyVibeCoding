@@ -1,5 +1,11 @@
 # MyMacFinder
 
+## 다운로드
+
+[최신 개인용 macOS 설치 파일](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacFinder/MyMacFinder-personal-mac.zip) · [전체 앱 배포 안내](../docs/releases/2026-09-27-app-update.md)
+
+2026-09-27 변경을 반영한 개인 사용용 빌드입니다. Apple 공증을 받은 배포본은 아닙니다.
+
 MyMacFinder는 macOS Finder를 Windows 파일 탐색기와 ForkLift에 가까운 사용감으로 보완하기 위한 로컬 우선 파일 관리자 앱입니다. SwiftUI와 AppKit을 함께 사용해서 Finder의 기본 파일 작업을 유지하면서 single/dual pane, inspector, 탭, 고급 검색, 압축 파일 탐색, Finder tags, 컨텍스트 메뉴, 단축키를 제공합니다.
 
 ## 주요 기능
@@ -35,7 +41,14 @@ MyMacFinder는 macOS Finder를 Windows 파일 탐색기와 ForkLift에 가까운
 - 앱 번들 실행 후 홈 폴더 목록 렌더링
 - Return / Command-Down으로 폴더 진입, 파일은 Open 동작. 검색 결과나 테이블 선택 직후 focus가 창에 남아도 Return은 선택 항목 Open으로 라우팅
 - 상위 폴더 이동은 root(`/`)에서 비활성화되고 path input을 canonical path로 유지
-- Name, Date Modified, Kind 열이 좁은 화면에서도 우선적으로 읽히도록 기본 폭과 자동 리사이즈를 조정
+- 좁은 목록은 Name, Size, Date Modified 열을 우선 표시하고, 넓은 목록은 Kind와 Tags도 표시
+- Dual pane마다 폴더 경로와 활성 표시를 제공하고, 툴바에서 Inspector를 바로 접거나 펼칠 수 있음
+- 빈 폴더, 검색 결과 없음, 로딩 상태를 구분하고, 검색 조건 요약과 Clear All Filters 제공
+- 시스템 클립보드가 바뀌면 이전 잘라내기 상태를 폐기하여 현재 복사한 항목만 붙여넣음
+- 하위 폴더 검색 결과에서 이름을 바꾸고 탭을 오가도 결과와 선택을 유지
+- 여러 파일 복제 중 실패·취소 시 앞선 복제본도 함께 되돌리고, 파일 복사 중 취소 요청을 처리
+- 폴더 크기는 숨김 파일도 포함하며 읽기 실패 시 불완전한 합계를 표시하지 않고, Refresh 후 오래된 계산값을 제거
+- 목록과 Inspector의 날짜·시간을 같은 로컬 시간대로 표시하고, ZIP 내부 폴더에서는 지원하지 않는 크기 계산 버튼을 숨김
 - 실제 정렬 가능한 컬럼만 정렬 affordance를 표시하며, Tags처럼 아직 정렬 엔진이 없는 컬럼은 fake sort UI를 노출하지 않음
 - Finder Tags 편집 후 table과 inspector가 즉시 갱신
 - Finder Tag 필터 중 태그 편집으로 항목이 필터에서 사라지면 selection도 함께 정리
@@ -288,8 +301,6 @@ git diff --check
 ./scripts/package_personal.sh
 ```
 
-2026-08-14 MyMacSearch 연동 검증에서 외부 folder URL router와 `MyMacFinderSupportsExternalFolderOpen` bundle capability를 추가했습니다. 전체 `swift test`는 626 tests / 0 failures, `swift build -Xswiftc -warnings-as-errors`는 경고 없이 통과했습니다. build, packaged, `/Applications` installed 실행 파일 SHA-256은 `31a5393924ed01910e30059de2905dc598bce84930ac0fa140368d20c4f6f3a7`, 개인 설치 ZIP SHA-256은 `f53948c9b6e57e4fd0467dc4bab4bae2fabac234c8d56ccb1cf8d7d214af389d`입니다. 교체 전 앱은 `/Users/biglol/.Trash/MyMacFinder.previous-20260814-1506.app`에 복구 가능한 상태로 보관했습니다.
-
-2026-08-13 저장 안정성/세션 복원 검증에서 `swift test --enable-code-coverage`는 623 tests / 0 failures, `swift build -Xswiftc -warnings-as-errors`는 경고 없이 통과했습니다. 이전 세션의 탭, dual pane, 각 위치와 정렬 상태를 bounded snapshot으로 복원하되 검색, 선택, history, Undo와 진행 중 작업은 제외합니다. 손상된 settings/sidebar/session 값은 자동 overwrite를 차단하고 Settings의 영역별 Reset으로만 복구합니다. 별도 QA bundle ID에서 정상 복원, 검색 제외, 8-byte 손상 session 보존/Reset, 복원 off를 실제 재실행으로 확인했습니다. build, packaged, installed 실행 파일 SHA-256은 `be4d4c50c1e1cf4c48ba9539fe6fc4b76b3bccb7f8aa1a7fc64df62de96c33dc`, ZIP SHA-256은 `3f594c1a5e35fe0b05e096970afd9d89c55c98b135ae0b5bec9a0b7d64bc02d6`입니다. 최신 앱은 `/Applications/MyMacFinder.app`에 설치되어 PID `63573`으로 실행 중이며 세부 근거와 검증 경계는 `docs/qa/2026-08-13-persistence-session-restoration-verification.md`에 기록했습니다.
+2026-08-13 최신 저장 안정성/세션 복원 검증에서 `swift test --enable-code-coverage`는 623 tests / 0 failures, `swift build -Xswiftc -warnings-as-errors`는 경고 없이 통과했습니다. 이전 세션의 탭, dual pane, 각 위치와 정렬 상태를 bounded snapshot으로 복원하되 검색, 선택, history, Undo와 진행 중 작업은 제외합니다. 손상된 settings/sidebar/session 값은 자동 overwrite를 차단하고 Settings의 영역별 Reset으로만 복구합니다. 별도 QA bundle ID에서 정상 복원, 검색 제외, 8-byte 손상 session 보존/Reset, 복원 off를 실제 재실행으로 확인했습니다. build, packaged, installed 실행 파일 SHA-256은 `be4d4c50c1e1cf4c48ba9539fe6fc4b76b3bccb7f8aa1a7fc64df62de96c33dc`, ZIP SHA-256은 `3f594c1a5e35fe0b05e096970afd9d89c55c98b135ae0b5bec9a0b7d64bc02d6`입니다. 최신 앱은 `/Applications/MyMacFinder.app`에 설치되어 PID `63573`으로 실행 중이며 세부 근거와 검증 경계는 `docs/qa/2026-08-13-persistence-session-restoration-verification.md`에 기록했습니다.
 
 2026-08-09 archive preview lifecycle 검증 당시 `swift test --enable-code-coverage`는 591 tests / 0 failures, `swift build -Xswiftc -warnings-as-errors`는 경고 없이 통과했습니다. 당시 release 앱과 개인 설치 패키지의 strict codesign/ZIP 무결성을 확인했고 build, packaged, installed 실행 파일 SHA-256은 `64cb9376df0e1ca922a11c6cfbb1469563a92a3a873370fba244d43883ba024f`, ZIP SHA-256은 `9daf4f28fe0dc5797165f989ef31e539d495d426e90952b14cca3e49a0f6075c`였습니다. 별도 QA bundle ID와 bare-UUID 임시 root에서 실제 ZIP panel close cleanup, external-open retention/expiry, 열린 Quick Look 도중 exact QA PID 종료 후 durable launch retry를 exact owner/record condition polling으로 확인했습니다. QA process, defaults domain, app, root, exact preview owners는 모두 제거했습니다. 같은 release를 UUID staging/rollback backup으로 `/Applications/MyMacFinder.app`에 안전 교체했으며 당시 PID `94702`, 실행 경로 `/Applications/MyMacFinder.app/Contents/MacOS/MyMacFinder`를 확인했습니다. 실제 GUI와 자동 검증의 정확한 경계는 `docs/qa/2026-08-08-archive-preview-lifecycle-verification.md`에 기록되어 있습니다.

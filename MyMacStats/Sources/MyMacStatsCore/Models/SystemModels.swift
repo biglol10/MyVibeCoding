@@ -229,6 +229,29 @@ public struct BatterySnapshot: Equatable, Sendable {
     public let cycleCount: Int?
     public let serviceRecommended: Bool
     public let sampledAt: Date
+    public let timeToFullChargeMinutes: Int?
+    public let isFullyCharged: Bool
+    public let isCalculatingTime: Bool
+    public let healthDescription: String?
+
+    public var timeEstimateTitle: String {
+        if isFullyCharged { return "Charge Status" }
+        return isCharging == true ? "Time Until Full" : "Time Remaining"
+    }
+
+    public var timeEstimateText: String {
+        if isFullyCharged { return "Fully charged" }
+        if powerSource == "AC Power", isCharging != true { return "On external power" }
+        if isCalculatingTime { return "Calculating…" }
+        let minutes = isCharging == true ? timeToFullChargeMinutes : timeRemainingMinutes
+        guard let minutes, minutes >= 0 else { return "Unavailable" }
+        if isCharging == true && minutes == 0 { return "Finishing charge" }
+        return "\(minutes)m"
+    }
+
+    public var serviceStatusText: String {
+        serviceRecommended ? "Recommended" : (healthDescription ?? "Unavailable")
+    }
 
     public init(
         isPresent: Bool,
@@ -238,7 +261,11 @@ public struct BatterySnapshot: Equatable, Sendable {
         timeRemainingMinutes: Int?,
         cycleCount: Int?,
         serviceRecommended: Bool,
-        sampledAt: Date = Date()
+        sampledAt: Date = Date(),
+        timeToFullChargeMinutes: Int? = nil,
+        isFullyCharged: Bool = false,
+        isCalculatingTime: Bool = false,
+        healthDescription: String? = nil
     ) {
         self.isPresent = isPresent
         self.percentage = percentage
@@ -248,6 +275,10 @@ public struct BatterySnapshot: Equatable, Sendable {
         self.cycleCount = cycleCount
         self.serviceRecommended = serviceRecommended
         self.sampledAt = sampledAt
+        self.timeToFullChargeMinutes = timeToFullChargeMinutes
+        self.isFullyCharged = isFullyCharged
+        self.isCalculatingTime = isCalculatingTime
+        self.healthDescription = healthDescription
     }
 }
 

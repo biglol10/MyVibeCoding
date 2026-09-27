@@ -94,6 +94,44 @@ final class EditorCanvasViewSnapshotTests: XCTestCase {
         )
     }
 
+    func testReducedTextPreviewMatchesExportedGlyphSizeAndPosition() throws {
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil,
+            pixelsWide: 2000, pixelsHigh: 1200, bitsPerSample: 8, samplesPerPixel: 4,
+            hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+        NSColor.white.setFill()
+        CGRect(x: 0, y: 0, width: 2000, height: 1200).fill()
+        NSGraphicsContext.restoreGraphicsState()
+        let base = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        for content in ["ABCDEFGH", "한글 메모 두 번째 줄"] {
+            let layer = EditorLayer.text(TextLayer(frame: CGRect(x: 200, y: 200, width: 600, height: 120),
+                text: content, fontSize: 20, style: LayerStyle(strokeColor: .black, fillColor: .yellow, lineWidth: 1)))
+            let document = EditorDocument(kind: .screenshot, data: base, layers: [layer])
+            let state = AppState(currentDocument: document)
+            let preview = ImageRenderer(content: EditorCanvasView(document: document, editorViewModel: EditorViewModel(appState: state))
+                .frame(width: 500, height: 300))
+            preview.scale = 1
+            let exported = try AppKitImageRenderService().renderPNG(basePNGData: base, layers: [layer])
+            let output = ImageRenderer(content: Image(nsImage: try XCTUnwrap(NSImage(data: exported))).resizable().frame(width: 500, height: 300))
+            output.scale = 1
+            let previewBitmap = NSBitmapImageRep(cgImage: try XCTUnwrap(preview.cgImage))
+            let outputBitmap = NSBitmapImageRep(cgImage: try XCTUnwrap(output.cgImage))
+            // At 25% zoom, a 20px glyph is only 5px tall. Include antialiased
+            // edges and compare in the same color space, excluding the yellow fill.
+            let dark: (NSColor) -> Bool = {
+                guard let color = $0.usingColorSpace(.sRGB) else { return false }
+                return color.redComponent < 0.7 && color.greenComponent < 0.7 && color.blueComponent < 0.7
+            }
+            let a = try XCTUnwrap(previewBitmap.boundsOfPixels(matching: dark))
+            let b = try XCTUnwrap(outputBitmap.boundsOfPixels(matching: dark))
+            XCTAssertEqual(a.minX, b.minX, accuracy: 1, content)
+            XCTAssertEqual(a.minY, b.minY, accuracy: 1, content)
+            XCTAssertEqual(a.width, b.width, accuracy: 2, content)
+            XCTAssertEqual(a.height, b.height, accuracy: 2, content)
+        }
+    }
+
     private func assertLayer(
         _ layer: EditorLayer,
         drawsPixelsMatching pixelPredicate: (NSColor) -> Bool,

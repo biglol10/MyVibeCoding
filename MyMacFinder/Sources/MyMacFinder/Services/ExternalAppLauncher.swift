@@ -10,7 +10,7 @@ public protocol WorkspaceApplicationOpening: AnyObject {
         _ urls: [URL],
         withApplicationAt applicationURL: URL,
         configuration: NSWorkspace.OpenConfiguration,
-        completionHandler: ((NSRunningApplication?, (any Error)?) -> Void)?
+        completionHandler: (@Sendable (NSRunningApplication?, (any Error)?) -> Void)?
     )
     func urlForApplication(withBundleIdentifier bundleIdentifier: String) -> URL?
     func urlsForApplications(toOpen contentType: UTType) -> [URL]

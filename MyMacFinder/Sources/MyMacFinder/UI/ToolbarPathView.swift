@@ -13,104 +13,139 @@ struct ToolbarPathView: View {
     @State private var isSearchOptionsPresented = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            Button {
-                Task { await explorerStore.goBack() }
-            } label: {
-                Image(systemName: "chevron.left")
-            }
-            .disabled(explorerStore.activePane.backStack.isEmpty)
-
-            Button {
-                Task { await explorerStore.goForward() }
-            } label: {
-                Image(systemName: "chevron.right")
-            }
-            .disabled(explorerStore.activePane.forwardStack.isEmpty)
-
-            Button {
-                Task { await explorerStore.goUp() }
-            } label: {
-                Image(systemName: "arrow.up")
-            }
-            .disabled(!explorerStore.canGoUp)
-
-            PathInputField(
-                text: $explorerStore.pathInput,
-                isFocused: focusedField == .path,
-                focusClearSequence: focusClearSequence,
-                onFocusChange: { isFocused in
-                    focusedField = isFocused ? .path : nil
-                },
-                onSubmit: { path in
-                    Task { await explorerStore.resolveAndNavigate(path) }
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Button {
+                    Task { await explorerStore.goBack() }
+                } label: {
+                    Image(systemName: "chevron.left")
                 }
-            )
+                .disabled(explorerStore.activePane.backStack.isEmpty)
 
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                TextField(
-                    "Search",
-                    text: Binding(
-                        get: { explorerStore.searchQuery },
-                        set: { explorerStore.setSearchQuery($0) }
-                    )
+                Button {
+                    Task { await explorerStore.goForward() }
+                } label: {
+                    Image(systemName: "chevron.right")
+                }
+                .disabled(explorerStore.activePane.forwardStack.isEmpty)
+
+                Button {
+                    Task { await explorerStore.goUp() }
+                } label: {
+                    Image(systemName: "arrow.up")
+                }
+                .disabled(!explorerStore.canGoUp)
+
+                PathInputField(
+                    text: $explorerStore.pathInput,
+                    isFocused: focusedField == .path,
+                    focusClearSequence: focusClearSequence,
+                    onFocusChange: { isFocused in
+                        focusedField = isFocused ? .path : nil
+                    },
+                    onSubmit: { path in
+                        Task { await explorerStore.resolveAndNavigate(path) }
+                    }
                 )
-                .textFieldStyle(.plain)
-                .focused($focusedField, equals: .search)
-                .onExitCommand {
-                    explorerStore.clearSearch()
-                }
 
-                if explorerStore.isSearching {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-
-                if !explorerStore.searchQuery.isEmpty {
-                    Button {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField(
+                        "Search",
+                        text: Binding(
+                            get: { explorerStore.searchQuery },
+                            set: { explorerStore.setSearchQuery($0) }
+                        )
+                    )
+                    .textFieldStyle(.plain)
+                    .focused($focusedField, equals: .search)
+                    .onExitCommand {
                         explorerStore.clearSearch()
+                    }
+
+                    if explorerStore.isSearching {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+
+                    if !explorerStore.searchQuery.isEmpty {
+                        Button {
+                            explorerStore.clearSearch()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                    }
+
+                    Button {
+                        isSearchOptionsPresented.toggle()
                     } label: {
-                        Image(systemName: "xmark.circle.fill")
+                        Image(systemName: explorerStore.searchOptions == ExplorerSearchOptions()
+                            ? "line.3.horizontal.decrease.circle"
+                            : "line.3.horizontal.decrease.circle.fill"
+                        )
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
+                    .help("Search Options")
+                    .popover(isPresented: $isSearchOptionsPresented, arrowEdge: .bottom) {
+                        SearchOptionsPopover(
+                            scope: searchScopeBinding,
+                            kind: searchKindBinding,
+                            fileExtension: searchFileExtensionBinding,
+                            finderTagQuery: searchFinderTagQueryBinding,
+                            onClearAll: explorerStore.clearAllSearchCriteria
+                        )
+                    }
                 }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .frame(minWidth: 180, idealWidth: 260, maxWidth: 300)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
 
                 Button {
-                    isSearchOptionsPresented.toggle()
+                    Task { await explorerStore.refresh() }
                 } label: {
-                    Image(systemName: explorerStore.searchOptions == ExplorerSearchOptions()
-                        ? "line.3.horizontal.decrease.circle"
-                        : "line.3.horizontal.decrease.circle.fill"
-                    )
+                    Image(systemName: "arrow.clockwise")
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("Search Options")
-                .popover(isPresented: $isSearchOptionsPresented, arrowEdge: .bottom) {
-                    SearchOptionsPopover(
-                        scope: searchScopeBinding,
-                        kind: searchKindBinding,
-                        fileExtension: searchFileExtensionBinding,
-                        finderTagQuery: searchFinderTagQueryBinding
-                    )
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .frame(width: 300)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                .help("Refresh")
 
-            Button {
-                Task { await explorerStore.refresh() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
+                Button {
+                    explorerStore.isInspectorVisible.toggle()
+                } label: {
+                    Image(systemName: "sidebar.right")
+                }
+                .help(explorerStore.isInspectorVisible ? "Hide Inspector" : "Show Inspector")
+            }
+            if explorerStore.searchOptions != ExplorerSearchOptions() {
+                HStack(spacing: 8) {
+                    Text(searchOptionsSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .help(searchOptionsSummary)
+                    Spacer(minLength: 8)
+                    Button("Clear All Filters") {
+                        explorerStore.clearAllSearchCriteria()
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                }
             }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
+    }
+
+    private var searchOptionsSummary: String {
+        let options = explorerStore.searchOptions
+        var labels = [options.scope.title]
+        if options.kind != .any { labels.append(options.kind.title) }
+        if !options.fileExtension.isEmpty { labels.append("Extension: \(options.fileExtension)") }
+        if !options.finderTagQuery.isEmpty { labels.append("Tag: \(options.finderTagQuery)") }
+        return labels.joined(separator: " · ")
     }
 
     private var searchScopeBinding: Binding<SearchScope> {
@@ -404,6 +439,7 @@ private struct SearchOptionsPopover: View {
     @Binding var kind: SearchKindFilter
     @Binding var fileExtension: String
     @Binding var finderTagQuery: String
+    var onClearAll: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -426,6 +462,7 @@ private struct SearchOptionsPopover: View {
 
             TextField("Tag", text: $finderTagQuery)
                 .textFieldStyle(.roundedBorder)
+            Button("Clear All Filters", action: onClearAll)
         }
         .padding(14)
         .frame(width: 280)

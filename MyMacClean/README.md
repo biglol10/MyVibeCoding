@@ -1,5 +1,11 @@
 # MyMacClean
 
+## 다운로드
+
+[최신 개인용 macOS 설치 파일](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacClean/MyMacClean-dev.dmg) · [전체 앱 배포 안내](../docs/releases/2026-09-27-app-update.md)
+
+2026-09-27 변경을 반영한 개인 사용용 빌드입니다. Apple 공증을 받은 배포본은 아닙니다.
+
 MyMacClean is a personal macOS cleaner and uninstaller built as a native SwiftUI
 app. It is designed for review-first cleanup, not one-click system cleaning.
 
@@ -37,13 +43,11 @@ MyMacClean is intentionally conservative.
 - Cleanup receipts are recorded for destructive attempts.
 - If Full Disk Access appears to be missing at launch, MyMacClean shows a
   permission prompt that opens System Settings directly to Full Disk Access.
-- Permission-related deletion failures show a toast action that opens Full Disk
-  Access settings.
+- Protected-data deletion failures show a toast action that opens Full Disk
+  Access settings. App-bundle deletion failures instead offer App Management.
 - If macOS rejects the standard Trash API for an app bundle, MyMacClean retries
-  through Finder. macOS may ask for permission to let MyMacClean control Finder;
-  this is used only to move the selected item to Trash.
-- Before a `/Applications` app bundle cleanup can request Finder access,
-  MyMacClean shows its own explanation dialog and lets you cancel.
+  through `NSWorkspace.recycle` and waits for its completion and verified Trash
+  destination before reporting success.
 - Startup item management does not edit plist contents, does not call
   `launchctl`, and does not modify system-wide LaunchAgents or LaunchDaemons.
 - Disabling a startup item renames the plist only. If the agent is already
@@ -58,7 +62,11 @@ MyMacClean is intentionally conservative.
   inside application packages.
 - Filters and sorts app list.
 - Scans the selected app bundle and related Library files.
-- Shows match evidence and safety level for each candidate.
+- Shows match evidence and safety level for each candidate. Name-only matches
+  require manual selection; a strong ownership match does not mean app data is
+  disposable.
+- Discards stale scan results when the selected app changes and preserves Reset
+  Data mode during rescans.
 - Blocks deletion of running apps and protected paths.
 - Moves selected items to Trash by default.
 - Supports permanent deletion and force-delete options only after explicit
@@ -74,12 +82,17 @@ MyMacClean is intentionally conservative.
 - Groups leftovers by inferred bundle identifier.
 - Excludes currently installed apps and the running MyMacClean bundle.
 - Requires manual selection before cleanup.
-- Supports group-level select/clear controls.
+- Supports group-level select/clear controls, name/path search, largest-first
+  sorting, and a selected-group inspector.
+- Waits for complete installed-app discovery before scanning for leftovers.
+- Excludes LaunchAgents whose executable still exists or cannot be resolved.
 - Supports reveal/copy-path actions for individual leftover candidates.
 - Moves selected leftovers to Trash by default.
 - Supports permanent deletion and force-delete options only after explicit
   confirmation.
-- Records cleanup receipts.
+- Records cleanup receipts, including deletion method and verified Trash paths.
+- Confirmation sheets show every selected path, including selections hidden by
+  the current search. Selected-only and clear-selection controls are available.
 
 ### Large Files
 
@@ -89,7 +102,7 @@ MyMacClean is intentionally conservative.
   deliberately not persisted across launches.
 - Offers `Include Subfolders`, off by default. Changing the folder or recursion
   setting clears stale scan results before the next scan.
-- Uses a 500 MB minimum size threshold.
+- Starts at a 500 MiB minimum size threshold, adjustable in the scan controls.
 - Does not auto-select results.
 - Excludes system roots and package internals.
 - Sorts results by size descending.
@@ -174,6 +187,18 @@ fail for paths under protected Library locations.
 
 ## If Deletion Fails
 
+MyMacClean records failed deletion attempts in Delete History. Permission
+failures offer a persistent recovery panel with the relevant System Settings
+link, an access check, restart, and a fresh review of remaining paths. The panel
+is restored from the latest failed receipt after relaunch. Retrying still
+requires reviewing the paths and confirming the deletion; it never resumes a
+destructive operation automatically.
+
+MyMacClean checks protected-directory access directly. App Management is checked
+by macOS when the deletion is attempted; the app does not claim that opening
+System Settings grants permission. Local ad-hoc builds can require permission to
+be enabled again after an update.
+
 MyMacClean records failed deletion attempts in Delete History. Open the failed
 record and expand `Error Logs` to see the exact path and macOS error.
 
@@ -181,14 +206,11 @@ Common fixes:
 
 1. Quit the app and its helpers first. If the app is still running, macOS may
    refuse to move its bundle or support folders.
-2. Grant Full Disk Access to `/Applications/MyMacClean.app`, then reopen
-   MyMacClean and retry. If the failure toast shows `Open Full Disk Access
-   Settings`, use that button to jump to the correct settings page.
-3. If MyMacClean shows `Finder Permission May Be Needed`, choose
-   `Continue and Request Finder Permission` only if you want to proceed with
-   that deletion. macOS may then ask whether MyMacClean can control Finder;
-   allow it. This is a separate Automation permission used as a fallback for
-   app bundles that the standard Trash API refuses.
+2. For `/Applications/*.app` failures, use the toast's `Open App Management
+   Settings` action and enable MyMacClean. Full Disk Access does not grant app
+   deletion permission; macOS may still request an administrator password.
+3. For protected Library data or system-file failures, use `Open Full Disk
+   Access Settings`, reopen MyMacClean, and retry.
 4. Use `Reveal in Finder` or copy the failed path from the error log, then move
    that item to Trash manually. Finder may request an administrator password
    for some paths.

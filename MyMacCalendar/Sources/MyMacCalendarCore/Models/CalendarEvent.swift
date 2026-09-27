@@ -57,10 +57,12 @@ public enum EventCategory: String, Codable, CaseIterable, Identifiable {
 
 @Model
 public final class CalendarEvent {
+    public static let defaultReminderOffsets = [1]
     @Attribute(.unique) public var id: UUID
     public var title: String
     public var startDate: Date
     public var endDate: Date
+    public var dateTimeZoneIdentifier: String = ""
     public var colorHex: String
     public var categoryRaw: String = EventCategory.personal.rawValue
     public var notes: String
@@ -80,12 +82,14 @@ public final class CalendarEvent {
         recurrence: EventRecurrence = .none,
         notificationOffsetsDays: [Int] = [],
         createdAt: Date = Date(),
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        calendar: Calendar = .current
     ) {
         self.id = id
         self.title = title
         self.startDate = startDate
         self.endDate = endDate
+        self.dateTimeZoneIdentifier = calendar.timeZone.identifier
         self.colorHex = colorHex
         self.categoryRaw = category.rawValue
         self.notes = notes
@@ -93,6 +97,20 @@ public final class CalendarEvent {
         self.notificationOffsetsRaw = Self.encodeNotificationOffsets(notificationOffsetsDays)
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+
+    public func localStartDate(in calendar: Calendar = .current) -> Date {
+        AllDayDate.resolve(startDate, storedTimeZone: dateTimeZoneIdentifier, calendar: calendar)
+    }
+
+    public func localEndDate(in calendar: Calendar = .current) -> Date {
+        AllDayDate.resolve(endDate, storedTimeZone: dateTimeZoneIdentifier, calendar: calendar)
+    }
+
+    public func setDateRange(start: Date, end: Date, calendar: Calendar = .current) {
+        startDate = calendar.startOfDay(for: start)
+        endDate = calendar.startOfDay(for: max(start, end))
+        dateTimeZoneIdentifier = calendar.timeZone.identifier
     }
 
     public var notificationOffsetsDays: [Int] {

@@ -11,15 +11,19 @@ public struct EventService {
         guard limit > 0 else { return [] }
         let startOfDay = calendar.startOfDay(for: startDate)
         return events
-            .filter { calendar.startOfDay(for: $0.endDate) >= startOfDay }
+            .filter { calendar.startOfDay(for: $0.localEndDate(in: calendar)) >= startOfDay }
             .sorted {
-                if $0.startDate == $1.startDate {
+                if $0.localStartDate(in: calendar) == $1.localStartDate(in: calendar) {
                     return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
                 }
-                return $0.startDate < $1.startDate
+                return $0.localStartDate(in: calendar) < $1.localStartDate(in: calendar)
             }
             .prefix(limit)
             .map { $0 }
+    }
+
+    public func upcomingYearOccurrences(from date: Date, events: [CalendarEvent]) -> [EventOccurrence] {
+        upcomingOccurrences(from: date, events: events, limit: Int.max, horizonDays: 365)
     }
 
     public func upcomingOccurrences(from startDate: Date, events: [CalendarEvent], limit: Int, horizonDays: Int = 90) -> [EventOccurrence] {
@@ -51,10 +55,10 @@ public struct EventService {
                     event.notes.lowercased().contains(normalized)
             }
             .sorted {
-                if $0.startDate == $1.startDate {
+                if $0.localStartDate(in: calendar) == $1.localStartDate(in: calendar) {
                     return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
                 }
-                return $0.startDate < $1.startDate
+                return $0.localStartDate(in: calendar) < $1.localStartDate(in: calendar)
             }
     }
 }

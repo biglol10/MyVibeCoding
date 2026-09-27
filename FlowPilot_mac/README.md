@@ -1,5 +1,11 @@
 # FlowPilot
 
+## 다운로드
+
+[최신 개인용 macOS 설치 파일](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/FlowPilot_mac/FlowPilot_native_mac_arm64.zip) · [전체 앱 배포 안내](../docs/releases/2026-09-27-app-update.md)
+
+2026-09-27 변경을 반영한 개인 사용용 빌드입니다. Apple 공증을 받은 배포본은 아닙니다.
+
 FlowPilot is a local productivity tracker for macOS and Windows. It records app/window usage and browser tab domains,
 then builds daily and weekly productivity reports with charts, tables, timelines, classification rules, exclude rules,
 display aliases, and persistent local storage.

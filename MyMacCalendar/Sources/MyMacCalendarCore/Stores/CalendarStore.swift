@@ -13,7 +13,7 @@ public enum CalendarStore {
 
     static func makeContainer(at storeURL: URL) throws -> ModelContainer {
         try prepareWritableDirectory(storeURL.deletingLastPathComponent())
-        let schema = Schema(versionedSchema: CalendarSchemaV3.self)
+        let schema = Schema(versionedSchema: CalendarSchemaV4.self)
         let configuration = ModelConfiguration(schema: schema, url: storeURL)
         return try ModelContainer(
             for: schema,
@@ -23,7 +23,7 @@ public enum CalendarStore {
     }
 
     static func makeInMemoryContainer() throws -> ModelContainer {
-        let schema = Schema(versionedSchema: CalendarSchemaV3.self)
+        let schema = Schema(versionedSchema: CalendarSchemaV4.self)
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         return try ModelContainer(
             for: schema,

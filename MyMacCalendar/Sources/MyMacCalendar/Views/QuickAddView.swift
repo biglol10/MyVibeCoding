@@ -6,6 +6,7 @@ struct QuickAddView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @State private var input = ""
+    @State private var reminderEnabled = true
     @State private var parsed: QuickAddResult?
     @State private var pendingConfirmation: QuickAddResult?
     @State private var errorMessage: String?
@@ -42,6 +43,8 @@ struct QuickAddView: View {
                             .font(.subheadline.weight(.bold))
                         Text(parsed.startDate.formatted(date: .complete, time: .omitted))
                             .foregroundStyle(.secondary)
+                        Toggle("하루 전 알림 · 설정의 기본 시간", isOn: $reminderEnabled)
+                            .font(.caption)
                         if parsed.needsConfirmation {
                             Label("날짜 확인이 필요합니다.", systemImage: "exclamationmark.triangle.fill")
                                 .font(.caption.weight(.semibold))
@@ -70,6 +73,7 @@ struct QuickAddView: View {
             HStack {
                 Spacer()
                 Button("취소") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
                 Button("추가") { submit() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(parsed == nil)
@@ -141,7 +145,7 @@ struct QuickAddView: View {
     }
 
     private func save(_ result: QuickAddResult) {
-        modelContext.insert(CalendarEvent(title: result.title, startDate: result.startDate, endDate: result.endDate))
+        modelContext.insert(CalendarEvent(title: result.title, startDate: result.startDate, endDate: result.endDate, notificationOffsetsDays: reminderEnabled ? CalendarEvent.defaultReminderOffsets : []))
         do {
             try PersistenceTransaction.save(context: modelContext)
         } catch {

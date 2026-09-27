@@ -36,6 +36,7 @@ public final class AppState: ObservableObject {
     @Published public var isRecordingInProgress: Bool
     @Published public var isHistoryPresented: Bool
     @Published public var historySearchText: String
+    @Published public var countdownSecondsRemaining: Int?
 
     public init(
         captureMode: CaptureMode = .screenshot,

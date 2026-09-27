@@ -174,7 +174,7 @@ struct CalendarSearchResultsView: View {
 
     private func metadata(for event: CalendarEvent) -> String {
         var parts = [
-            event.startDate.formatted(date: .abbreviated, time: .omitted),
+            event.localStartDate().formatted(date: .abbreviated, time: .omitted),
             event.category.title
         ]
         if event.recurrence != .none {

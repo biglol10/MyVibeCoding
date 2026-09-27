@@ -234,7 +234,7 @@ final class CaptureCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testScreenshotUsesConfiguredDefaultDelayBeforeSelecting() async {
+    func testScreenshotCountsDownAfterSelecting() async {
         let appState = AppState()
         let settingsStore = makeSettingsStore("screenshotDelay")
         settingsStore.update { settings in
@@ -252,7 +252,7 @@ final class CaptureCoordinatorTests: XCTestCase {
 
         await coordinator.startNewCapture()
 
-        XCTAssertEqual(delaySleeper.requestedSeconds, [4])
+        XCTAssertEqual(delaySleeper.requestedSeconds, [1, 1, 1, 1])
     }
 
     @MainActor
@@ -302,7 +302,7 @@ final class CaptureCoordinatorTests: XCTestCase {
 
         await coordinator.startScreenshotCapture()
 
-        XCTAssertEqual(events.values, ["hide", "sleep:4", "select", "capture", "restore"])
+        XCTAssertEqual(events.values, ["hide", "select", "sleep:1", "sleep:1", "sleep:1", "sleep:1", "capture", "restore"])
     }
 
     @MainActor
@@ -476,7 +476,7 @@ final class CaptureCoordinatorTests: XCTestCase {
 
         await coordinator.startNewCapture()
 
-        XCTAssertEqual(delaySleeper.requestedSeconds, [2])
+        XCTAssertEqual(delaySleeper.requestedSeconds, [1, 1])
     }
 
     @MainActor
@@ -779,7 +779,7 @@ final class CaptureCoordinatorTests: XCTestCase {
 
         await coordinator.startScreenRecording()
 
-        XCTAssertEqual(events.values, ["hide", "select", "restore", "sleep:2", "record"])
+        XCTAssertEqual(events.values, ["hide", "select", "restore", "sleep:1", "sleep:1", "record"])
     }
 
     @MainActor
@@ -977,6 +977,49 @@ final class CaptureCoordinatorTests: XCTestCase {
         XCTAssertNil(appState.currentDocument)
         XCTAssertTrue(fileTrashService.trashedURLs.isEmpty)
         XCTAssertEqual(appState.statusMessage, "Screenshot discarded.")
+    }
+
+    @MainActor
+    func testCountdownCancellationPreservesDocumentAndNeverCaptures() async {
+        for mode in [CaptureMode.screenshot, .record] {
+            let original = EditorDocument(kind: .screenshot, data: Data(), isDirty: false)
+            let state = AppState(captureMode: mode, currentDocument: original)
+            let settings = makeSettingsStore("cancelCountdown-\(mode)")
+            settings.update { $0.defaultDelaySeconds = 3; $0.countdownSeconds = 3 }
+            let sleeper = CancellableTestSleeper()
+            let screenshot = MockScreenshotService()
+            let recorder = MockRecordingService()
+            let coordinator = CaptureCoordinator(appState: state, settingsStore: settings,
+                screenshotService: screenshot, recordingService: recorder,
+                selectionService: MockSelectionService(), delaySleeper: sleeper)
+            let task = Task { await coordinator.startNewCapture() }
+            for _ in 0..<1000 {
+                if sleeper.started { break }
+                await Task.yield()
+            }
+            XCTAssertTrue(sleeper.started)
+            XCTAssertEqual(state.countdownSecondsRemaining, 3)
+            coordinator.cancelCountdown()
+            await task.value
+            XCTAssertEqual(state.currentDocument, original)
+            XCTAssertEqual(screenshot.captureCallCount, 0)
+            XCTAssertNil(state.countdownSecondsRemaining)
+            XCTAssertFalse(state.isInteractionBlocked)
+            XCTAssertEqual(state.statusMessage, mode == .screenshot ? "Screenshot cancelled." : "Recording cancelled.")
+        }
+    }
+
+    @MainActor
+    func testCountdownPublishesEachRemainingSecond() async {
+        let state = AppState()
+        let settings = makeSettingsStore("countdownTicks")
+        settings.update { $0.defaultDelaySeconds = 3; $0.automaticallySaveScreenshots = false; $0.copyCapturedImageToClipboard = false }
+        let sleeper = CountdownObservingSleeper(state: state)
+        let coordinator = CaptureCoordinator(appState: state, settingsStore: settings,
+            screenshotService: MockScreenshotService(), selectionService: MockSelectionService(), delaySleeper: sleeper)
+        await coordinator.startScreenshotCapture()
+        XCTAssertEqual(sleeper.remaining, [3, 2, 1])
+        XCTAssertNil(state.countdownSecondsRemaining)
     }
 
     private func isolatedDefaults(_ name: String) -> UserDefaults {
@@ -1300,5 +1343,22 @@ private final class ManuallyStoppedRecordingService: RecordingServicing {
         await withCheckedContinuation { continuation in
             startWaiters.append(continuation)
         }
+    }
+}
+
+@MainActor private final class CancellableTestSleeper: CaptureDelaySleeping {
+    var started = false
+    func sleep(seconds: Int) async throws {
+        started = true
+        try await Task.sleep(for: .seconds(2))
+    }
+}
+
+@MainActor private final class CountdownObservingSleeper: CaptureDelaySleeping {
+    let state: AppState
+    var remaining: [Int] = []
+    init(state: AppState) { self.state = state }
+    func sleep(seconds: Int) async throws {
+        if let value = state.countdownSecondsRemaining { remaining.append(value) }
     }
 }

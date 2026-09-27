@@ -4,23 +4,14 @@ import MyMacStatsCore
 
 struct MetricDetailView: View {
     @ObservedObject var viewModel: DashboardViewModel
-    let isSettingsSelected: Bool
 
     var body: some View {
         VStack(spacing: 0) {
-            if isSettingsSelected {
-                PanelHeader(title: "Settings", subtitle: "Refresh and display preferences")
-                Divider()
-                InfoRow(title: "Refresh Interval", value: viewModel.refreshInterval.title)
-                InfoRow(title: "Menu Bar Display", value: "CPU + RAM")
-                Spacer(minLength: 0)
-            } else {
-                PanelHeader(title: detailTitle, subtitle: viewModel.selectedSummary?.detailText)
-                Divider()
-                detailContent
-            }
+            PanelHeader(title: detailTitle, subtitle: viewModel.selectedSummary?.detailText)
+            Divider()
+            detailContent
         }
-        .navigationSplitViewColumnWidth(min: 360, ideal: 430, max: 520)
+        .navigationSplitViewColumnWidth(min: 360, ideal: 430)
     }
 
     @ViewBuilder
@@ -31,13 +22,13 @@ struct MetricDetailView: View {
         case .memory:
             memoryDetail
         case .disk:
-            diskDetail
+            ScrollView { diskDetail }
         case .network:
-            networkDetail
+            ScrollView { networkDetail }
         case .battery:
-            batteryDetail
+            ScrollView { batteryDetail }
         case .processes:
-            processDetail
+            ScrollView { processDetail }
         }
     }
 
@@ -46,6 +37,10 @@ struct MetricDetailView: View {
             VStack(spacing: 0) {
                 if let cpu = viewModel.snapshot.cpu {
                     InfoRow(title: "Total", value: MetricFormatters.percent(cpu.totalUsagePercent), valueColor: viewModel.selectedSummary?.health.statusColor ?? .primary)
+                    Text("Total CPU: all cores = 100%. Process CPU: one core = 100%.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 16)
                     InfoRow(title: "User", value: MetricFormatters.percent(cpu.userPercent))
                     InfoRow(title: "System", value: MetricFormatters.percent(cpu.systemPercent))
                     InfoRow(title: "Idle", value: MetricFormatters.percent(cpu.idlePercent))
@@ -94,17 +89,36 @@ struct MetricDetailView: View {
         VStack(spacing: 0) {
             if let disk = viewModel.snapshot.disk {
                 InfoRow(title: "Volume", value: disk.volumeName)
+                InfoRow(title: "Mount Point", value: disk.mountPoint)
+                InfoRow(title: "Total", value: MetricFormatters.bytes(disk.totalBytes))
                 InfoRow(title: "Used", value: MetricFormatters.bytes(disk.totalBytes - disk.freeBytes))
                 InfoRow(title: "Free", value: MetricFormatters.bytes(disk.freeBytes), valueColor: viewModel.selectedSummary?.health.statusColor ?? .primary)
                 InfoRow(title: "Read", value: disk.readBytesPerSecond.map(MetricFormatters.speed) ?? "Unavailable")
                 InfoRow(title: "Write", value: disk.writeBytesPerSecond.map(MetricFormatters.speed) ?? "Unavailable")
-                if !viewModel.snapshot.diskSpaceCandidates.isEmpty {
-                    Divider()
-                        .padding(.vertical, 6)
-                    InfoRow(title: "Space Candidates", value: "\(viewModel.snapshot.diskSpaceCandidates.count)")
-                    ForEach(viewModel.snapshot.diskSpaceCandidates.prefix(6)) { candidate in
-                        DiskCandidateRow(candidate: candidate)
+                Text("Read and write speeds include all storage devices.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(16)
+                Divider()
+                HStack {
+                    Text("Space Candidates").font(.headline)
+                    Spacer()
+                    Button(viewModel.isScanningDisk ? "Scanning…" : "Scan Again") {
+                        Task { await viewModel.rescanDiskSpaceCandidates() }
                     }
+                    .disabled(viewModel.isScanningDisk)
+                }
+                .padding(16)
+                Text("Checks Xcode DerivedData only. Partial estimates exclude files that could not be measured; use Scan Again to retry.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                if viewModel.snapshot.diskSpaceCandidates.isEmpty {
+                    InfoRow(title: "Candidates", value: "None found in the scanned location")
+                }
+                ForEach(viewModel.snapshot.diskSpaceCandidates) { candidate in
+                    DiskCandidateRow(candidate: candidate)
                 }
             } else {
                 ContentUnavailableView("Disk Unavailable", systemImage: "internaldrive")
@@ -134,10 +148,10 @@ struct MetricDetailView: View {
             if let battery = viewModel.snapshot.battery, battery.isPresent {
                 InfoRow(title: "Charge", value: battery.percentage.map { MetricFormatters.percent($0) } ?? "Unavailable", valueColor: viewModel.selectedSummary?.health.statusColor ?? .primary)
                 InfoRow(title: "Power Source", value: battery.powerSource)
-                InfoRow(title: "Charging", value: battery.isCharging == true ? "Yes" : "No")
-                InfoRow(title: "Time Remaining", value: battery.timeRemainingMinutes.map { "\($0)m" } ?? "Unavailable")
+                InfoRow(title: "Charging", value: battery.isCharging.map { $0 ? "Yes" : "No" } ?? "Unavailable")
+                InfoRow(title: battery.timeEstimateTitle, value: battery.timeEstimateText)
                 InfoRow(title: "Cycle Count", value: battery.cycleCount.map(String.init) ?? "Unavailable")
-                InfoRow(title: "Service", value: battery.serviceRecommended ? "Recommended" : "OK")
+                InfoRow(title: "Service", value: battery.serviceStatusText)
             } else {
                 ContentUnavailableView("Battery Unavailable", systemImage: "battery.0")
             }
@@ -148,11 +162,29 @@ struct MetricDetailView: View {
     private var processDetail: some View {
         VStack(spacing: 0) {
             if let group = viewModel.selectedProcessGroup, let process = viewModel.selectedProcess {
-                let terminationTarget = group.id.hasPrefix("app:") || group.processes.count > 1 ? "App" : "Process"
                 InfoRow(title: "App", value: group.name)
                 InfoRow(title: "Processes", value: "\(group.processes.count)")
                 InfoRow(title: "Total CPU", value: MetricFormatters.percent(group.cpuPercent, fractionDigits: group.cpuPercent < 10 ? 1 : 0))
                 InfoRow(title: "Total Memory", value: MetricFormatters.bytes(group.memoryBytes))
+                if group.isApplicationTarget {
+                    Button(role: .destructive) {
+                        viewModel.requestTermination(for: process, scope: .application)
+                    } label: {
+                        Label("Quit App (\(group.processes.count) \(group.processes.count == 1 ? "process" : "processes"))", systemImage: "xmark.octagon")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!viewModel.selectedProcessTerminationAvailability.isAllowed)
+                    .help(viewModel.selectedProcessTerminationAvailability.reason ?? "Quit all processes belonging to this app")
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
+                    if viewModel.selectedProcessCanForceQuit {
+                        Button("Force Quit App", role: .destructive) {
+                            viewModel.requestForceTermination(for: process, scope: .application)
+                        }
+                        .padding(.top, 8)
+                    }
+                }
                 Divider()
                     .padding(.vertical, 6)
                 if let terminationMessage = viewModel.selectedProcessTerminationMessage {
@@ -165,21 +197,21 @@ struct MetricDetailView: View {
                 InfoRow(title: "Path", value: process.path ?? "Unavailable")
                 InfoRow(title: "Bundle ID", value: process.bundleIdentifier ?? "Unavailable")
                 Button(role: .destructive) {
-                    viewModel.requestTermination(for: process)
+                    viewModel.requestTermination(for: process, scope: .process)
                 } label: {
-                    Label("Quit \(terminationTarget)", systemImage: "xmark.octagon")
+                    Label("Quit Process (PID \(process.pid))", systemImage: "xmark.octagon")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
-                .disabled(!viewModel.selectedProcessTerminationAvailability.isAllowed)
-                .help(viewModel.selectedProcessTerminationAvailability.reason ?? "Quit selected \(terminationTarget.lowercased())")
+                .disabled(!viewModel.individualProcessTerminationAvailability.isAllowed)
+                .help(viewModel.individualProcessTerminationAvailability.reason ?? "Quit only PID \(process.pid)")
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
-                if viewModel.selectedProcessCanForceQuit {
+                if viewModel.selectedIndividualProcessCanForceQuit {
                     Button(role: .destructive) {
-                        viewModel.requestForceTermination(for: process)
+                        viewModel.requestForceTermination(for: process, scope: .process)
                     } label: {
-                        Label("Force Quit \(terminationTarget)", systemImage: "exclamationmark.octagon")
+                        Label("Force Quit Process", systemImage: "exclamationmark.octagon")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
@@ -190,7 +222,7 @@ struct MetricDetailView: View {
                 if group.processes.count > 1 {
                     Divider()
                         .padding(.vertical, 8)
-                    ForEach(group.processes.prefix(6)) { child in
+                    ForEach(group.processes) { child in
                         Button {
                             viewModel.selectProcess(pid: child.pid)
                         } label: {

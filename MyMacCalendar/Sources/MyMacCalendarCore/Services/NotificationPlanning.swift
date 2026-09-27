@@ -12,7 +12,7 @@ public struct NotificationPlan: Equatable, Sendable {
 public struct NotificationPlanner {
     private let calendar: Calendar
 
-    public init(calendar: Calendar = .current) {
+    public init(calendar: Calendar = .autoupdatingCurrent) {
         self.calendar = calendar
     }
 

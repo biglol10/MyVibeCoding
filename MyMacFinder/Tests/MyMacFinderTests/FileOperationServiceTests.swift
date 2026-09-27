@@ -4,6 +4,43 @@ import XCTest
 @testable import MyMacFinder
 
 final class FileOperationServiceTests: XCTestCase {
+    func testDuplicateBatchCancellationRemovesEarlierCompletedCopies() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("DuplicateCancel-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = root.appendingPathComponent("first.bin"), second = root.appendingPathComponent("second.bin")
+        try Data(repeating: 1, count: 8).write(to: first)
+        try Data(repeating: 2, count: 12).write(to: second)
+        let canceller = ByteThresholdProgressCanceller(cancelAtCompletedBytes: 12)
+        let reporter = FileOperationProgressReporter(
+            initialSnapshot: FileOperationProgressSnapshot(kind: .duplicate, title: "Duplicating"),
+            onUpdate: { await canceller.cancelIfNeeded(snapshot: $0) }
+        )
+        await canceller.setReporter(reporter)
+        do {
+            _ = try await FileOperationService(copyChunkSize: 4).duplicateItems([first, second], progress: reporter)
+            XCTFail("Expected cancellation during the second file")
+        } catch is CancellationError {
+            XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: root.path)), ["first.bin", "second.bin"])
+            XCTAssertEqual(try Data(contentsOf: first), Data(repeating: 1, count: 8))
+            XCTAssertEqual(try Data(contentsOf: second), Data(repeating: 2, count: 12))
+        }
+    }
+
+    func testDuplicateBatchKeepsEachSourceInItsOwnParentFolder() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("DuplicateParents-\(UUID())", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let left = root.appendingPathComponent("left"), right = root.appendingPathComponent("right")
+        try FileManager.default.createDirectory(at: left, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: right, withIntermediateDirectories: true)
+        let a = left.appendingPathComponent("same.txt"), b = right.appendingPathComponent("same.txt")
+        try Data([1]).write(to: a); try Data([2]).write(to: b)
+        let result = try await FileOperationService().duplicateItems([a, b])
+        XCTAssertEqual(result.createdURLs.count, 2)
+        XCTAssertEqual(try Data(contentsOf: left.appendingPathComponent("same copy.txt")), Data([1]))
+        XCTAssertEqual(try Data(contentsOf: right.appendingPathComponent("same copy.txt")), Data([2]))
+    }
+
     private var tempDirectory: URL!
 
     override func setUpWithError() throws {

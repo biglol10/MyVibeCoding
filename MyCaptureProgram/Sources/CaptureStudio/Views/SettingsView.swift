@@ -122,10 +122,13 @@ struct SettingsView: View {
                     value: timeBinding(\.countdownSeconds, control: .recordingCountdown)
                 )
                 Divider()
-                timeControl(
-                    SettingsTimeControl.recordingDuration,
-                    value: timeBinding(\.recordingDurationSeconds, control: .recordingDuration)
-                )
+                Toggle("Record until I press Stop", isOn: binding(\.recordUntilStopped))
+                if !settingsStore.settings.recordUntilStopped {
+                    timeControl(
+                        SettingsTimeControl.recordingDuration,
+                        value: timeBinding(\.recordingDurationSeconds, control: .recordingDuration)
+                    )
+                }
             }
 
             settingsSection("Quality") {

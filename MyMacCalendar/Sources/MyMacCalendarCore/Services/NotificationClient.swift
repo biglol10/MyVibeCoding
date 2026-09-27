@@ -39,7 +39,7 @@ public final class SystemNotificationClient: NotificationClient {
 
     public init(
         centerProvider: @escaping () -> UNUserNotificationCenter = { .current() },
-        calendar: Calendar = .current
+        calendar: Calendar = .autoupdatingCurrent
     ) {
         self.centerProvider = centerProvider
         self.calendar = calendar

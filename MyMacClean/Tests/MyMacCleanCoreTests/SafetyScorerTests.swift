@@ -22,7 +22,7 @@ final class SafetyScorerTests: XCTestCase {
         XCTAssertFalse(score.requiresManualReview)
     }
 
-    func testExactNameEvidenceInKnownCleanupRootRequiresReviewButCanBeDefaultSelected() {
+    func testExactNameEvidenceRequiresManualSelection() {
         let evidence = MatchEvidence(
             type: .exactAppName,
             matchedValue: "Figma",
@@ -38,7 +38,7 @@ final class SafetyScorerTests: XCTestCase {
         )
 
         XCTAssertEqual(score.level, .review)
-        XCTAssertTrue(score.defaultSelected)
+        XCTAssertFalse(score.defaultSelected)
         XCTAssertTrue(score.requiresManualReview)
     }
 

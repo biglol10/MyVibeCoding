@@ -163,6 +163,35 @@ public enum EditorLayer: Codable, Equatable, Identifiable, Sendable {
         return nil
     }
 
+    public var isResizable: Bool {
+        switch self {
+        case .rectangle, .ellipse, .text, .redaction: return true
+        default: return false
+        }
+    }
+
+    public var strokeColor: LayerColor? {
+        switch self {
+        case .freehand(let layer), .highlighter(let layer): return layer.style.strokeColor
+        case .arrow(let layer): return layer.style.strokeColor
+        case .rectangle(let layer), .ellipse(let layer): return layer.style.strokeColor
+        case .text(let layer): return layer.style.strokeColor
+        case .redaction: return nil
+        }
+    }
+
+    public mutating func setStrokeColor(_ color: LayerColor) {
+        switch self {
+        case .freehand(var layer): layer.style.strokeColor = color; self = .freehand(layer)
+        case .highlighter(var layer): layer.style.strokeColor = color; self = .highlighter(layer)
+        case .arrow(var layer): layer.style.strokeColor = color; self = .arrow(layer)
+        case .rectangle(var layer): layer.style.strokeColor = color; self = .rectangle(layer)
+        case .ellipse(var layer): layer.style.strokeColor = color; self = .ellipse(layer)
+        case .text(var layer): layer.style.strokeColor = color; self = .text(layer)
+        case .redaction: break
+        }
+    }
+
     public var textFontSize: CGFloat? {
         if case .text(let layer) = self {
             return layer.fontSize

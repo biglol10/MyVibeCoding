@@ -204,7 +204,7 @@ public enum CaptureStudioGuidePresentation {
                 "Record creates an MP4 from the Rectangle, Window, or Full Screen target selected in Options.",
                 "Countdown controls the wait before recording starts; duration controls how long it records.",
                 "After recording, the preview area plays the saved video.",
-                "Use Trim Copy or GIF export when you only need the useful part of a recording."
+                "Trim Copy saves a separate file and keeps the original open, including unsaved recordings. Export GIF creates an animated copy."
             ]
         ),
         Section(
@@ -213,7 +213,7 @@ public enum CaptureStudioGuidePresentation {
             systemImage: "slider.horizontal.3",
             items: [
                 "Options is for quick timing changes without opening the full settings window.",
-                "Presets apply capture mode, area, timing, clipboard, and save behavior without changing folders or recording quality.",
+                "Presets apply capture mode, area, timing, clipboard, and save behavior including recording quality; output folders stay unchanged.",
                 "The status text shows where files will save and which timing values are active."
             ]
         ),
@@ -226,7 +226,7 @@ public enum CaptureStudioGuidePresentation {
                 "Copy exports the edited image to clipboard; Save writes the edited result to disk.",
                 "Quick Redact finds OCR matches and adds redactions for them automatically.",
                 "Quick Redact does not alter the original file or clipboard until you explicitly Save or Copy the redacted version.",
-                "Delete removes the current result from the app and moves saved files to Trash."
+                "Delete selected annotation removes only that annotation. Delete entire capture moves saved files to Trash."
             ]
         ),
         Section(

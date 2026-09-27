@@ -5,6 +5,43 @@ import XCTest
 
 @MainActor
 final class FileTableViewReuseTests: XCTestCase {
+    func testModelReloadAndRestoredSelectionDoNotPublishUserSelectionOrActivatePane() {
+        let entry = makeTableEntry(name: "match.txt")
+        var selections: [Set<URL>] = []
+        var focusCount = 0
+        let harness = makeTableHarness(
+            entries: [entry], selectedRowIndexes: [0], canPaste: false, canUndo: false,
+            onFocus: { focusCount += 1 }, onSelectionChange: { selections.append($0) }, onCommand: { _ in }
+        )
+        selections = []; focusCount = 0
+        harness.coordinator.reloadDataIfNeeded()
+        harness.coordinator.parent.entries = []
+        harness.coordinator.reloadDataIfNeeded()
+        harness.coordinator.applySelection([entry.url])
+        harness.coordinator.parent.entries = [entry]
+        harness.coordinator.reloadDataIfNeeded()
+        harness.coordinator.applySelection([entry.url])
+        XCTAssertEqual(harness.tableView.selectedRowIndexes, [0])
+        XCTAssertTrue(selections.isEmpty)
+        XCTAssertEqual(focusCount, 0)
+        // A real user selection must still reach the model.
+        harness.tableView.deselectAll(nil)
+        XCTAssertEqual(selections.last, [])
+        XCTAssertGreaterThan(focusCount, 0)
+    }
+
+    func testCompactColumnsKeepSizeAndDateVisibleWithinNarrowPane() {
+        let harness = makeTableHarness(entries: [], selectedRowIndexes: [], canPaste: false, canUndo: false, onCommand: { _ in })
+        var table = harness.fileTable
+        table.usesCompactColumns = true
+        let columns = table.columnDefinitions
+        XCTAssertEqual(columns.map(\.key), ["name", "size", "modified"])
+        XCTAssertLessThanOrEqual(columns.reduce(0) { $0 + $1.width }, 420)
+        XCTAssertGreaterThanOrEqual(columns.first(where: { $0.key == "size" })!.width, 90)
+        table.showsPathColumn = true
+        XCTAssertEqual(table.columnDefinitions.last?.key, "path")
+    }
+
     func testStandardResponderActionsRouteClipboardCommandsThroughTable() {
         let entry = makeTableEntry(name: "report.txt")
         var commands: [ExplorerCommand] = []
@@ -1507,8 +1544,8 @@ final class FileTableViewReuseTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(dateColumn.minWidth, 140)
         XCTAssertGreaterThanOrEqual(kindColumn.width, 170)
         XCTAssertGreaterThanOrEqual(kindColumn.minWidth, 150)
-        XCTAssertLessThanOrEqual(regularColumns.reduce(0) { $0 + $1.minWidth }, 620)
-        XCTAssertLessThanOrEqual(regularColumns.reduce(0) { $0 + $1.width }, 740)
+        XCTAssertLessThanOrEqual(regularColumns.reduce(0) { $0 + $1.minWidth }, 650)
+        XCTAssertLessThanOrEqual(regularColumns.reduce(0) { $0 + $1.width }, 780)
     }
 
     func testTableColumnsApplyReadableMinimumWidths() throws {

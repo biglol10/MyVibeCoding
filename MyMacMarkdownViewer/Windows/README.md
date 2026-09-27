@@ -1,6 +1,6 @@
 # MyMarkdownViewer Windows
 
-Windows 11 Intel·AMD x64용 개인 사용 버전입니다. [최신 0.3.7 포터블 ZIP 다운로드](https://github.com/biglol10/MyVibeCoding/releases/download/mymarkdownviewer-2026-09-14/MyMarkdownViewer-0.3.7-Windows-x64.zip) 후 전체 압축을 풀고 `MyMarkdownViewer.exe`를 실행합니다. 런타임과 편집기 리소스가 포함되므로 별도 Node.js나 WebView 설치가 필요 없습니다. EXE만 분리하지 마세요.
+Windows 11 Intel·AMD x64용 개인 사용 버전입니다. [최신 0.3.8 포터블 ZIP 다운로드](https://github.com/biglol10/MyVibeCoding/releases/download/apps-2026-09-27/MyMarkdownViewer-0.3.8-Windows-x64.zip) 전체를 압축 해제하고 `MyMarkdownViewer.exe`를 실행합니다. 런타임과 편집기 리소스가 포함되므로 별도 Node.js나 WebView 설치가 필요 없습니다. EXE만 분리하지 마세요.
 
 ## 구현 범위
 
@@ -65,4 +65,4 @@ Electron renderer의 Node 실행은 꺼져 있으며 sandbox와 contextIsolation
 
 ## 0.3.7 현재 문서 찾기
 
-파일 탭 상단의 과녁 모양 **현재 문서 찾기** 버튼으로 상위 폴더를 펼치고 현재 문서를 선택해 목록에 표시합니다. 본문 위치·선택 범위·미저장 내용을 유지하며 예약된 자동 저장을 방해하지 않습니다.
+파일 탭 상단의 과녁 모양 **현재 문서 찾기** 버튼으로 상위 폴더를 펼치고 현재 문서를 선택해 목록에 표시합니다. 본문 위치·선택 범위·미저장 내용을 유지하며 예약된 자동 저장을 방해하지 않습니다. [최신 배포 검증](../../docs/releases/2026-09-27-app-update.md)를 확인하세요.

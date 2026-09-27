@@ -144,13 +144,8 @@ public struct AppKitImageRenderService: ImageRenderServicing {
 
     private func drawText(_ text: TextLayer, canvasHeight: CGFloat) {
         let frame = appKitRect(text.frame, canvasHeight: canvasHeight)
-        text.style.fillColor.nsColor.setFill()
-        frame.fill()
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: text.fontSize),
-            .foregroundColor: text.style.strokeColor.nsColor
-        ]
-        text.text.draw(in: frame.insetBy(dx: 6, dy: 4), withAttributes: attributes)
+        guard let image = TextLayerRasterizer.image(for: text) else { return }
+        NSGraphicsContext.current?.cgContext.draw(image, in: frame)
     }
 
     private func drawRedaction(_ redaction: RedactionLayer, baseImage: CGImage, canvasHeight: CGFloat) {
@@ -202,6 +197,37 @@ public struct AppKitImageRenderService: ImageRenderServicing {
             width: frame.width,
             height: frame.height
         ).standardized
+    }
+}
+
+/// Use the same glyph layout and image-space padding in preview and exported PNGs.
+enum TextLayerRasterizer {
+    static func image(for text: TextLayer) -> CGImage? {
+        guard text.frame.width.isFinite, text.frame.height.isFinite,
+              text.frame.width > 0, text.frame.height > 0,
+              text.frame.width <= 16_384, text.frame.height <= 16_384,
+              text.fontSize.isFinite, text.fontSize > 0,
+              let bitmap = NSBitmapImageRep(
+                bitmapDataPlanes: nil,
+                pixelsWide: Int(ceil(text.frame.width)), pixelsHigh: Int(ceil(text.frame.height)),
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+                isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+              ), let context = NSGraphicsContext(bitmapImageRep: bitmap)
+        else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current = context
+        let frame = CGRect(x: 0, y: 0, width: bitmap.pixelsWide, height: bitmap.pixelsHigh)
+        context.cgContext.clear(frame)
+        text.style.fillColor.nsColor.setFill()
+        frame.fill()
+        if frame.width > 12, frame.height > 8 {
+            text.text.draw(in: frame.insetBy(dx: 6, dy: 4), withAttributes: [
+                .font: NSFont.systemFont(ofSize: text.fontSize),
+                .foregroundColor: text.style.strokeColor.nsColor
+            ])
+        }
+        return bitmap.cgImage
     }
 }
 

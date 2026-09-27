@@ -93,7 +93,7 @@ final class CaptureCoordinatorPersonalWorkflowTests: XCTestCase {
     }
 
     @MainActor
-    func testTrimmingCurrentRecordingUsesExporterAndUpdatesCurrentDocument() async throws {
+    func testTrimmingCreatesHistoryCopyAndKeepsOriginalOpen() async throws {
         let sourceURL = temporaryFile(name: "source.mp4", data: Data([0x00, 0x00, 0x00, 0x18]))
         let appState = AppState(
             currentDocument: EditorDocument(
@@ -105,11 +105,13 @@ final class CaptureCoordinatorPersonalWorkflowTests: XCTestCase {
         )
         let exporter = MockRecordingExportService()
         let settingsStore = makeSettingsStore("trim")
+        let history = CaptureHistoryStore(defaults: isolatedDefaults("trimHistory"))
         let coordinator = CaptureCoordinator(
             appState: appState,
             settingsStore: settingsStore,
             screenshotService: MockPersonalScreenshotService(),
             selectionService: MockPersonalSelectionService(),
+            historyStore: history,
             recordingExportService: exporter
         )
 
@@ -119,17 +121,20 @@ final class CaptureCoordinatorPersonalWorkflowTests: XCTestCase {
         XCTAssertEqual(request.sourceURL, sourceURL)
         XCTAssertEqual(request.startSeconds, 1)
         XCTAssertEqual(request.endSeconds, 3)
-        let finalURL = try XCTUnwrap(appState.currentDocument?.fileURL)
+        XCTAssertEqual(appState.currentDocument?.fileURL, sourceURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sourceURL.path))
+        let finalURL = try XCTUnwrap(history.items.first?.fileURL)
+        XCTAssertNotEqual(finalURL, sourceURL)
         XCTAssertNotEqual(finalURL, request.outputURL)
         XCTAssertEqual(finalURL.deletingLastPathComponent().path, settingsStore.settings.recordingFolderPath)
         XCTAssertTrue(FileManager.default.fileExists(atPath: finalURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: request.outputURL.path))
         XCTAssertEqual(appState.currentDocument?.isDirty, false)
-        XCTAssertEqual(appState.statusMessage, "Recording trimmed.")
+        XCTAssertEqual(appState.statusMessage, "Trimmed copy saved. Original recording kept open.")
     }
 
     @MainActor
-    func testTrimmingUnsavedTemporaryRecordingRemovesOwnedSource() async throws {
+    func testTrimmingUnsavedTemporaryRecordingPreservesOwnedSource() async throws {
         let pendingDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("CaptureCoordinatorPersonalWorkflowTests-pending-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: pendingDirectory) }
@@ -156,9 +161,11 @@ final class CaptureCoordinatorPersonalWorkflowTests: XCTestCase {
 
         await coordinator.trimCurrentRecording(startSeconds: 0, endSeconds: 1)
 
-        XCTAssertFalse(FileManager.default.fileExists(atPath: sourceURL.path))
-        XCTAssertEqual(appState.currentDocument?.isDirty, false)
-        XCTAssertEqual(appState.statusMessage, "Recording trimmed.")
+        XCTAssertEqual(try Data(contentsOf: sourceURL), Data("original".utf8))
+        XCTAssertEqual(appState.currentDocument?.fileURL, sourceURL)
+        XCTAssertEqual(appState.currentDocument?.isDirty, true)
+        XCTAssertEqual(try pendingRecordingStore.recoverableRecordings().map(\.fileURL), [sourceURL])
+        XCTAssertEqual(appState.statusMessage, "Trimmed copy saved. Original recording kept open.")
     }
 
     @MainActor

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { blocksFor, outlineFor, rebaseMarkdown } from '../src/markdown';
-import { frontMatterFor, nextFootnoteLabel, tableOfContentsMarkdown } from '../src/semantic';
+import { frontMatterFor, headingIDs, headingTargets, nextFootnoteLabel, tableOfContentsMarkdown } from '../src/semantic';
 import { parseTable, serializeTable, withTableAlignment, withTableColumn, withTableRow } from '../src/table';
 
 describe('source-preserving Markdown parsing', () => {
@@ -43,6 +43,14 @@ it('uses absolute file URLs across Windows drives and UNC shares', () => {
 });
 
 describe('document semantics', () => {
+  it('uses one unique heading ID rule for punctuation, repeated titles and numbered titles', () => {
+    expect(headingIDs(['제목: 설치?', '반복', '반복', '반복-2', '반복'])).toEqual(['제목-설치', '반복', '반복-2', '반복-2-2', '반복-3']);
+    const source = '---\ntitle: 정보\n---\n\n# 제목: 설치?\n\n## 반복\n\n첫째\n\n## 반복\n\n둘째\n';
+    const targets = headingTargets(source);
+    expect(targets.map(heading => heading.id)).toEqual(['제목-설치', '반복', '반복-2']);
+    expect(targets[2].from).toBe(source.lastIndexOf('## 반복'));
+    for (const heading of targets) expect(tableOfContentsMarkdown(source)).toContain(`(#${heading.id})`);
+  });
   it('recognizes only an opening front matter fence and makes a safe unique TOC', () => {
     const source = '---\ntitle: [안전]\n---\n\n# 같은 제목\n\n# 같은 제목\n';
     expect(frontMatterFor(source)?.entries).toEqual([{ key: 'title', value: '[안전]' }]);

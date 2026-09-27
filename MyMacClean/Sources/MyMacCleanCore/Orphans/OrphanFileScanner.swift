@@ -67,6 +67,14 @@ public struct OrphanFileScanner: Sendable {
                 guard let identifier = bundleIdentifierCandidate(from: url.lastPathComponent) else { continue }
                 guard !isIgnoredSystemIdentifier(identifier) else { continue }
                 guard !isRelatedToInstalledApp(identifier, installedIdentifiers: installedIdentifiers) else { continue }
+                if kind == .launchAgent {
+                    do {
+                        guard try hasConfirmedMissingLaunchTarget(url) else { continue }
+                    } catch {
+                        issues.append(ScanIssue.from(path: url, error: error))
+                        continue
+                    }
+                }
 
                 let evidence = MatchEvidence(
                     type: .bundleIdentifier,
@@ -117,6 +125,18 @@ public struct OrphanFileScanner: Sendable {
                 $0.inferredIdentifier.localizedCaseInsensitiveCompare($1.inferredIdentifier) == .orderedAscending
             }
         return ScanResult(value: groups, issues: issues.deduplicatedAndSorted())
+    }
+
+    private func hasConfirmedMissingLaunchTarget(_ url: URL) throws -> Bool {
+        let data = try Data(contentsOf: url)
+        guard let plist = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let target = (plist["Program"] as? String) ?? (plist["ProgramArguments"] as? [String])?.first
+        // Existing interpreters and unresolved relative commands are not evidence of an orphan.
+        guard let target, target.hasPrefix("/") else { return false }
+        if case .missing = FilePresence.inspect(URL(fileURLWithPath: target)) { return true }
+        return false
     }
 
     private func scanRoots() -> [(URL, RelatedFileKind)] {

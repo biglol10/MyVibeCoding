@@ -175,7 +175,7 @@ private final class DefaultOpenWorkspaceOpener: WorkspaceApplicationOpening {
         _ urls: [URL],
         withApplicationAt applicationURL: URL,
         configuration: NSWorkspace.OpenConfiguration,
-        completionHandler: ((NSRunningApplication?, (any Error)?) -> Void)?
+        completionHandler: (@Sendable (NSRunningApplication?, (any Error)?) -> Void)?
     ) {}
 
     func urlForApplication(withBundleIdentifier bundleIdentifier: String) -> URL? {
@@ -209,7 +209,7 @@ private final class DuplicateCompletionWorkspaceOpener: WorkspaceApplicationOpen
         _ urls: [URL],
         withApplicationAt applicationURL: URL,
         configuration: NSWorkspace.OpenConfiguration,
-        completionHandler: ((NSRunningApplication?, (any Error)?) -> Void)?
+        completionHandler: (@Sendable (NSRunningApplication?, (any Error)?) -> Void)?
     ) {
         openCalls.append(OpenCall(urls: urls.map(\.standardizedFileURL), applicationURL: applicationURL.standardizedFileURL))
         completionHandler?(nil, nil)
@@ -242,7 +242,7 @@ private final class CompletionErrorWorkspaceOpener: WorkspaceApplicationOpening 
         _ urls: [URL],
         withApplicationAt applicationURL: URL,
         configuration: NSWorkspace.OpenConfiguration,
-        completionHandler: ((NSRunningApplication?, (any Error)?) -> Void)?
+        completionHandler: (@Sendable (NSRunningApplication?, (any Error)?) -> Void)?
     ) {
         openCalls.append(OpenCall(urls: urls.map(\.standardizedFileURL), applicationURL: applicationURL.standardizedFileURL))
         completionHandler?(nil, NSError(domain: "terminal-open", code: 1))
