@@ -17,6 +17,8 @@
 
 MyMacMarkdownViewer 최신 설치본은 Mac 0.3.7, Windows 0.3.8, Android 1.2.3입니다. 2026-09-27에는 캡처·캘린더·정리·파일 관리·시스템 모니터·Markdown 편집기의 사용성 수정과 FlowPilot 실행 구성을 반영하고 해당 설치 파일을 갱신했습니다. MyMacSearch는 새 변경이 없어 기존 설치본을 유지합니다. [앱별 변경 및 검증 기록](docs/releases/2026-09-27-app-update.md)을 확인하세요.
 
+MyMacFinder는 2026-09-28 빈 폴더 우클릭 메뉴와 필터 초기화 위치 수정을 반영해 설치 ZIP을 갱신했습니다. [최신 변경 및 검증](docs/releases/2026-09-28-mymacfinder-update.md)을 확인하세요.
+
 ## 클론
 
 ```bash

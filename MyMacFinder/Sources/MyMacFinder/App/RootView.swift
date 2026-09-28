@@ -169,19 +169,23 @@ struct RootView: View {
                                     if isFiltered {
                                         Text("Try another search or clear the filters.")
                                             .font(.callout)
-                                        Button("Clear All Filters") {
-                                            explorerStore.clearAllSearchCriteria()
-                                        }
                                     }
                                 }
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .allowsHitTesting(false)
                             }
                         }
                 }
                 Divider()
                 HStack {
                     Text("\(entries.count) \(countLabel)")
+                    if isFiltered && entries.isEmpty && !pane.isLoading && !isSearching {
+                        Button("Clear All Filters") {
+                            explorerStore.clearAllSearchCriteria()
+                        }
+                        .buttonStyle(.link)
+                    }
                     Spacer()
                     if !pane.selectedURLs.isEmpty {
                         Text("\(pane.selectedURLs.count) selected")

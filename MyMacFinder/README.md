@@ -2,9 +2,9 @@
 
 ## 다운로드
 
-[최신 개인용 macOS 설치 파일](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacFinder/MyMacFinder-personal-mac.zip) · [전체 앱 배포 안내](../docs/releases/2026-09-27-app-update.md)
+[최신 개인용 macOS 설치 파일](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacFinder/MyMacFinder-personal-mac.zip) · [최신 변경 및 검증](../docs/releases/2026-09-28-mymacfinder-update.md)
 
-2026-09-27 변경을 반영한 개인 사용용 빌드입니다. Apple 공증을 받은 배포본은 아닙니다.
+2026-09-28 빈 폴더 우클릭 수정을 반영한 개인 사용용 빌드입니다. Apple 공증을 받은 배포본은 아닙니다.
 
 MyMacFinder는 macOS Finder를 Windows 파일 탐색기와 ForkLift에 가까운 사용감으로 보완하기 위한 로컬 우선 파일 관리자 앱입니다. SwiftUI와 AppKit을 함께 사용해서 Finder의 기본 파일 작업을 유지하면서 single/dual pane, inspector, 탭, 고급 검색, 압축 파일 탐색, Finder tags, 컨텍스트 메뉴, 단축키를 제공합니다.
 
@@ -43,7 +43,7 @@ MyMacFinder는 macOS Finder를 Windows 파일 탐색기와 ForkLift에 가까운
 - 상위 폴더 이동은 root(`/`)에서 비활성화되고 path input을 canonical path로 유지
 - 좁은 목록은 Name, Size, Date Modified 열을 우선 표시하고, 넓은 목록은 Kind와 Tags도 표시
 - Dual pane마다 폴더 경로와 활성 표시를 제공하고, 툴바에서 Inspector를 바로 접거나 펼칠 수 있음
-- 빈 폴더, 검색 결과 없음, 로딩 상태를 구분하고, 검색 조건 요약과 Clear All Filters 제공
+- 빈 폴더, 검색 결과 없음, 로딩 상태를 구분하고, 검색 조건 요약과 Clear All Filters 제공. 빈 상태 안내 위에서도 우클릭 메뉴로 새 폴더 생성 가능
 - 시스템 클립보드가 바뀌면 이전 잘라내기 상태를 폐기하여 현재 복사한 항목만 붙여넣음
 - 하위 폴더 검색 결과에서 이름을 바꾸고 탭을 오가도 결과와 선택을 유지
 - 여러 파일 복제 중 실패·취소 시 앞선 복제본도 함께 되돌리고, 파일 복사 중 취소 요청을 처리
