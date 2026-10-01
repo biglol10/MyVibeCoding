@@ -489,6 +489,9 @@ struct FileTableView: NSViewRepresentable {
                 isApplyingModelState = true
                 defer { isApplyingModelState = false }
                 tableView.selectRowIndexes(indexes, byExtendingSelection: false)
+                if let first = indexes.first {
+                    tableView.scrollRowToVisible(first)
+                }
             }
         }
 

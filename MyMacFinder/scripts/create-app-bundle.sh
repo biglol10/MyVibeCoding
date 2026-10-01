@@ -83,10 +83,33 @@ cat > "$contents_dir/Info.plist" <<'PLIST'
   <string>1</string>
   <key>LSMinimumSystemVersion</key>
   <string>15.0</string>
-  <key>MyMacFinderSupportsExternalFolderOpen</key>
-  <true/>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>MyMacFinderSupportsExternalFolderOpen</key>
+  <true/>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key><string>com.biglol.MyMacFinder.open</string>
+      <key>CFBundleURLSchemes</key><array><string>mymacfinder</string></array>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+    </dict>
+  </array>
+  <key>NSServices</key>
+  <array>
+    <dict>
+      <key>NSMenuItem</key><dict><key>default</key><string>Open in MyMacFinder</string></dict>
+      <key>NSMessage</key><string>openInMyMacFinder</string>
+      <key>NSPortName</key><string>MyMacFinder</string>
+      <key>NSSendTypes</key>
+      <array>
+        <string>public.file-url</string>
+        <string>NSFilenamesPboardType</string>
+        <string>NSStringPboardType</string>
+      </array>
+      <key>NSRequiredContext</key><dict/>
+    </dict>
+  </array>
 </dict>
 </plist>
 PLIST

@@ -18,7 +18,7 @@ struct RootView: View {
                     focusClearSequence: toolbarFocusClearSequence
                 )
                 TabBarView()
-                if let progress = explorerStore.activeOperationProgress {
+                if let progress = explorerStore.visibleOperationProgress {
                     OperationProgressBanner(
                         snapshot: progress,
                         onCancel: {

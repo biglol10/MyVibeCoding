@@ -3,10 +3,9 @@ import SwiftUI
 
 @main
 struct MyMacFinderApp: App {
+    @NSApplicationDelegateAdaptor(ExternalOpenAppDelegate.self) private var appDelegate
+    @Environment(\.openWindow) private var openWindow
     @StateObject private var explorerStore: ExplorerStore
-    @State private var didFinishInitialLoad = false
-    @State private var pendingExternalFolderURL: URL?
-    private let externalFolderOpenRouter = ExternalFolderOpenRouter()
 
     init() {
         _explorerStore = StateObject(
@@ -20,24 +19,22 @@ struct MyMacFinderApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: "explorer") {
             RootView()
                 .environmentObject(explorerStore)
-                .task {
-                    await explorerStore.cleanupExpiredArchiveArtifacts()
-                    await explorerStore.loadInitialDirectory()
-                    didFinishInitialLoad = true
-                    if let pendingExternalFolderURL {
-                        self.pendingExternalFolderURL = nil
-                        openExternalFolder(pendingExternalFolderURL)
-                    }
-                }
                 .onOpenURL { url in
-                    if didFinishInitialLoad {
-                        openExternalFolder(url)
-                    } else {
-                        pendingExternalFolderURL = url
+                    appDelegate.receiver.enqueue([url])
+                }
+                .task {
+                    appDelegate.receiver.showWindow = {
+                        if let window = NSApp.windows.first(where: { $0.canBecomeMain && $0.isVisible }) {
+                            window.makeKeyAndOrderFront(nil)
+                        } else {
+                            openWindow(id: "explorer")
+                        }
+                        NSApp.activate(ignoringOtherApps: true)
                     }
+                    await appDelegate.receiver.start(store: explorerStore)
                 }
         }
         .commands {
@@ -425,21 +422,5 @@ struct MyMacFinderApp: App {
 
     private func openPrivacySettings() {
         NSWorkspace.shared.open(PermissionGuidance.privacySettingsURL)
-    }
-
-    private func openExternalFolder(_ url: URL) {
-        Task { @MainActor in
-            do {
-                let folderURL = try externalFolderOpenRouter.validate(url)
-                await explorerStore.navigate(to: folderURL)
-            } catch {
-                let alert = NSAlert()
-                alert.alertStyle = .warning
-                alert.messageText = "Could Not Open Folder"
-                alert.informativeText = error.localizedDescription
-                alert.addButton(withTitle: "OK")
-                alert.runModal()
-            }
-        }
     }
 }

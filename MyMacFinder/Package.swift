@@ -10,7 +10,7 @@ let package = Package(
         .executable(name: "MyMacFinder", targets: ["MyMacFinder"])
     ],
     dependencies: [
-        .package(url: "https://github.com/weichsel/ZIPFoundation.git", .upToNextMajor(from: "0.9.20"))
+        .package(path: "Vendor/ZIPFoundation")
     ],
     targets: [
         .executableTarget(

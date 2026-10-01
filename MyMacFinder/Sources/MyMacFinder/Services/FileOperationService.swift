@@ -34,7 +34,10 @@ public struct FileOperationService: @unchecked Sendable {
 
     @discardableResult
     public func createFolder(in parent: URL) async throws -> FileOperationResult {
-        let folderURL = uniqueURL(in: parent, baseName: "Untitled Folder", extension: nil)
+        let folderURL = URL(
+            fileURLWithPath: uniqueURL(in: parent, baseName: "Untitled Folder", extension: nil).path,
+            isDirectory: true
+        )
         let stagingURL = uniqueCreateFolderStagingURL(in: parent)
         var stagingIdentity: FileSystemPathIdentity.FileSystemEntryIdentity?
         do {

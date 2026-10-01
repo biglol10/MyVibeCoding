@@ -2,9 +2,9 @@
 
 ## 다운로드
 
-[최신 개인용 macOS 설치 파일](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacFinder/MyMacFinder-personal-mac.zip) · [최신 변경 및 검증](../docs/releases/2026-09-28-mymacfinder-update.md)
+[최신 개인용 macOS 설치 ZIP](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacFinder/MyMacFinder-personal-mac.zip) · [VS Code 확장 0.1.1](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacFinder/mymacfinder-open-0.1.1.vsix) · [최신 변경 및 검증](../docs/releases/2026-10-01-mymacfinder-update.md)
 
-2026-09-28 빈 폴더 우클릭 수정을 반영한 개인 사용용 빌드입니다. Apple 공증을 받은 배포본은 아닙니다.
+2026-10-01 새 폴더 생성·이름 변경, 짧은 작업의 진행 표시, ZIP 시간 및 외부 앱에서 열기 변경을 반영한 개인 사용용 빌드입니다. Apple 공증을 받은 배포본은 아닙니다.
 
 MyMacFinder는 macOS Finder를 Windows 파일 탐색기와 ForkLift에 가까운 사용감으로 보완하기 위한 로컬 우선 파일 관리자 앱입니다. SwiftUI와 AppKit을 함께 사용해서 Finder의 기본 파일 작업을 유지하면서 single/dual pane, inspector, 탭, 고급 검색, 압축 파일 탐색, Finder tags, 컨텍스트 메뉴, 단축키를 제공합니다.
 
@@ -96,7 +96,7 @@ MyMacFinder는 macOS Finder를 Windows 파일 탐색기와 ForkLift에 가까운
 - 같은 폴더에 같은 이름으로 copy할 때 원본을 replace하지 않고 `copy` 이름으로 분기
 - case-insensitive volume의 case-only rename과 Undo를 filesystem identity로 검증하며, 실패 cleanup이 원본을 partial destination으로 오인해 삭제하지 않음
 - 새 폴더, rename, move, duplicate/copy 결과는 작업이 실제로 소유한 filesystem identity만 Undo ownership으로 기록하고, 공개 경로가 작업 직후 교체되면 해당 교체 항목을 소유물로 오인하지 않음
-- 충돌 처리, replace 실패 rollback, Undo, 대용량 작업 progress banner
+- 충돌 처리, replace 실패 rollback, Undo, 대용량 작업 progress banner. 작업이 0.5초 이상 진행될 때만 banner를 표시하며 실패는 즉시 알림
 - 일반 파일 복사는 byte manifest 기반 진행률을 표시하고, 단일 대용량 파일도 스트리밍 복사 중 중간 진행률/취소를 처리하며 Finder tag/xattr/ACL/resource fork 계열 metadata를 보존
 - copy와 ZIP extraction은 UUID staging에서 완성한 전체 tree snapshot을 확인한 뒤 공개하며, rollback은 공개 경로를 고유한 `0700` quarantine으로 먼저 이동한 다음 identity와 전체 tree를 재검증해서 외부 교체 파일을 삭제하지 않음
 - 휴지통 이동 중 일부 항목 처리 후 후속 항목이 실패하면 이미 이동한 항목을 원래 위치로 복구
@@ -183,6 +183,12 @@ System Settings > Privacy & Security > Full Disk Access
 에서 MyMacFinder 권한을 확인하세요.
 
 샌드박스 빌드에서는 Settings > Privacy & Access에서 폴더를 직접 선택해 security-scoped folder grant를 저장할 수 있습니다. 개인 개발 빌드는 보통 unrestricted 상태로 동작하지만, macOS TCC가 보호하는 위치는 시스템 설정 권한이 필요할 수 있습니다.
+
+## 외부 앱에서 열기
+
+`integrations/vscode`의 확장은 VS Code 파일·폴더 우클릭 메뉴에 **Open in MyMacFinder**를 추가합니다. 위 VSIX를 내려받아 `code --install-extension mymacfinder-open-0.1.1.vsix --force`로 설치할 수 있습니다. 로컬 파일은 상위 폴더에서 선택하고 폴더는 해당 위치로 이동합니다. [확장 사용 안내](integrations/vscode/README.md)를 참고하세요.
+
+앱은 `mymacfinder://open?path=<percent-encoded absolute path>` 링크와 macOS 서비스 **Open in MyMacFinder**도 지원합니다. 서비스를 제공하는 앱의 선택 파일 또는 절대 경로 텍스트에서 사용할 수 있지만, 모든 앱의 자체 우클릭 메뉴에 자동 삽입되는 것은 아닙니다. [이번 배포의 검증 범위](../docs/releases/2026-10-01-mymacfinder-update.md)를 확인하세요.
 
 ## 테스트
 

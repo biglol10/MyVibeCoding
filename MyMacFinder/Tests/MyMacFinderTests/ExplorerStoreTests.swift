@@ -704,10 +704,12 @@ final class ExplorerStoreTests: XCTestCase {
         await store.perform(.paste)
 
         XCTAssertEqual(store.activeOperationProgress?.phase, .failed)
+        XCTAssertEqual(store.visibleOperationProgress?.phase, .failed)
 
         try await Task.sleep(nanoseconds: 120_000_000)
 
         XCTAssertEqual(store.activeOperationProgress?.phase, .failed)
+        XCTAssertEqual(store.visibleOperationProgress?.phase, .failed)
     }
 }
 

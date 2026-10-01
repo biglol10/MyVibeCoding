@@ -8,7 +8,7 @@
 | --- | --- | --- | --- |
 | MyCaptureProgram | 사각형/윈도우/전체 화면 캡처와 녹화, 편집, OCR, 빠른 가리기, 히스토리/프리셋, 안전한 종료 확인, 완료된 미저장 녹화 복구를 제공하는 macOS 앱 | [MyCaptureProgram](./MyCaptureProgram) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyCaptureProgram/CaptureStudio-personal-mac.zip) |
 | MyMacClean | 앱 삭제/데이터 초기화, 고아 파일, 대용량 파일, 개발 캐시, 시작 항목을 권한 안내, 경로 확인, Trash 이동 로그까지 검토 후 정리하는 SwiftUI 유틸리티 | [MyMacClean](./MyMacClean) | [개인 설치 DMG](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacClean/MyMacClean-dev.dmg) |
-| MyMacFinder | 듀얼 패널, 경로/빈 영역 Terminal 명령, Smart/ZIP 프리뷰 lifecycle, 이전 세션/저장 데이터 복구, 안전한 파일 작업/Undo를 갖춘 SwiftUI/AppKit 로컬 파일 관리자 | [MyMacFinder](./MyMacFinder) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacFinder/MyMacFinder-personal-mac.zip) |
+| MyMacFinder | 듀얼 패널, 안전한 파일 작업/Undo, ZIP 탐색, VS Code·macOS 서비스에서 파일 열기를 갖춘 SwiftUI/AppKit 로컬 파일 관리자 | [MyMacFinder](./MyMacFinder) | [Mac 설치 ZIP](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacFinder/MyMacFinder-personal-mac.zip), [VS Code 확장](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacFinder/mymacfinder-open-0.1.1.vsix) |
 | MyMacSearch | 자체 SQLite FTS5 인덱스와 FSEvents 변경 감지로 파일명·경로·메타데이터를 빠르게 찾는 읽기 전용 SwiftUI 검색 도구 | [MyMacSearch](./MyMacSearch) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacSearch/MyMacSearch-personal-mac.zip) |
 | MyMacStats | CPU, RAM, Disk I/O, Network, Battery, Processes 상태, refresh 설정 저장, RAM 알림을 보여주는 SwiftUI 시스템 모니터 | [MyMacStats](./MyMacStats) | [MyMacStats-test-build.zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacStats/MyMacStats-test-build.zip) |
 | MyMacCalendar | 로컬 우선 일정 관리, 반복 일정, 검색, 알림, 빠른 추가 확인, 자동 휴일 가져오기, 메뉴바/플로팅 위젯 복구를 제공하는 SwiftUI 캘린더 | [MyMacCalendar](./MyMacCalendar) | [개인 설치 zip](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacCalendar/MyMacCalendar-personal-mac.zip) |
@@ -18,6 +18,8 @@
 MyMacMarkdownViewer 최신 설치본은 Mac 0.3.7, Windows 0.3.8, Android 1.2.3입니다. 2026-09-27에는 캡처·캘린더·정리·파일 관리·시스템 모니터·Markdown 편집기의 사용성 수정과 FlowPilot 실행 구성을 반영하고 해당 설치 파일을 갱신했습니다. MyMacSearch는 새 변경이 없어 기존 설치본을 유지합니다. [앱별 변경 및 검증 기록](docs/releases/2026-09-27-app-update.md)을 확인하세요.
 
 MyMacFinder는 2026-09-28 빈 폴더 우클릭 메뉴와 필터 초기화 위치 수정을 반영해 설치 ZIP을 갱신했습니다. [최신 변경 및 검증](docs/releases/2026-09-28-mymacfinder-update.md)을 확인하세요.
+
+MyMacFinder는 2026-10-01 새 폴더 선택·이름 변경, 진행 표시, ZIP 시간 및 외부 앱 연동을 갱신했습니다. [변경 및 검증](docs/releases/2026-10-01-mymacfinder-update.md)을 확인하세요.
 
 ## 클론
 

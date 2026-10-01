@@ -1,0 +1,31 @@
+{
+  "name": "mymacfinder-open",
+  "displayName": "Open in MyMacFinder",
+  "description": "Reveal local files and folders in MyMacFinder on macOS.",
+  "version": "0.1.1",
+  "publisher": "biglol-local",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "main": "./extension.js",
+  "extensionKind": ["ui"],
+  "capabilities": { "untrustedWorkspaces": { "supported": true }, "virtualWorkspaces": false },
+  "scripts": { "test": "node --test test/*.test.js" },
+  "contributes": {
+    "commands": [{ "command": "mymacfinder.open", "title": "Open in MyMacFinder", "enablement": "isMac && resourceScheme == file" }],
+    "menus": {
+      "explorer/context": [{ "command": "mymacfinder.open", "when": "isMac && resourceScheme == file", "group": "navigation@21" }],
+      "commandPalette": [{ "command": "mymacfinder.open", "when": "isMac && resourceScheme == file" }]
+    },
+    "configuration": {
+      "title": "MyMacFinder",
+      "properties": {
+        "mymacfinder.applicationPath": {
+          "type": "string",
+          "default": "/Applications/MyMacFinder.app",
+          "scope": "machine",
+          "description": "Absolute path to the installed MyMacFinder app bundle."
+        }
+      }
+    }
+  }
+}

@@ -128,6 +128,7 @@ public final class ExplorerStore: ObservableObject {
     @Published public private(set) var favoriteSidebarItems: [SidebarFavoriteItem]
     @Published public private(set) var recentFolders: [SidebarRecentFolder]
     @Published public private(set) var activeOperationProgress: FileOperationProgressSnapshot?
+    @Published private var isOperationProgressVisible: Bool
     @Published public private(set) var isToolbarTextInputFocused: Bool
     @Published public private(set) var grantedFolderSummaries: [FolderAccessGrantSummary]
     @Published public private(set) var folderAccessPersistenceErrorMessage: String?
@@ -164,11 +165,14 @@ public final class ExplorerStore: ObservableObject {
     private let filePasteboardWriter: FilePasteboardWriter
     private let filePasteboardChangeCount: FilePasteboardChangeCount
     private var fileClipboardChangeCount: Int?
+    private var pasteAvailabilityCache: (changeCount: Int, canPaste: Bool)?
     private var folderSizeGeneration: UInt64 = 0
     private let watcherDebounceNanoseconds: UInt64
+    private let operationProgressRevealDelayNanoseconds: UInt64
     private let operationProgressAutoDismissNanoseconds: UInt64
     private let sessionPersistenceDebounceNanoseconds: UInt64
     private var watcherRefreshTask: Task<Void, Never>?
+    private var operationProgressRevealTask: Task<Void, Never>?
     private var operationProgressAutoDismissTask: Task<Void, Never>?
     private var sessionPersistenceTask: Task<Void, Never>?
     private var sessionPersistenceGeneration: UInt64
@@ -177,6 +181,8 @@ public final class ExplorerStore: ObservableObject {
     private var searchTask: Task<Void, Never>?
     private var searchGeneration: UInt64
     private var paneLoadGenerations: [PaneID: UInt64]
+    private var selectionOperationDepth: [PaneID: Int] = [:]
+    private var deferredWatcherPaneIDs: Set<PaneID> = []
     private var finderTagPopulationTask: Task<Void, Never>?
     private var finderTagPopulationToken: UUID
     private var activeOperationReporter: FileOperationProgressReporter?
@@ -224,6 +230,7 @@ public final class ExplorerStore: ObservableObject {
         },
         filePasteboardChangeCount: @escaping FilePasteboardChangeCount = { NSPasteboard.general.changeCount },
         watcherDebounceNanoseconds: UInt64 = 250_000_000,
+        operationProgressRevealDelayNanoseconds: UInt64 = 500_000_000,
         operationProgressAutoDismissNanoseconds: UInt64 = 1_000_000_000,
         sessionPersistenceDebounceNanoseconds: UInt64 = 350_000_000,
         pathResolver: PathResolver = PathResolver(
@@ -325,6 +332,7 @@ public final class ExplorerStore: ObservableObject {
         self.favoriteSidebarItems = Self.favoriteItems(from: sidebarState.favorites, missingURLs: [])
         self.recentFolders = sidebarState.recentFolders
         self.activeOperationProgress = nil
+        self.isOperationProgressVisible = false
         self.isToolbarTextInputFocused = false
         self.grantedFolderSummaries = []
         self.folderAccessPersistenceErrorMessage = nil
@@ -359,10 +367,13 @@ public final class ExplorerStore: ObservableObject {
         self.bookmarkStore = bookmarkStore
         self.folderAccessService = folderAccessService
         self.watcherDebounceNanoseconds = watcherDebounceNanoseconds
+        self.operationProgressRevealDelayNanoseconds = operationProgressRevealDelayNanoseconds
         self.operationProgressAutoDismissNanoseconds = operationProgressAutoDismissNanoseconds
         self.sessionPersistenceDebounceNanoseconds = sessionPersistenceDebounceNanoseconds
         self.fileClipboard = nil
+        self.pasteAvailabilityCache = nil
         self.watcherRefreshTask = nil
+        self.operationProgressRevealTask = nil
         self.operationProgressAutoDismissTask = nil
         self.sessionPersistenceTask = nil
         self.sessionPersistenceGeneration = 0
@@ -396,6 +407,11 @@ public final class ExplorerStore: ObservableObject {
 
     public var activePane: PaneState {
         panes[activePaneIndex]
+    }
+
+    /// Keep brief operations out of the layout while still tracking their progress internally.
+    public var visibleOperationProgress: FileOperationProgressSnapshot? {
+        isOperationProgressVisible ? activeOperationProgress : nil
     }
 
     public var activeTab: ExplorerTab {
@@ -567,7 +583,16 @@ public final class ExplorerStore: ObservableObject {
     }
 
     public var canPaste: Bool {
-        !pasteSourceClipboard().isEmpty
+        let changeCount = filePasteboardChangeCount()
+        if let cached = pasteAvailabilityCache, cached.changeCount == changeCount {
+            return cached.canPaste
+        }
+        // Menu validation runs for every progress update. Avoid repeatedly decoding large file lists.
+        let available = !pasteSourceClipboard().isEmpty
+        if filePasteboardChangeCount() == changeCount {
+            pasteAvailabilityCache = (changeCount, available)
+        }
+        return available
     }
 
     public var canUndo: Bool {
@@ -827,6 +852,43 @@ public final class ExplorerStore: ObservableObject {
 
     public func navigate(to targetURL: URL) async {
         await navigate(to: .fileSystem(targetURL.standardizedFileURL))
+    }
+
+    /// External reveal requests navigate folders, and select files without opening their contents.
+    public func openExternalURL(_ incomingURL: URL) async {
+        do {
+            let url = try ExternalOpenRequest.fileURL(from: incomingURL)
+            let status = await pathStatusChecker.status(for: url)
+            guard status.exists else { throw ExplorerError.pathDoesNotExist(url.path) }
+            guard status.isReadable else { throw ExplorerError.permissionDenied(url.path) }
+            let folder = status.isDirectory ? url : url.deletingLastPathComponent()
+            let paneID = activePane.id
+            requestToolbarFocusClear()
+            guard let commit = try await loadLocationCommit(.fileSystem(folder), pushHistory: true, paneID: paneID),
+                  let paneIndex = currentPaneIndex(for: commit.paneID, generation: commit.generation) else {
+                return
+            }
+            if paneIndex == activePaneIndex {
+                clearAllSearchCriteria()
+            }
+            if !status.isDirectory {
+                if url.lastPathComponent.hasPrefix("."), !showHiddenFiles {
+                    await setShowHiddenFiles(true)
+                }
+                // A newer user navigation must not acquire this request's selection.
+                guard let currentIndex = panes.firstIndex(where: { $0.id == paneID }),
+                      panes[currentIndex].location == .fileSystem(folder),
+                      panes[currentIndex].entries.contains(where: { $0.url == url }) else { return }
+                panes[currentIndex].selectedURLs = [url]
+            } else {
+                panes[paneIndex].selectedURLs = []
+            }
+            clearError()
+        } catch let error as ExplorerError {
+            present(error)
+        } catch {
+            present(.operationFailed(error.localizedDescription))
+        }
     }
 
     public func navigateFromSidebar(to targetURL: URL) async {
@@ -1295,6 +1357,8 @@ public final class ExplorerStore: ObservableObject {
             }
             let location = panes[paneIndex].location
 
+            beginSelectionOperation(in: paneID)
+            defer { endSelectionOperation(in: paneID) }
             let result = try await fileOperationService.rename(sourceURL, to: newName)
             if let renamedURL = result.renamedItem?.destination {
                 recordUndo(
@@ -1309,7 +1373,9 @@ public final class ExplorerStore: ObservableObject {
                 )
                 if let reloadCommit,
                    let currentPaneIndex = currentPaneIndex(for: reloadCommit) {
-                    panes[currentPaneIndex].selectedURLs = [renamedURL.standardizedFileURL]
+                    let loadedURL = loadedEntryURL(matching: renamedURL, inPaneAt: currentPaneIndex)
+                        ?? renamedURL.standardizedFileURL
+                    panes[currentPaneIndex].selectedURLs = [loadedURL]
                     if currentPaneIndex == activePaneIndex {
                         trimSelectionToVisibleEntries()
                     }
@@ -1379,6 +1445,8 @@ public final class ExplorerStore: ObservableObject {
                 guard let currentURL = target.location.fileSystemURL else {
                     throw ExplorerError.operationFailed("Cannot create folders inside ZIP archives.")
                 }
+                beginSelectionOperation(in: target.paneID)
+                defer { endSelectionOperation(in: target.paneID) }
                 let result = try await fileOperationService.createFolder(in: currentURL)
                 if !result.createdURLs.isEmpty {
                     recordUndo(.created(result.createdURLs), ownership: result.undoSourceIdentities)
@@ -1387,13 +1455,15 @@ public final class ExplorerStore: ObservableObject {
                 if let reloadCommit,
                    let createdURL = result.createdURLs.first,
                    let targetPaneIndex = currentPaneIndex(for: reloadCommit) {
-                    panes[targetPaneIndex].selectedURLs = [createdURL.standardizedFileURL]
+                    let loadedURL = loadedEntryURL(matching: createdURL, inPaneAt: targetPaneIndex)
+                        ?? createdURL.standardizedFileURL
+                    panes[targetPaneIndex].selectedURLs = [loadedURL]
                     if activePane.id == target.paneID {
                         requestToolbarFocusClear()
                     }
                     inlineRenameRequest = InlineRenameRequest(
                         paneID: target.paneID,
-                        url: createdURL
+                        url: loadedURL
                     )
                 }
             case .rename:
@@ -1423,10 +1493,12 @@ public final class ExplorerStore: ObservableObject {
                 filePasteboardWriter(selectedURLs)
                 fileClipboardChangeCount = filePasteboardChangeCount()
                 fileClipboard = FileClipboard(urls: selectedURLs, mode: .copy)
+                pasteAvailabilityCache = nil
             case .cut:
                 filePasteboardWriter(selectedURLs)
                 fileClipboardChangeCount = filePasteboardChangeCount()
                 fileClipboard = FileClipboard(urls: selectedURLs, mode: .move)
+                pasteAvailabilityCache = nil
             case .paste:
                 let clipboard = pasteSourceClipboard()
                 guard !clipboard.isEmpty else { return }
@@ -1594,6 +1666,9 @@ public final class ExplorerStore: ObservableObject {
             operationProgressAutoDismissTask?.cancel()
             operationProgressAutoDismissTask = nil
         }
+        operationProgressRevealTask?.cancel()
+        operationProgressRevealTask = nil
+        isOperationProgressVisible = false
         activeOperationProgress = nil
         activeOperationReporter = nil
     }
@@ -2358,6 +2433,7 @@ public final class ExplorerStore: ObservableObject {
             if fileClipboard == clipboard, fileClipboardChangeCount == originalChangeCount {
                 fileClipboard = nil
                 fileClipboardChangeCount = nil
+                pasteAvailabilityCache = nil
             }
             return (clipboard.mode, result)
         }
@@ -2775,7 +2851,13 @@ public final class ExplorerStore: ObservableObject {
         let snapshot = FileOperationProgressSnapshot(kind: kind, title: title)
         operationProgressAutoDismissTask?.cancel()
         operationProgressAutoDismissTask = nil
+        operationProgressRevealTask?.cancel()
+        operationProgressRevealTask = nil
+        isOperationProgressVisible = operationProgressRevealDelayNanoseconds == 0
         activeOperationProgress = snapshot
+        if !isOperationProgressVisible {
+            scheduleOperationProgressReveal(for: snapshot.id)
+        }
         let reporter = FileOperationProgressReporter(initialSnapshot: snapshot) { [weak self] snapshot in
             await MainActor.run {
                 self?.handleOperationProgressUpdate(snapshot)
@@ -2786,12 +2868,41 @@ public final class ExplorerStore: ObservableObject {
     }
 
     private func handleOperationProgressUpdate(_ snapshot: FileOperationProgressSnapshot) {
+        guard activeOperationProgress?.id == snapshot.id else {
+            return
+        }
         activeOperationProgress = snapshot
+        if snapshot.isTerminal {
+            operationProgressRevealTask?.cancel()
+            operationProgressRevealTask = nil
+            if snapshot.phase == .failed {
+                isOperationProgressVisible = true
+            }
+        }
         if snapshot.phase == .completed {
             scheduleOperationProgressAutoDismiss(for: snapshot.id)
         } else {
             operationProgressAutoDismissTask?.cancel()
             operationProgressAutoDismissTask = nil
+        }
+    }
+
+    private func scheduleOperationProgressReveal(for id: FileOperationID) {
+        let delay = operationProgressRevealDelayNanoseconds
+        operationProgressRevealTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: delay)
+            } catch {
+                return
+            }
+            guard let self,
+                  let snapshot = self.activeOperationProgress,
+                  snapshot.id == id,
+                  !snapshot.isTerminal else {
+                return
+            }
+            self.isOperationProgressVisible = true
+            self.operationProgressRevealTask = nil
         }
     }
 
@@ -2861,6 +2972,7 @@ public final class ExplorerStore: ObservableObject {
         }.joined(separator: "\n")
         fileClipboard = nil
         fileClipboardChangeCount = nil
+        pasteAvailabilityCache = nil
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(paths, forType: .string)
     }
@@ -3262,6 +3374,12 @@ public final class ExplorerStore: ObservableObject {
         }
 
         for target in targets {
+            // Our mutation reload must commit selection/rename before a watcher read
+            // can supersede it. Keep the external refresh, including concurrent changes.
+            if selectionOperationDepth[target.paneID, default: 0] > 0 {
+                deferredWatcherPaneIDs.insert(target.paneID)
+                continue
+            }
             do {
                 try await reloadCapturedPane(target)
             } catch let error as ExplorerError {
@@ -3269,6 +3387,22 @@ public final class ExplorerStore: ObservableObject {
             } catch {
                 visibleError = .readFailed(error.localizedDescription)
             }
+        }
+    }
+
+    private func beginSelectionOperation(in paneID: PaneID) {
+        selectionOperationDepth[paneID, default: 0] += 1
+    }
+
+    private func endSelectionOperation(in paneID: PaneID) {
+        let remaining = selectionOperationDepth[paneID, default: 1] - 1
+        if remaining > 0 {
+            selectionOperationDepth[paneID] = remaining
+            return
+        }
+        selectionOperationDepth.removeValue(forKey: paneID)
+        if deferredWatcherPaneIDs.remove(paneID) != nil {
+            scheduleExternalRefresh()
         }
     }
 
@@ -3427,6 +3561,15 @@ public final class ExplorerStore: ObservableObject {
             return nil
         }
         return paneIndex
+    }
+
+    private func loadedEntryURL(matching url: URL, inPaneAt index: Int) -> URL? {
+        // Use the row's URL representation for selection/editing. Directory flags and
+        // Unicode normalization can differ from the URL returned by a file operation.
+        let path = url.standardizedFileURL.path.precomposedStringWithCanonicalMapping
+        return panes[index].entries.first {
+            $0.url.standardizedFileURL.path.precomposedStringWithCanonicalMapping == path
+        }?.url
     }
 
     private func makeFileEntry(from archiveEntry: ArchiveEntry) -> FileEntry {
