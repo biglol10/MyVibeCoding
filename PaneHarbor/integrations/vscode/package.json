@@ -1,0 +1,31 @@
+{
+  "name": "paneharbor-open",
+  "displayName": "Open in PaneHarbor",
+  "description": "Reveal local files and folders in PaneHarbor on macOS.",
+  "version": "0.1.1",
+  "publisher": "biglol-local",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "main": "./extension.js",
+  "extensionKind": ["ui"],
+  "capabilities": { "untrustedWorkspaces": { "supported": true }, "virtualWorkspaces": false },
+  "scripts": { "test": "node --test test/*.test.js" },
+  "contributes": {
+    "commands": [{ "command": "paneharbor.open", "title": "Open in PaneHarbor", "enablement": "isMac && resourceScheme == file" }],
+    "menus": {
+      "explorer/context": [{ "command": "paneharbor.open", "when": "isMac && resourceScheme == file", "group": "navigation@21" }],
+      "commandPalette": [{ "command": "paneharbor.open", "when": "isMac && resourceScheme == file" }]
+    },
+    "configuration": {
+      "title": "PaneHarbor",
+      "properties": {
+        "paneharbor.applicationPath": {
+          "type": "string",
+          "default": "/Applications/PaneHarbor.app",
+          "scope": "machine",
+          "description": "Absolute path to the installed PaneHarbor app bundle."
+        }
+      }
+    }
+  }
+}

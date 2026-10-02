@@ -1,0 +1,389 @@
+import SwiftUI
+
+struct PrivacyAccessSettingsPresentation: Equatable {
+    let sandboxPolicy: SandboxPolicySummary
+    let folderRows: [PrivacyAccessFolderRowPresentation]
+    let persistenceErrorMessage: String?
+
+    init(
+        sandboxPolicy: SandboxPolicySummary,
+        grantedFolderSummaries: [FolderAccessGrantSummary],
+        persistenceErrorMessage: String? = nil
+    ) {
+        self.sandboxPolicy = sandboxPolicy
+        self.folderRows = grantedFolderSummaries.map(PrivacyAccessFolderRowPresentation.init)
+        self.persistenceErrorMessage = persistenceErrorMessage
+    }
+
+    var folderCountText: String {
+        "\(folderRows.count) folder\(folderRows.count == 1 ? "" : "s")"
+    }
+
+    var showsResetAction: Bool {
+        !folderRows.isEmpty || showsPersistenceError
+    }
+
+    var showsPersistenceError: Bool {
+        persistenceErrorMessage?.isEmpty == false
+    }
+
+    var emptyTitle: String {
+        "No folders selected"
+    }
+
+    var emptyMessage: String {
+        "Choose a folder when macOS blocks access to a location you trust."
+    }
+}
+
+struct PrivacyAccessFolderRowPresentation: Equatable, Identifiable {
+    let id: FolderAccessGrantID
+    let displayPath: String
+    let statusText: String
+    let systemImageName: String
+    let availability: FolderAccessGrantAvailability
+
+    init(grant: FolderAccessGrantSummary) {
+        self.id = grant.id
+        self.displayPath = grant.displayPath
+        self.statusText = Self.statusText(for: grant)
+        self.systemImageName = grant.availability.systemImageName
+        self.availability = grant.availability
+    }
+
+    var tint: Color {
+        availability.tint
+    }
+
+    private static func statusText(for grant: FolderAccessGrantSummary) -> String {
+        if grant.isStale {
+            return "Bookmark refreshed"
+        }
+
+        switch grant.availability {
+        case .available:
+            return "Available"
+        case .unavailable:
+            return "Needs selection again"
+        case .unknown:
+            return "Saved folder access"
+        }
+    }
+}
+
+struct PrivacyAccessSettingsView: View {
+    let sandboxPolicy: SandboxPolicySummary
+    let grantedFolderSummaries: [FolderAccessGrantSummary]
+    let persistenceErrorMessage: String?
+    let onChooseFolder: () -> Void
+    let onOpenPrivacySettings: () -> Void
+    let onRemoveGrant: (FolderAccessGrantSummary.ID) -> Void
+    let onResetGrants: () -> Void
+
+    private var presentation: PrivacyAccessSettingsPresentation {
+        PrivacyAccessSettingsPresentation(
+            sandboxPolicy: sandboxPolicy,
+            grantedFolderSummaries: grantedFolderSummaries,
+            persistenceErrorMessage: persistenceErrorMessage
+        )
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                header
+                statusPanel
+                actionsPanel
+                if presentation.showsPersistenceError {
+                    persistenceErrorPanel
+                }
+                foldersPanel
+                SettingsPanel {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(L10n.text("Your Privacy")).font(.headline)
+                        Text(L10n.text("PaneHarbor has no advertising or analytics service and does not upload your files to a service operated by us."))
+                        Text(L10n.text("File previews and searches run on your Mac. Settings, folder bookmarks, and the last workspace are stored on this Mac. Removing saved folder access does not delete your files."))
+                        Text(L10n.text("Files you choose to open, share, or transfer to a network folder are handled by the application or server you select. Their own privacy policies apply."))
+                        Text(L10n.text("Policy updated October 1, 2026.")).font(.caption).foregroundStyle(.secondary)
+                    }
+                    .font(.callout).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 10)
+            .frame(maxWidth: 620, alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var header: some View {
+        HStack(alignment: .center, spacing: 14) {
+            Image(systemName: "lock.shield")
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(Color.white, Color.accentColor)
+                .frame(width: 48, height: 48)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.18))
+                )
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L10n.text("Privacy & Access"))
+                    .font(.title3.weight(.semibold))
+                Text(L10n.text("Manage folder access and macOS privacy recovery options."))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var statusPanel: some View {
+        SettingsPanel {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: sandboxPolicy.isSandboxed ? "shippingbox" : "checkmark.shield")
+                    .font(.title3)
+                    .foregroundStyle(sandboxPolicy.isSandboxed ? .orange : .green)
+                    .frame(width: 28)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Text(L10n.text("Sandbox"))
+                            .font(.headline)
+                        StatusBadge(
+                            title: sandboxPolicy.statusTitle,
+                            color: sandboxPolicy.isSandboxed ? .orange : .green
+                        )
+                    }
+
+                    Text(sandboxPolicy.detail)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private var actionsPanel: some View {
+        SettingsPanel {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(L10n.text("Access Recovery"))
+                    .font(.headline)
+
+                HStack(spacing: 10) {
+                    Button(action: onChooseFolder) {
+                        Label(L10n.text("Choose Folder..."), systemImage: "folder.badge.plus")
+                            .frame(minWidth: 150)
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button(action: onOpenPrivacySettings) {
+                        Label(L10n.text("Privacy Settings"), systemImage: "lock.shield")
+                            .frame(minWidth: 150)
+                    }
+                    .buttonStyle(.bordered)
+
+                    Spacer(minLength: 0)
+                }
+
+                Text(L10n.text("Choose the folders you want to open. Removing a saved folder stops restoring that access on the next launch."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var persistenceErrorPanel: some View {
+        SettingsPanel {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.orange)
+                    .frame(width: 28)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(L10n.text("Saved Access Data Needs Attention"))
+                        .font(.headline)
+                    if let message = presentation.persistenceErrorMessage {
+                        Text(message)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text(L10n.text("Reset only if you want to discard the saved access data."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var foldersPanel: some View {
+        SettingsPanel {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(L10n.text("Selected Folders"))
+                            .font(.headline)
+                        Text(presentation.folderCountText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    if presentation.showsResetAction {
+                        Button(L10n.text("Reset"), role: .destructive, action: onResetGrants)
+                            .controlSize(.small)
+                    }
+                }
+
+                if presentation.folderRows.isEmpty {
+                    emptyFolderState
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(presentation.folderRows) { row in
+                            FolderGrantRow(
+                                row: row,
+                                onRemove: { onRemoveGrant(row.id) }
+                            )
+                            if row.id != presentation.folderRows.last?.id {
+                                Divider()
+                                    .padding(.leading, 34)
+                            }
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color(nsColor: .separatorColor).opacity(0.35), lineWidth: 1)
+                    )
+                }
+            }
+        }
+    }
+
+    private var emptyFolderState: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "folder.badge.questionmark")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+                .frame(width: 34, height: 34)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.secondary.opacity(0.12))
+                )
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(presentation.emptyTitle)
+                    .font(.callout.weight(.medium))
+                Text(presentation.emptyMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.secondary.opacity(0.08))
+        )
+    }
+}
+
+private struct SettingsPanel<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        content
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor).opacity(0.72))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 1)
+            )
+    }
+}
+
+private struct StatusBadge: View {
+    let title: String
+    let color: Color
+
+    var body: some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .foregroundStyle(color)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(color.opacity(0.15))
+            )
+    }
+}
+
+private struct FolderGrantRow: View {
+    let row: PrivacyAccessFolderRowPresentation
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: row.systemImageName)
+                .foregroundStyle(row.tint)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.displayPath)
+                    .font(.callout)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(row.statusText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button(role: .destructive, action: onRemove) {
+                Image(systemName: "minus.circle")
+                    .imageScale(.medium)
+            }
+            .buttonStyle(.borderless)
+            .help(L10n.text("Remove"))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background(Color.secondary.opacity(0.05))
+    }
+}
+
+private extension FolderAccessGrantAvailability {
+    var systemImageName: String {
+        switch self {
+        case .available:
+            return "checkmark.circle.fill"
+        case .unavailable:
+            return "exclamationmark.triangle.fill"
+        case .unknown:
+            return "folder.fill"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .available:
+            return .green
+        case .unavailable:
+            return .orange
+        case .unknown:
+            return .secondary
+        }
+    }
+}

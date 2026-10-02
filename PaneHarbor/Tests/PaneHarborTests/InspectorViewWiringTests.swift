@@ -1,0 +1,21 @@
+import XCTest
+@testable import PaneHarbor
+
+final class InspectorViewWiringTests: XCTestCase {
+    @MainActor
+    func testInspectorViewAcceptsCommandAndFolderSizeInputs() {
+        var receivedCommand: ExplorerCommand?
+
+        let view = InspectorView(
+            selection: [],
+            calculatedFolderSizes: [:],
+            previewByteLimit: FilePreviewByteLimit.balanced.rawValue,
+            onCommand: { command in
+                receivedCommand = command
+            }
+        )
+
+        XCTAssertNotNil(String(describing: view))
+        XCTAssertNil(receivedCommand)
+    }
+}

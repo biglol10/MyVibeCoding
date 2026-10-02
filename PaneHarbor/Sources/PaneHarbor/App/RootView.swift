@@ -1,0 +1,530 @@
+import AppKit
+import SwiftUI
+
+struct RootView: View {
+    @EnvironmentObject private var explorerStore: ExplorerStore
+    @Environment(\.scenePhase) private var scenePhase
+    @FocusState private var focusedToolbarField: ToolbarField?
+    @State private var toolbarFocusClearSequence = 0
+    @AppStorage("PaneHarbor.browserView") private var browserView = "list"
+
+    var body: some View {
+        NavigationSplitView {
+            SidebarView()
+                .frame(minWidth: 220)
+        } detail: {
+            VStack(spacing: 0) {
+                HStack {
+                    if explorerStore.requiresWorkingFolder {
+                        Text(L10n.text("Choose a folder to begin.")).foregroundStyle(.secondary)
+                    }
+                    Button(L10n.text("Choose Folder…"), systemImage: "folder.badge.plus") {
+                        Task { await explorerStore.chooseWorkingFolder() }
+                    }
+                    Spacer()
+                    if !explorerStore.requiresWorkingFolder {
+                        Picker(L10n.text("View"), selection: $browserView) {
+                            Text(L10n.text("List")).tag("list"); Text(L10n.text("Icons")).tag("icons"); Text(L10n.text("Thumbnails")).tag("thumbnails")
+                        }.pickerStyle(.segmented).frame(width: 230)
+                    }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                if !explorerStore.requiresWorkingFolder {
+                    ToolbarPathView(
+                        focusedField: $focusedToolbarField,
+                        focusClearSequence: toolbarFocusClearSequence
+                    )
+                    TabBarView()
+                    if let progress = explorerStore.visibleOperationProgress {
+                        OperationProgressBanner(
+                            snapshot: progress,
+                            onCancel: {
+                                explorerStore.cancelActiveOperation()
+                            },
+                            onDismiss: {
+                                explorerStore.clearCompletedOperationProgress()
+                            }
+                        )
+                    }
+                    Divider()
+                    HSplitView {
+                        filePane(at: 0)
+
+                        if explorerStore.paneMode == .dual {
+                            filePane(at: 1)
+                        }
+
+                        if explorerStore.isInspectorVisible {
+                            inspectorPane
+                        }
+                    }
+                } else {
+                    Spacer()
+                    Label(L10n.text("Your files, with your permission"), systemImage: "folder.badge.person.crop")
+                        .font(.title2)
+                    Text(L10n.text("You choose which folders PaneHarbor can open."))
+                        .foregroundStyle(.secondary).padding(.top, 4)
+                    Spacer()
+                }
+            }
+        }
+        .sheet(isPresented: $explorerStore.isServerConnectionPresented) { ServerConnectionView() }
+        .sheet(item: $explorerStore.batchRenameRequest) { request in
+            BatchRenameView(request: request)
+        }
+        .alert("PaneHarbor", isPresented: explorerStore.hasVisibleError) {
+            if let guidance = explorerStore.visibleErrorGuidance,
+               let actionTitle = guidance.primaryActionTitle {
+                Button(actionTitle) {
+                    performRecoveryAction(guidance)
+                }
+            }
+            Button(L10n.text("OK"), role: .cancel) {
+                explorerStore.clearError()
+            }
+        } message: {
+            Text(explorerStore.visibleErrorMessage)
+        }
+        .onChange(of: explorerStore.requestedFocus) { _, target in
+            guard let target else {
+                return
+            }
+            switch target {
+            case .path:
+                focusedToolbarField = .path
+            case .search:
+                focusedToolbarField = .search
+            case .clear:
+                focusedToolbarField = nil
+                toolbarFocusClearSequence += 1
+            }
+            explorerStore.clearFocusRequest()
+        }
+        .onChange(of: focusedToolbarField) { _, field in
+            explorerStore.setToolbarTextInputFocused(field != nil)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase != .active else {
+                return
+            }
+            Task {
+                await explorerStore.flushSessionPersistence()
+            }
+        }
+        .background(
+            ExplorerShortcutMonitor(
+                isToolbarTextInputFocused: explorerStore.isToolbarTextInputFocused,
+                isCommandEnabled: { explorerStore.isCommandEnabled($0) },
+                onCommand: { command in
+                    Task { await explorerStore.perform(command) }
+                }
+            )
+            .frame(width: 0, height: 0)
+        )
+    }
+
+    private var inspectorPane: some View {
+        InspectorView(
+            selection: explorerStore.activeSelectedEntries,
+            calculatedFolderSizes: explorerStore.calculatedFolderSizes,
+            previewMode: explorerStore.previewMode,
+            previewByteLimit: explorerStore.previewByteLimit.rawValue,
+            isCommandEnabled: { explorerStore.isCommandEnabled($0) },
+            onCommand: { command in
+                Task { await explorerStore.perform(command) }
+            }
+        )
+        .frame(minWidth: 260, idealWidth: 300, maxWidth: 360)
+    }
+
+    @ViewBuilder
+    private func filePane(at index: Int) -> some View {
+        if explorerStore.panes.indices.contains(index) {
+            let pane = explorerStore.panes[index]
+            let entries = explorerStore.visibleEntries(forPaneAt: index)
+            let isActive = explorerStore.activePaneIndex == index
+            let isSearching = isActive && explorerStore.isSearching
+            let isFiltered = isActive && explorerStore.hasActiveSearchCriteria
+            VStack(spacing: 0) {
+                if explorerStore.paneMode == .dual {
+                    Button {
+                        focusedToolbarField = nil
+                        explorerStore.activatePane(at: index)
+                        explorerStore.requestToolbarFocusClear()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: pane.location.isArchive ? "archivebox" : "folder")
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(index == 0 ? L10n.text("Left Folder") : L10n.text("Right Folder"))
+                                    .font(.caption.weight(.semibold))
+                                Text(pane.location.displayPath)
+                                    .font(.caption)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            Spacer(minLength: 0)
+                            if isActive {
+                                Text(L10n.text("Active"))
+                                    .font(.caption.weight(.semibold))
+                            }
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(pane.location.displayPath)
+                    .background(isActive ? Color.accentColor.opacity(0.12) : Color.clear)
+                    Divider()
+                }
+                GeometryReader { geometry in
+                    Group {
+                        if browserView == "list" {
+                            fileTable(for: pane, at: index, compact: geometry.size.width < 680)
+                        } else {
+                            FileGridView(paneID: pane.id, thumbnails: browserView == "thumbnails")
+                                .id(pane.id)
+                        }
+                    }
+                        .overlay {
+                            if pane.isLoading || isSearching {
+                                ProgressView(isSearching ? "Searching…" : "Loading folder…")
+                                    .padding(16)
+                                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .allowsHitTesting(false)
+                            } else if entries.isEmpty {
+                                VStack(spacing: 10) {
+                                    Image(systemName: isFiltered ? "magnifyingglass" : "folder")
+                                        .font(.title2)
+                                    Text(isFiltered ? L10n.text("No Matching Items") : L10n.text("This Folder Is Empty"))
+                                        .font(.headline)
+                                    if isFiltered {
+                                        Text(L10n.text("Try another search or clear the filters."))
+                                            .font(.callout)
+                                    }
+                                }
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .allowsHitTesting(false)
+                            }
+                        }
+                }
+                Divider()
+                HStack {
+                    Text(L10n.format(isFiltered ? "%ld results" : "%ld items", entries.count))
+                    if isFiltered && entries.isEmpty && !pane.isLoading && !isSearching {
+                        Button(L10n.text("Clear All Filters")) {
+                            explorerStore.clearAllSearchCriteria()
+                        }
+                        .buttonStyle(.link)
+                    }
+                    Spacer()
+                    if !pane.selectedURLs.isEmpty {
+                        Text(L10n.format("%ld selected", pane.selectedURLs.count))
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+            }
+            .frame(minWidth: explorerStore.paneMode == .dual ? 420 : 520)
+        }
+    }
+
+    private func fileTable(for pane: PaneState, at index: Int, compact: Bool) -> some View {
+        FileTableView(
+            entries: explorerStore.visibleEntries(forPaneAt: index),
+            selectedURLs: pane.selectedURLs,
+            canPaste: explorerStore.canPaste,
+            canUndo: explorerStore.canUndo,
+            canCloseTab: explorerStore.canCloseTab,
+            canGoBack: !pane.backStack.isEmpty,
+            canGoForward: !pane.forwardStack.isEmpty,
+            canGoUp: explorerStore.canGoUp(forPaneAt: index),
+            currentURL: pane.currentURL,
+            currentLocation: pane.location,
+            currentSort: pane.sort,
+            showsPathColumn: index == explorerStore.activePaneIndex && explorerStore.isShowingRecursiveSearchResults,
+            usesCompactColumns: compact,
+            paneID: pane.id,
+            inlineRenameRequest: inlineRenameRequest(for: pane),
+            requestsInitialFocus: index == explorerStore.activePaneIndex,
+            onFocus: {
+                focusedToolbarField = nil
+                explorerStore.activatePane(at: index)
+                explorerStore.setToolbarTextInputFocused(false)
+            },
+            onSelectionChange: { urls in
+                explorerStore.activatePane(at: index)
+                explorerStore.updateSelection(urls)
+            },
+            onOpen: { url in
+                explorerStore.activatePane(at: index)
+                Task { await explorerStore.open(url) }
+            },
+            onRename: { paneID, url, newName in
+                Task { await explorerStore.rename(url, to: newName, inPane: paneID) }
+            },
+            onInlineRenameEnd: { requestID in
+                explorerStore.clearInlineRenameRequest(matching: requestID)
+            },
+            onCommand: { command in
+                explorerStore.activatePane(at: index)
+                Task { await explorerStore.perform(command) }
+            },
+            isCommandEnabled: { command in
+                explorerStore.isCommandEnabled(command, forPaneAt: index)
+            },
+            openWithApplications: explorerStore.openWithApplications(forPaneAt: index),
+            onOpenWithApplication: { application in
+                explorerStore.activatePane(at: index)
+                Task { await explorerStore.openSelected(with: application) }
+            },
+            allowsFileDrop: !explorerStore.isFileMutationInProgress,
+            onDropItems: { urls, destinationFolder, operation in
+                explorerStore.activatePane(at: index)
+                Task {
+                    await explorerStore.performDrop(
+                        urls: urls,
+                        destinationFolder: destinationFolder,
+                        operation: operation
+                    )
+                }
+            },
+            onSortChange: { sortKey in
+                explorerStore.activatePane(at: index)
+                explorerStore.sortActivePane(by: sortKey)
+            }
+        )
+    }
+
+    private func inlineRenameRequest(for pane: PaneState) -> InlineRenameRequest? {
+        guard explorerStore.activePane.id == pane.id,
+              explorerStore.inlineRenameRequest?.paneID == pane.id else {
+            return nil
+        }
+        return explorerStore.inlineRenameRequest
+    }
+
+    private func performRecoveryAction(_ guidance: PermissionGuidance) {
+        switch guidance.recoveryAction {
+        case .chooseFolder:
+            let retryingPath = explorerStore.pendingPermissionRecoveryPath
+            let startingURL = retryingPath.map { URL(fileURLWithPath: $0, isDirectory: true).standardizedFileURL }
+            Task {
+                await explorerStore.chooseFolderForAccess(
+                    startingAt: startingURL,
+                    retryingPermissionPath: retryingPath
+                )
+            }
+        case .openPrivacySettings:
+            NSWorkspace.shared.open(PermissionGuidance.privacySettingsURL)
+            explorerStore.clearError()
+        case .none:
+            explorerStore.clearError()
+        }
+    }
+}
+
+private struct TabBarView: View {
+    @EnvironmentObject private var explorerStore: ExplorerStore
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    ForEach(Array(explorerStore.tabs.enumerated()), id: \.element.id) { index, tab in
+                        ExplorerTabButton(
+                            title: tab.title,
+                            isActive: index == explorerStore.activeTabIndex,
+                            canClose: explorerStore.tabs.count > 1,
+                            onSelect: {
+                                Task { await explorerStore.selectTab(at: index) }
+                            },
+                            onClose: {
+                                Task { await explorerStore.closeTab(at: index) }
+                            }
+                        )
+                    }
+                }
+                .padding(.horizontal, 8)
+            }
+
+            Button {
+                Task { await explorerStore.newTab() }
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(L10n.text("New Tab"))
+            .padding(.trailing, 8)
+        }
+        .frame(height: 34)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
+
+private struct ExplorerTabButton: View {
+    var title: String
+    var isActive: Bool
+    var canClose: Bool
+    var onSelect: () -> Void
+    var onClose: () -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Button(action: onSelect) {
+                Text(title)
+                    .font(.system(size: 12, weight: isActive ? .semibold : .regular))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if canClose {
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(L10n.text("Close Tab"))
+            }
+        }
+        .foregroundStyle(isActive ? Color.primary : Color.secondary)
+        .padding(.horizontal, 8)
+        .frame(width: 170, height: 26)
+        .background(
+            RoundedRectangle(cornerRadius: 5)
+                .fill(isActive ? Color.accentColor.opacity(0.16) : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 5)
+                .stroke(isActive ? Color.accentColor.opacity(0.38) : Color.clear, lineWidth: 1)
+        )
+    }
+}
+
+private struct ExplorerShortcutMonitor: NSViewRepresentable {
+    var isToolbarTextInputFocused: Bool
+    var isCommandEnabled: (ExplorerCommand) -> Bool
+    var onCommand: (ExplorerCommand) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            isToolbarTextInputFocused: isToolbarTextInputFocused,
+            isCommandEnabled: isCommandEnabled,
+            onCommand: onCommand
+        )
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        context.coordinator.isToolbarTextInputFocused = isToolbarTextInputFocused
+        context.coordinator.isCommandEnabled = isCommandEnabled
+        context.coordinator.onCommand = onCommand
+        context.coordinator.install()
+        return NSView(frame: .zero)
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.isToolbarTextInputFocused = isToolbarTextInputFocused
+        context.coordinator.isCommandEnabled = isCommandEnabled
+        context.coordinator.onCommand = onCommand
+        context.coordinator.install()
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.uninstall()
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var isToolbarTextInputFocused: Bool
+        var isCommandEnabled: (ExplorerCommand) -> Bool
+        var onCommand: (ExplorerCommand) -> Void
+        private var monitor: Any?
+
+        init(
+            isToolbarTextInputFocused: Bool,
+            isCommandEnabled: @escaping (ExplorerCommand) -> Bool,
+            onCommand: @escaping (ExplorerCommand) -> Void
+        ) {
+            self.isToolbarTextInputFocused = isToolbarTextInputFocused
+            self.isCommandEnabled = isCommandEnabled
+            self.onCommand = onCommand
+        }
+
+        func install() {
+            guard monitor == nil else {
+                return
+            }
+
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self else {
+                    return event
+                }
+                guard
+                    let shortcut = Self.shortcut(from: event),
+                    let command = ExplorerShortcutRouting.command(
+                        for: shortcut,
+                        isToolbarTextInputFocused: isToolbarTextInputFocused,
+                        isTextEditingResponderFocused: Self.isTextEditingResponderFocused(in: event.window),
+                        profile: .current,
+                        isCommandEnabled: isCommandEnabled
+                    )
+                else {
+                    return event
+                }
+
+                onCommand(command)
+                return nil
+            }
+        }
+
+        func uninstall() {
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+            }
+            monitor = nil
+        }
+
+        private static func shortcut(from event: NSEvent) -> ExplorerShortcut? {
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let unsupportedFlags = flags.subtracting([.command, .control, .option, .shift, .capsLock, .numericPad, .function])
+            guard unsupportedFlags.isEmpty else {
+                return nil
+            }
+
+            var modifiers = Set<ExplorerShortcutModifier>()
+            if flags.contains(.command) { modifiers.insert(.command) }
+            if flags.contains(.control) { modifiers.insert(.control) }
+            if flags.contains(.option) { modifiers.insert(.option) }
+            if flags.contains(.shift) { modifiers.insert(.shift) }
+
+            let key = ExplorerKeyCodeMapper.key(
+                for: event.keyCode,
+                charactersIgnoringModifiers: event.charactersIgnoringModifiers
+            )
+
+            guard !key.isEmpty else {
+                return nil
+            }
+            return ExplorerShortcut(key: key, modifiers: modifiers)
+        }
+
+        private static func isTextEditingResponderFocused(in window: NSWindow?) -> Bool {
+            guard let responder = window?.firstResponder else {
+                return false
+            }
+            return responder is NSTextView || responder is NSTextField
+        }
+    }
+}
