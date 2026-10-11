@@ -6,7 +6,6 @@ APP_NAME="PaneHarbor"
 CONFIGURATION="${CONFIGURATION:-release}"
 INTERNAL_APP_DIR="$ROOT_DIR/.build/app/$APP_NAME.app"
 APP_DIR="$ROOT_DIR/build/$APP_NAME.app"
-LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -50,8 +49,5 @@ codesign --force --deep --sign "${CODE_SIGN_IDENTITY:--}" --entitlements "$ROOT_
 codesign --verify --deep --strict "$APP_DIR"
 /usr/bin/touch "$APP_DIR"
 
-if [[ -x "$LSREGISTER" ]]; then
-  "$LSREGISTER" -f "$APP_DIR" >/dev/null 2>&1 || true
-fi
-
+# Build output stays unregistered; installation registers the installed app.
 echo "$APP_DIR"

@@ -6,11 +6,11 @@ PaneHarbor는 두 창과 탭으로 파일을 정리하는 macOS 15 이상용 로
 
 - [Mac 개인 설치 ZIP](../downloads/PaneHarbor/PaneHarbor-personal-mac.zip) · [SHA-256](../downloads/PaneHarbor/PaneHarbor-personal-mac.zip.sha256)
 - [VS Code 확장 VSIX](../downloads/PaneHarbor/paneharbor-open-0.1.1.vsix) · [SHA-256](../downloads/PaneHarbor/paneharbor-open-0.1.1.vsix.sha256)
-- [이번 추가의 검증 범위와 주의사항](../docs/releases/2026-10-03-paneharbor-introduction.md)
+- [최신 배포의 검증 범위와 주의사항](../docs/releases/2026-10-11-paneharbor-update.md)
 
-개인 설치 ZIP을 풀어 `Install PaneHarbor.command`를 실행하면 `/Applications/PaneHarbor.app`에 복사합니다. 기존 `PaneHarbor.app`은 같은 폴더의 `.saved-bundle`로 백업합니다. 별도로 설치된 `PaneHarbor Preview.app`은 교체하지 않습니다. 설치 앱은 ad-hoc 서명이며 Developer ID 공증본이 아닙니다. 설치 스크립트는 서명을 검사한 뒤 다운로드 격리 속성을 제거합니다. 출처를 신뢰하는 본인 Mac에서만 사용하세요.
+개인 설치 ZIP은 Apple Silicon(arm64)용입니다. 압축을 풀어 `Install PaneHarbor.command`를 실행하면 표준 경로 `/Applications/PaneHarbor.app`에 복사합니다. 기존 동일 경로의 앱은 같은 폴더의 `.saved-bundle`로 백업합니다. 과거 이름인 `PaneHarbor Preview.app`은 설치 스크립트가 자동 제거하지 않습니다. 설치 앱은 ad-hoc 서명이며 Developer ID 공증본이 아닙니다. 설치 스크립트는 서명을 검사한 뒤 다운로드 격리 속성을 제거합니다. 출처를 신뢰하는 본인 Mac에서만 사용하세요.
 
-처음 실행하면 **폴더 선택…**으로 작업할 폴더를 직접 허용하세요. 접근 권한은 앱의 개인정보 및 접근 설정에서 회수할 수 있습니다. VS Code 확장은 로컬 macOS에서 파일/폴더 우클릭 → **Open in PaneHarbor**를 제공합니다. 기본 앱 경로는 `/Applications/PaneHarbor.app`이고, Preview 앱을 계속 쓴다면 `paneharbor.applicationPath`를 직접 설정해야 합니다. VSIX는 VS Code의 **확장: VSIX에서 설치…**로 설치할 수 있습니다.
+처음 실행하면 **폴더 선택…**으로 작업할 폴더를 직접 허용하세요. 접근 권한은 앱의 개인정보 및 접근 설정에서 회수할 수 있습니다. VS Code 확장은 로컬 macOS에서 파일/폴더 우클릭 → **Open in PaneHarbor**를 제공합니다. 기본 앱 경로는 `/Applications/PaneHarbor.app`입니다. 과거 Preview 경로를 직접 지정한 적이 있다면 `paneharbor.applicationPath`를 현재 설치 경로로 바꿔주세요. VSIX는 VS Code의 **확장: VSIX에서 설치…**로 설치할 수 있습니다.
 
 ## 기능과 제한
 
@@ -26,5 +26,7 @@ scripts/package_personal.sh
 ```
 
 `scripts/archive-local.sh`는 Xcode 아카이브용입니다. App Store 배포에는 실제 소유자 팀·Mac App Store 서명/프로비저닝, App Store Connect 정보와 별도 검증이 필요합니다. 로컬 빌드나 개인 설치 ZIP은 그 증거가 아닙니다. VS Code 확장은 [`integrations/vscode`](integrations/vscode)를 확인하세요.
+
+`scripts/build_app.sh`는 개발용 앱을 macOS 앱 목록에 자동 등록하지 않습니다. 앱 등록은 실제 설치 단계에서 설치 경로에만 수행합니다. 로컬 앱 검색의 중복을 방지하려면 프로젝트의 `build`·`dist` 폴더를 시스템 설정 → Spotlight → 검색 개인정보 보호에서 제외하세요.
 
 ZIPFoundation 0.9.20 MIT 고지는 앱의 `ThirdPartyNotices.txt`에 포함됩니다. [벤더 출처와 로컬 시간 수정](Vendor/ZIPFoundation/UPSTREAM.md)을 확인하세요.

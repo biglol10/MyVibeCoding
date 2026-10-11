@@ -24,6 +24,8 @@ MyMacFinder는 2026-10-01 새 폴더 선택·이름 변경, 진행 표시, ZIP �
 
 PaneHarbor는 2026-10-03 별도 로컬 베타로 추가했습니다. [설치 방법과 검증 범위](docs/releases/2026-10-03-paneharbor-introduction.md)를 확인하세요.
 
+PaneHarbor의 2026-10-11 갱신은 표준 설치 경로 `/Applications/PaneHarbor.app` 안내와 개발 빌드의 중복 앱 등록 방지 처리를 반영했습니다. [최신 배포 및 검증](docs/releases/2026-10-11-paneharbor-update.md)을 확인하세요.
+
 ## 클론
 
 ```bash
