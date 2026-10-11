@@ -75,6 +75,7 @@ struct WorkspaceView: View {
                     Button("폴더 열기…") { model.chooseFolder() }
                     Button("이미지 삽입…") { model.chooseImage() }
                     Divider()
+                    Toggle("숨김 파일·폴더 표시", isOn: $model.settings.showHiddenFiles).disabled(model.workspaceBusy)
                     Toggle("집중 모드", isOn: $model.settings.focusMode)
                     Toggle("타자기 모드", isOn: $model.settings.typewriterMode)
                     Toggle("외부 이미지 불러오기", isOn: Binding(get: { model.remoteImages }, set: { _ in model.toggleRemoteImages() }))
@@ -332,13 +333,17 @@ struct SettingsView: View {
                 HStack { Text("읽기 폭"); Slider(value: $model.settings.contentWidth, in: 500...1200, step: 20); Text("\(Int(model.settings.contentWidth))").monospacedDigit().frame(width: 44) }
             }
             Section("저장") { Toggle("입력 후 자동 저장", isOn: $model.settings.autosave); Text("입력을 멈춘 뒤 1초 후 저장합니다. 외부 변경이 발견되면 자동 저장을 멈춥니다.").font(.caption).foregroundStyle(.secondary) }
+            Section("파일 탐색") {
+                Toggle("숨김 파일·폴더 표시", isOn: $model.settings.showHiddenFiles).disabled(model.workspaceBusy)
+                Text(".claude처럼 점으로 시작하는 항목을 파일 목록, 빠른 파일 열기와 폴더 검색에 포함합니다.").font(.caption).foregroundStyle(.secondary)
+            }
             Section("편집") {
                 Toggle("집중 모드", isOn: $model.settings.focusMode)
                 Text("현재 문단을 또렷하게 표시합니다.").font(.caption).foregroundStyle(.secondary)
                 Toggle("타자기 모드", isOn: $model.settings.typewriterMode)
                 Text("입력 중인 줄을 화면 가운데에 가깝게 유지합니다.").font(.caption).foregroundStyle(.secondary)
             }
-            Section { Button("읽기 설정 초기화") { let autosave = model.settings.autosave; model.settings = ReadingSettings(); model.settings.autosave = autosave } }
-        }.formStyle(.grouped).padding(10).frame(width: 490, height: 500)
+            Section { Button("읽기 설정 초기화") { let autosave = model.settings.autosave; model.settings = ReadingSettings(); model.settings.autosave = autosave }.disabled(model.workspaceBusy) }
+        }.formStyle(.grouped).padding(10).frame(width: 490, height: 580)
     }
 }

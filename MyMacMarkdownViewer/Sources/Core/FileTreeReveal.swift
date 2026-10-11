@@ -21,7 +21,7 @@ public enum FileTreeReveal {
         return directories
     }
 
-    public static func read(document: URL, inside root: URL) throws -> Snapshot {
+    public static func read(document: URL, inside root: URL, showHiddenFiles: Bool = false) throws -> Snapshot {
         guard let directories = directories(for: document, inside: root) else { throw CocoaError(.fileReadNoPermission) }
         let target = document.standardizedFileURL
         var entries: [String: [FileEntry]] = [:]
@@ -31,10 +31,10 @@ public enum FileTreeReveal {
         let names = directories.dropFirst().map(\.lastPathComponent) + [target.lastPathComponent]
         for (index, name) in names.enumerated() {
             try Task.checkCancellation()
-            let listing = try FolderScanner.children(of: directory)
+            let listing = try FolderScanner.children(of: directory, showHiddenFiles: showHiddenFiles)
             let expectsDirectory = index + 1 < names.count
             guard let next = listing.first(where: { $0.name == name && $0.isDirectory == expectsDirectory }) else {
-                // A hidden, deleted or excluded/symlinked item is not a tree row.
+                // Deleted or excluded items (including hidden rows when disabled) are not tree rows.
                 throw CocoaError(.fileReadNoSuchFile)
             }
             scannedDirectories.append(directory)

@@ -75,6 +75,8 @@ struct MyMarkdownViewerApp: App {
                 Button("빠른 파일 열기…") { model.quickQuery = ""; model.quickOpen = true }.keyboardShortcut("p")
                 Button(model.sourceMode ? "라이브 편집" : "원문 모드") { model.command("source") }.keyboardShortcut("m", modifiers: [.command, .shift])
                 Divider()
+                Toggle("숨김 파일·폴더 표시", isOn: $model.settings.showHiddenFiles)
+                    .keyboardShortcut(".", modifiers: [.command, .shift]).disabled(model.workspaceBusy)
                 Toggle("집중 모드", isOn: $model.settings.focusMode)
                 Toggle("타자기 모드", isOn: $model.settings.typewriterMode)
             }

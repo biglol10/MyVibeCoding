@@ -5,13 +5,15 @@ public enum FolderSearch {
     public struct Options: Sendable, Equatable {
         public var query: String
         public var caseSensitive: Bool
+        public var showHiddenFiles: Bool
         public var maximumResults: Int
         public var maximumFileBytes: Int
         public var maximumRetainedBytes: Int
 
-        public init(query: String, caseSensitive: Bool = false, maximumResults: Int = 1_000, maximumFileBytes: Int = 32 * 1024 * 1024, maximumRetainedBytes: Int = 64 * 1024 * 1024) {
+        public init(query: String, caseSensitive: Bool = false, showHiddenFiles: Bool = false, maximumResults: Int = 1_000, maximumFileBytes: Int = 32 * 1024 * 1024, maximumRetainedBytes: Int = 64 * 1024 * 1024) {
             self.query = query
             self.caseSensitive = caseSensitive
+            self.showHiddenFiles = showHiddenFiles
             self.maximumResults = max(1, maximumResults)
             self.maximumFileBytes = max(1, min(maximumFileBytes, 32 * 1024 * 1024))
             self.maximumRetainedBytes = max(1, min(maximumRetainedBytes, 64 * 1024 * 1024))
@@ -32,6 +34,7 @@ public enum FolderSearch {
     public struct FileResult: Sendable, Identifiable {
         public let url: URL
         public let workspaceRoot: URL
+        public let showHiddenFiles: Bool
         public let codec: DocumentCodec
         public let originalHash: String
         public let matches: [Match]
@@ -58,12 +61,14 @@ public enum FolderSearch {
         public struct File: Sendable, Identifiable {
             public let url: URL
             public let workspaceRoot: URL
+            public let showHiddenFiles: Bool
             public let codec: DocumentCodec
             public let originalHash: String
             public let matches: [Match]
             public var id: String { url.path }
             fileprivate init(_ result: FileResult) {
                 url = result.url; workspaceRoot = result.workspaceRoot; codec = result.codec; originalHash = result.originalHash; matches = result.matches
+                showHiddenFiles = result.showHiddenFiles
             }
         }
         public let files: [File]
@@ -160,17 +165,21 @@ public enum FolderSearch {
         guard documents.contains(where: { $0.resolvingSymlinksInPath().standardizedFileURL.path == target }) else {
             throw WorkspaceFileError.unsafePath
         }
+        // Recheck the scan's visibility policy and every ancestor before writing. A package or
+        // symlink introduced after searching must not become a replacement target.
+        _ = try FileTreeReveal.read(document: file.url, inside: file.workspaceRoot, showHiddenFiles: file.showHiddenFiles)
     }
 
     private static func scanSynchronously(folder: URL, options: Options) -> ScanReport {
         guard !options.query.isEmpty else { return ScanReport(files: [], issues: [Issue(url: folder, message: "검색할 텍스트가 비어 있습니다.")], isTruncated: false, wasCancelled: false) }
         let fm = FileManager.default
         // Check the user-selected spelling before resolving /var-style system aliases.
-        guard isVisibleDirectory(folder) else { return ScanReport(files: [], issues: [Issue(url: folder, message: "폴더에 접근할 수 없거나 안전하지 않습니다.")], isTruncated: false, wasCancelled: false) }
+        guard isSafeDirectory(folder) else { return ScanReport(files: [], issues: [Issue(url: folder, message: "폴더에 접근할 수 없거나 안전하지 않습니다.")], isTruncated: false, wasCancelled: false) }
         let workspaceRoot = folder.resolvingSymlinksInPath().standardizedFileURL
         var files: [FileResult] = [], issues: [Issue] = []
-        guard isVisibleDirectory(workspaceRoot) else { return ScanReport(files: [], issues: [Issue(url: folder, message: "폴더에 접근할 수 없거나 안전하지 않습니다.")], isTruncated: false, wasCancelled: false) }
-        guard let enumerator = fm.enumerator(at: workspaceRoot, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isPackageKey, .isRegularFileKey], options: [.skipsHiddenFiles, .skipsPackageDescendants], errorHandler: { url, _ in
+        guard isSafeDirectory(workspaceRoot) else { return ScanReport(files: [], issues: [Issue(url: folder, message: "폴더에 접근할 수 없거나 안전하지 않습니다.")], isTruncated: false, wasCancelled: false) }
+        let enumerationOptions: FileManager.DirectoryEnumerationOptions = options.showHiddenFiles ? [.skipsPackageDescendants] : [.skipsHiddenFiles, .skipsPackageDescendants]
+        guard let enumerator = fm.enumerator(at: workspaceRoot, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isPackageKey, .isRegularFileKey], options: enumerationOptions, errorHandler: { url, _ in
             issues.append(Issue(url: url, message: "폴더 항목을 읽을 수 없습니다.")); return true
         }) else {
             return ScanReport(files: [], issues: [Issue(url: folder, message: "폴더 목록을 읽을 수 없습니다.")], isTruncated: false, wasCancelled: false)
@@ -209,14 +218,14 @@ public enum FolderSearch {
                     retainedBytes += bytes.count
                 }
                 totalMatches += matches.count
-                if !matches.isEmpty { files.append(FileResult(url: url, workspaceRoot: workspaceRoot, codec: codec, originalHash: DocumentCodec.hash(codec.originalData), matches: matches)) }
+                if !matches.isEmpty { files.append(FileResult(url: url, workspaceRoot: workspaceRoot, showHiddenFiles: options.showHiddenFiles, codec: codec, originalHash: DocumentCodec.hash(codec.originalData), matches: matches)) }
                 if truncated { break }
             } catch { issues.append(Issue(url: url, message: errorMessage(error))) }
         }
         return ScanReport(files: files, issues: issues, isTruncated: truncated, wasCancelled: false)
     }
 
-    private static func isVisibleDirectory(_ url: URL) -> Bool {
+    private static func isSafeDirectory(_ url: URL) -> Bool {
         guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isPackageKey]) else { return false }
         return values.isDirectory == true && values.isSymbolicLink != true && values.isPackage != true
     }

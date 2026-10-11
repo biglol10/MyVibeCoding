@@ -15,6 +15,10 @@ enum AppQA {
         let allowedRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("MyMarkdownViewer/QA", isDirectory: true).standardizedFileURL
         guard root.path == allowedRoot.path || root.path.hasPrefix(allowedRoot.path + "/") else { return }
+        if args.contains("--qa-hidden-files") || args.contains("--qa-hidden-files-relaunch") {
+            await HiddenFilesQA.run(model: model, web: web, root: root, relaunch: args.contains("--qa-hidden-files-relaunch"))
+            return
+        }
         if args.contains("--qa-ux-fixes") {
             await uxFixChecks(model: model, web: web, root: root)
             return
@@ -362,8 +366,8 @@ enum AppQA {
         }
         model.reviewFolderReplacement()
         guard let review = model.replacementReview else { throw DocumentError.unavailable }
-        model.replacementReview = nil
         let applied = await model.applyFolderReplacement(review, selected: Set(review.plan.files.map(\.url)))
+        model.replacementReview = nil
         let replacedText = try String(contentsOf: movedFile, encoding: .utf8)
         report["workspaceReviewedReplacement"] = applied?.savedCount == 2 && replacedText.contains("바꾼말")
         report["workspaceReplacementRefreshesEditor"] = (try await model.bridge.snapshot()["text"] as? String)?.contains("바꾼말") == true

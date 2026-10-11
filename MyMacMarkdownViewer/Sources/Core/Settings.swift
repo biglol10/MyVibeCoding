@@ -14,10 +14,11 @@ public struct ReadingSettings: Codable, Equatable, Sendable {
     public var autosave: Bool = true
     public var focusMode: Bool = false
     public var typewriterMode: Bool = false
+    public var showHiddenFiles: Bool = false
     public init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case theme, fontSize, lineHeight, contentWidth, fontFamily, autosave, focusMode, typewriterMode
+        case theme, fontSize, lineHeight, contentWidth, fontFamily, autosave, focusMode, typewriterMode, showHiddenFiles
     }
 
     public init(from decoder: Decoder) throws {
@@ -30,6 +31,7 @@ public struct ReadingSettings: Codable, Equatable, Sendable {
         autosave = try values.decodeIfPresent(Bool.self, forKey: .autosave) ?? true
         focusMode = try values.decodeIfPresent(Bool.self, forKey: .focusMode) ?? false
         typewriterMode = try values.decodeIfPresent(Bool.self, forKey: .typewriterMode) ?? false
+        showHiddenFiles = try values.decodeIfPresent(Bool.self, forKey: .showHiddenFiles) ?? false
     }
 }
 
@@ -50,8 +52,8 @@ public enum MarkdownFileSupport {
 }
 
 public enum FolderScanner {
-    public static func children(of folder: URL) throws -> [FileEntry] {
-        try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isPackageKey], options: [.skipsHiddenFiles])
+    public static func children(of folder: URL, showHiddenFiles: Bool = false) throws -> [FileEntry] {
+        try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isPackageKey], options: showHiddenFiles ? [] : [.skipsHiddenFiles])
             .compactMap { url -> FileEntry? in
                 let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isPackageKey])
                 guard values.isSymbolicLink != true, values.isPackage != true else { return nil }
@@ -65,14 +67,19 @@ public enum FolderScanner {
             }
     }
 
-    public static func index(_ folder: URL) -> [URL] {
+    public static func index(_ folder: URL, showHiddenFiles: Bool = false) -> [URL] {
+        let options: FileManager.DirectoryEnumerationOptions = showHiddenFiles ? [.skipsPackageDescendants] : [.skipsHiddenFiles, .skipsPackageDescendants]
         guard let enumerator = FileManager.default.enumerator(at: folder,
-            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isPackageKey], options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return [] }
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isPackageKey], options: options) else { return [] }
         var files: [URL] = []
         for case let url as URL in enumerator {
             if Task.isCancelled { break }
-            guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]) else { continue }
-            if values.isSymbolicLink == true { enumerator.skipDescendants(); continue }
+            guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isPackageKey]) else { continue }
+            if values.isSymbolicLink == true || values.isPackage == true {
+                // Calling skipDescendants for a file would skip the next directory's children.
+                if values.isDirectory == true { enumerator.skipDescendants() }
+                continue
+            }
             if values.isDirectory != true, MarkdownFileSupport.isMarkdownFile(url) { files.append(url) }
         }
         return files.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }

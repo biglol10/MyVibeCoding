@@ -34,6 +34,7 @@ final class AppModel: ObservableObject {
             if let data = try? JSONEncoder().encode(settings) { UserDefaults.standard.set(data, forKey: "readingSettings") }
             applyAppearance(); sendSettings()
             if settings.autosave != oldValue.autosave { scheduleAutosave() }
+            if settings.showHiddenFiles != oldValue.showHiddenFiles { hiddenFileVisibilityChanged() }
         }
     }
     @Published var documentURL: URL?
@@ -252,7 +253,8 @@ final class AppModel: ObservableObject {
         if let path = UserDefaults.standard.string(forKey: "lastFolder") {
             if let url = access.restore(path) {
                 do {
-                    _ = try await Task.detached { try FolderScanner.children(of: url) }.value
+                    let showHiddenFiles = settings.showHiddenFiles
+                    _ = try await Task.detached { try FolderScanner.children(of: url, showHiddenFiles: showHiddenFiles) }.value
                     guard navigationGeneration == generation else { return }
                     await setFolder(url)
                 } catch { notices.append("마지막 폴더를 열 수 없습니다. 삭제되었거나 접근 권한이 바뀌었을 수 있습니다. 폴더를 다시 선택해 주세요.") }
@@ -583,15 +585,19 @@ final class AppModel: ObservableObject {
     func refreshFolder() {
         refreshTask?.cancel(); indexTask?.cancel()
         guard let folderURL else { return }
-        let generation = folderGeneration, expandedPaths = expanded
+        let generation = folderGeneration, expandedPaths = expanded, showHiddenFiles = settings.showHiddenFiles
         refreshTask = Task {
             do {
                 try await Task.sleep(for: .milliseconds(180))
-                let result = try await Task.detached {
+                let worker = Task.detached {
                     var children: [String: [FileEntry]] = [:]
-                    for path in expandedPaths where path.hasPrefix(folderURL.path + "/") { children[path] = try? FolderScanner.children(of: URL(fileURLWithPath: path)) }
-                    return (try FolderScanner.children(of: folderURL), children)
-                }.value
+                    for path in expandedPaths where path.hasPrefix(folderURL.path + "/") {
+                        try Task.checkCancellation()
+                        children[path] = try? FolderScanner.children(of: URL(fileURLWithPath: path), showHiddenFiles: showHiddenFiles)
+                    }
+                    return (try FolderScanner.children(of: folderURL, showHiddenFiles: showHiddenFiles), children)
+                }
+                let result = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
                 guard generation == folderGeneration, !Task.isCancelled else { return }
                 // A reveal or folder expansion may have loaded more ancestors
                 // while this refresh was reading its earlier expansion set.
@@ -600,13 +606,13 @@ final class AppModel: ObservableObject {
                     refreshedChildren[path] = children[path]
                 }
                 rootEntries = result.0; children = refreshedChildren; startIndex()
-            } catch is CancellationError {} catch { showError(error) }
+            } catch is CancellationError {} catch { if generation == folderGeneration, !Task.isCancelled { showError(error) } }
         }
     }
     private func startIndex() {
-        guard let folderURL else { return }; let generation = folderGeneration; indexing = true
+        guard let folderURL else { return }; let generation = folderGeneration, showHiddenFiles = settings.showHiddenFiles; indexing = true
         indexTask = Task {
-            let worker = Task.detached(priority: .utility) { FolderScanner.index(folderURL) }
+            let worker = Task.detached(priority: .utility) { FolderScanner.index(folderURL, showHiddenFiles: showHiddenFiles) }
             let files = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
             guard generation == folderGeneration, !Task.isCancelled else { return }; indexedFiles = files; indexing = false
         }
@@ -615,11 +621,11 @@ final class AppModel: ObservableObject {
         if expanded.contains(entry.id) { expanded.remove(entry.id) }
         else {
             expanded.insert(entry.id)
-            let generation = folderGeneration
+            let generation = folderGeneration, showHiddenFiles = settings.showHiddenFiles
             Task {
-                do { let entries = try await Task.detached { try FolderScanner.children(of: entry.url) }.value
-                    if generation == folderGeneration { children[entry.id] = entries }
-                } catch { showError(error) }
+                do { let entries = try await Task.detached { try FolderScanner.children(of: entry.url, showHiddenFiles: showHiddenFiles) }.value
+                    if generation == folderGeneration, expanded.contains(entry.id) { children[entry.id] = entries }
+                } catch { if generation == folderGeneration { showError(error) } }
             }
         }
         if let folderURL { UserDefaults.standard.set(Array(expanded), forKey: "expanded:\(folderURL.path)") }
@@ -628,6 +634,7 @@ final class AppModel: ObservableObject {
         guard let documentURL else { return "문서를 열거나 저장한 뒤 찾을 수 있습니다" }
         guard let folderURL else { return "파일 목록에 표시할 폴더를 먼저 열어 주세요" }
         guard FileTreeReveal.directories(for: documentURL, inside: folderURL) != nil else { return "현재 문서는 열린 폴더에 없습니다" }
+        if !settings.showHiddenFiles, isHiddenWorkspacePath(documentURL) { return "숨김 파일·폴더 표시를 켠 뒤 찾을 수 있습니다" }
         if workspaceBusy { return "파일 작업이 끝난 뒤 찾을 수 있습니다" }
         if revealingCurrentFile { return "현재 문서를 찾는 중…" }
         return nil
@@ -635,11 +642,11 @@ final class AppModel: ObservableObject {
 
     func revealCurrentFileInSidebar() async {
         guard currentFileRevealUnavailableReason == nil, let documentURL, let folderURL else { return }
-        let generation = folderGeneration, session = sessionID
+        let generation = folderGeneration, session = sessionID, showHiddenFiles = settings.showHiddenFiles
         revealingCurrentFile = true
         defer { revealingCurrentFile = false }
         do {
-            let worker = Task.detached(priority: .userInitiated) { try FileTreeReveal.read(document: documentURL, inside: folderURL) }
+            let worker = Task.detached(priority: .userInitiated) { try FileTreeReveal.read(document: documentURL, inside: folderURL, showHiddenFiles: showHiddenFiles) }
             let snapshot = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
             guard !Task.isCancelled, generation == folderGeneration, session == sessionID,
                   self.documentURL == documentURL, !workspaceBusy else { return }
@@ -660,6 +667,24 @@ final class AppModel: ObservableObject {
     }
     func completeSidebarReveal(_ requestID: UUID) {
         if fileRevealRequest?.id == requestID { fileRevealRequest = nil }
+    }
+    private func isHiddenWorkspacePath(_ url: URL) -> Bool {
+        guard let root = folderURL?.standardizedFileURL else { return false }
+        var item = url.standardizedFileURL
+        while item.path.hasPrefix(root.path + "/") {
+            if item.lastPathComponent.hasPrefix(".") || (try? item.resourceValues(forKeys: [.isHiddenKey]).isHidden) == true { return true }
+            item.deleteLastPathComponent()
+        }
+        return false
+    }
+    private func hiddenFileVisibilityChanged() {
+        folderGeneration = UUID()
+        refreshTask?.cancel(); indexTask?.cancel()
+        rootEntries = []; children = [:]; indexedFiles = []; indexing = false
+        fileRevealRequest = nil; revealedFileSelection = nil
+        if !settings.showHiddenFiles, let scope = folderSearchScope, isHiddenWorkspacePath(scope) { folderSearchScope = nil }
+        invalidateFolderSearch(); replacementReview = nil
+        refreshFolder()
     }
     func isCurrentSidebarFile(_ entry: FileEntry) -> Bool {
         documentURL?.standardizedFileURL == entry.url.standardizedFileURL
@@ -767,6 +792,7 @@ struct FolderReplacementReview: Identifiable {
     let root: URL
     let query: String
     let replacement: String
+    let searchGeneration: UUID
     let plan: FolderSearch.ReplacementPlan
 }
 
@@ -1007,12 +1033,13 @@ extension AppModel {
         guard !workspaceBusy else { return }
         invalidateFolderSearch(); workspaceNotice = nil
         guard let root = folderSearchScope ?? folderURL, !folderQuery.isEmpty else { return }
-        let generation = searchGeneration, options = FolderSearch.Options(query: folderQuery, caseSensitive: folderCaseSensitive)
+        let generation = searchGeneration, options = FolderSearch.Options(query: folderQuery, caseSensitive: folderCaseSensitive, showHiddenFiles: settings.showHiddenFiles)
         folderSearching = true
         folderSearchTask = Task {
-            guard await beginWorkspaceChange() else { folderSearching = false; return }
+            guard await beginWorkspaceChange() else { if generation == searchGeneration { folderSearching = false }; return }
             let ready = await saveWorkspaceDocumentIfNeeded(in: root)
             endWorkspaceChange()
+            guard generation == searchGeneration else { return }
             guard ready, !Task.isCancelled else { folderSearching = false; return }
             let result = await FolderSearch.scan(folder: root, options: options)
             guard generation == searchGeneration, !Task.isCancelled else { return }
@@ -1035,13 +1062,15 @@ extension AppModel {
 
     func reviewFolderReplacement() {
         guard let root = folderSearchScope ?? folderURL, let report = folderSearchReport, report.isComplete, !report.files.isEmpty, !workspaceBusy else { return }
-        replacementReview = FolderReplacementReview(root: root, query: folderQuery, replacement: folderReplacement, plan: report.replacementPlan)
+        replacementReview = FolderReplacementReview(root: root, query: folderQuery, replacement: folderReplacement, searchGeneration: searchGeneration, plan: report.replacementPlan)
     }
 
     func applyFolderReplacement(_ review: FolderReplacementReview, selected: Set<URL>) async -> FolderSearch.ApplyReport? {
-        guard (folderSearchScope ?? folderURL) == review.root, !selected.isEmpty, await beginWorkspaceChange() else { return nil }
+        guard replacementReview?.id == review.id, review.searchGeneration == searchGeneration,
+              (folderSearchScope ?? folderURL) == review.root, !selected.isEmpty, await beginWorkspaceChange() else { return nil }
         defer { endWorkspaceChange() }
         guard await saveWorkspaceDocumentIfNeeded(in: review.root) else { return nil }
+        guard review.searchGeneration == searchGeneration, replacementReview?.id == review.id else { return nil }
         let report = await FolderSearch.apply(plan: review.plan, replacement: review.replacement, including: selected, store: store)
         if let documentURL, report.outcomes.contains(where: { $0.url == documentURL && $0.status == .saved }) {
             do { try await adoptRelocatedDocument(documentURL) } catch { hasConflict = true; showError(error) }

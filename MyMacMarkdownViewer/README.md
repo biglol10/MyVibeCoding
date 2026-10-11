@@ -4,17 +4,17 @@
 
 ## 다운로드
 
-- [Mac 0.3.7 Universal ZIP](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacMarkdownViewer/MyMarkdownViewer-0.3.7-macOS.zip)
+- [Mac 0.3.8 Universal ZIP](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacMarkdownViewer/MyMarkdownViewer-0.3.8-macOS.zip)
 - [Windows 0.3.8 x64 포터블 ZIP](https://github.com/biglol10/MyVibeCoding/releases/download/apps-2026-09-27/MyMarkdownViewer-0.3.8-Windows-x64.zip)
 - [Android 1.2.3 APK](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacMarkdownViewer/MarkdownReader-1.2.3-Android.apk)
 
-Windows는 공통 편집기 수정을 포함해 재패키징했습니다. Android 앱 코드는 변경되지 않아 기존 서명 APK를 유지합니다.
+이번 갱신은 macOS 0.3.8 (14)의 숨김 파일·폴더 표시 기능입니다. Windows 0.3.8과 Android 1.2.3은 기존 설치 파일을 유지합니다. [최신 배포 및 검증](../docs/releases/2026-10-11-markdownviewer-update.md)을 확인하세요.
 
 ## 실행
 
-공개 다운로드는 Mac 0.3.7 / Windows 0.3.8 / Android 1.2.3입니다. Mac·Windows에는 파일 목록에서 **현재 문서 찾기**를 추가했습니다. 코드 언어 헤더·테두리·여백이 커서 위치에 따라 달라지는 문제를 수정했습니다. [커서 위치 검증](docs/Code-Cursor-Layout-Verification-2026-09-13.md)을 참고하세요. 코드 블록을 클릭해도 코드 서식을 유지하고, 다이어그램 편집 시 원문과 그림을 함께 표시합니다. 앱을 다시 열면 각 기기에서 마지막 문서·읽던 위치·폴더를 복원합니다. Windows의 링크·코드와 Android의 코드·표 가독성 보완도 새 ZIP·APK에 포함했습니다. [표시 수정과 검증 범위](docs/Code-Preview-Verification-2026-09-12.md), [가독성 검토](docs/Readability-Review-2026-09-13.md), [코드 언어 표시 검증](docs/Code-Language-Verification-2026-09-13.md)를 참고하세요. Mac 설치본은 0.3.7 (13)입니다. 표 입력 보존, 검색창 실행 취소, 자동 저장 초점, 링크 이동과 충돌 해결 흐름을 수정했습니다. [수정 및 검증 기록](../docs/releases/2026-09-27-app-update.md)을 확인하세요.
+공개 다운로드는 Mac 0.3.8 / Windows 0.3.8 / Android 1.2.3입니다. Mac·Windows에는 파일 목록에서 **현재 문서 찾기**를 추가했습니다. 코드 언어 헤더·테두리·여백이 커서 위치에 따라 달라지는 문제를 수정했습니다. [커서 위치 검증](docs/Code-Cursor-Layout-Verification-2026-09-13.md)을 참고하세요. 코드 블록을 클릭해도 코드 서식을 유지하고, 다이어그램 편집 시 원문과 그림을 함께 표시합니다. 앱을 다시 열면 각 기기에서 마지막 문서·읽던 위치·폴더를 복원합니다. Windows의 링크·코드와 Android의 코드·표 가독성 보완도 새 ZIP·APK에 포함했습니다. [표시 수정과 검증 범위](docs/Code-Preview-Verification-2026-09-12.md), [가독성 검토](docs/Readability-Review-2026-09-13.md), [코드 언어 표시 검증](docs/Code-Language-Verification-2026-09-13.md)를 참고하세요. Mac 최신 배포본은 0.3.8 (14)이며 숨김 항목 표시 옵션을 포함합니다. 표 입력 보존, 검색창 실행 취소, 자동 저장 초점, 링크 이동과 충돌 해결 흐름의 이전 수정은 [수정 및 검증 기록](../docs/releases/2026-09-27-app-update.md)을 확인하세요.
 
-현재 배포 파일은 `dist/MyMarkdownViewer.app`과 `dist/MyMarkdownViewer-0.3.7-macOS.zip`입니다. 앱을 원하는 위치에 복사해서 실행할 수 있습니다. macOS 14 이상을 대상으로 하며 Apple Silicon과 Intel 실행 파일을 함께 포함합니다.
+현재 배포 파일은 `dist/MyMarkdownViewer.app`과 `dist/MyMarkdownViewer-0.3.8-macOS.zip`입니다. 앱을 원하는 위치에 복사해서 실행할 수 있습니다. macOS 14 이상을 대상으로 하며 Apple Silicon과 Intel 실행 파일을 함께 포함합니다.
 
 현재 배포본은 개인 실행용 ad-hoc 서명입니다. Developer ID 서명과 Apple 공증은 포함되지 않았습니다. 다른 Mac으로 옮겼을 때 Gatekeeper의 배포 검증을 통과하는 공증된 배포본으로 간주하면 안 됩니다.
 
@@ -29,6 +29,7 @@ Mac 0.3.6·Windows 0.3.7에는 **현재 문서 찾기** 버튼을 추가했습�
 | 저장 / 다른 이름으로 저장 | ⌘S / ⌘⇧S |
 | 실행 취소 / 다시 실행 | ⌘Z / ⌘⇧Z |
 | 빠른 파일 열기 | ⌘P |
+| 숨김 파일·폴더 표시 | ⌘⇧. / 보기 메뉴 / 설정의 파일 탐색 |
 | 문서 검색 / 바꾸기 | ⌘F / ⌘⌥F |
 | 폴더 전체 본문 검색 | ⌘⇧F / 사이드바 → 검색 |
 | 라이브 편집 / 원문 전환 | ⌘⇧M |
@@ -104,7 +105,8 @@ npm --prefix Editor run test:browser
 - 열린 문서를 이동할 때 미저장 내용을 먼저 저장합니다. 이동한 문서 내부의 상대 링크를 보정하고, 폴더 내부에서 함께 이동하는 연결은 유지합니다. 다른 문서에서 이동한 파일을 가리키는 링크는 자동 수정하지 않습니다.
 - 검색 탭에서는 하위 폴더의 보이는 `.md`·`.markdown` 문서(대소문자 무관)를 일반 문자열로 검색합니다. 결과를 누르면 일치한 글자를 선택합니다. 검색할 때 작업 폴더 안의 열린 문서에 미저장 변경이 있으면 먼저 저장합니다.
 - 전체 바꾸기는 변경 내용을 미리 확인하고 파일별 적용 여부를 선택합니다. 파일 변경·삭제·경로 변경을 적용 전에 재검사하며, 일부 저장만 성공하면 파일별 결과를 표시합니다. 여러 파일 변경을 한 번에 실행 취소하는 기능은 없습니다. 저장 전 백업은 기존 파일별 백업 방식으로 남습니다.
-- 검색 결과가 1,000개를 넘거나 읽기 오류가 있으면 불완전한 검색임을 표시하고 전체 바꾸기를 잠급니다. 숨김 항목·심볼릭 링크·패키지 내부는 검색 대상에서 제외합니다.
+- macOS에서 `보기 → 숨김 파일·폴더 표시`(⌘⇧.) 또는 설정의 `파일 탐색`으로 `.claude` 같은 숨김 항목을 표시할 수 있습니다. 파일 목록·빠른 파일 열기·폴더 검색·현재 문서 찾기에 같은 설정을 적용하며 재실행 후에도 유지합니다. 기본값은 숨김이고, 표시를 꺼도 열려 있는 문서는 유지합니다.
+- 검색 결과가 1,000개를 넘거나 읽기 오류가 있으면 불완전한 검색임을 표시하고 전체 바꾸기를 잠급니다. 숨김 항목은 macOS의 표시 설정을 따르며 심볼릭 링크·패키지 내부는 계속 제외합니다. Windows·Android에는 이번 옵션을 추가하지 않았습니다.
 
 표 셀 편집, 참조 링크·각주·본문 `[toc]`·문서 메타데이터 표시, 집중·타자기 모드, HTML/PDF 내보내기와 인쇄를 제공합니다. 내보내기는 전체 문서를 대상으로 하며 로컬 이미지와 수식 글꼴을 포함합니다. 외부 이미지는 내보내기에 자동 포함하지 않습니다. 이미지 파일·DOCX·EPUB 내보내기와 사용자 CSS 테마는 아직 포함되지 않습니다. 실제 두벌식 검증도 [별도 체크리스트](docs/Korean-IME-Checklist.md)의 실제 입력 결과가 필요합니다.
 
