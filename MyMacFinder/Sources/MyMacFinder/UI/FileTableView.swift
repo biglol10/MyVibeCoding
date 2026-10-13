@@ -81,7 +81,7 @@ struct FileTableView: NSViewRepresentable {
         tableView.delegate = context.coordinator
         tableView.dataSource = context.coordinator
         tableView.allowsMultipleSelection = true
-        tableView.usesAlternatingRowBackgroundColors = true
+        tableView.usesAlternatingRowBackgroundColors = !entries.isEmpty
         tableView.doubleAction = #selector(Coordinator.doubleClicked(_:))
         tableView.target = context.coordinator
         tableView.menuProvider = context.coordinator
@@ -101,6 +101,7 @@ struct FileTableView: NSViewRepresentable {
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = true
+        scrollView.contentView = ContextMenuClipView()
         scrollView.documentView = tableView
         context.coordinator.tableView = tableView
         context.coordinator.requestInitialFocusIfNeeded()
@@ -496,6 +497,7 @@ struct FileTableView: NSViewRepresentable {
         }
 
         func reloadDataIfNeeded() {
+            tableView?.usesAlternatingRowBackgroundColors = !parent.entries.isEmpty
             guard renderedEntries != parent.entries else {
                 return
             }
@@ -1193,6 +1195,18 @@ struct FileTableView: NSViewRepresentable {
             }
         }
 
+    }
+
+    @MainActor
+    final class ContextMenuClipView: NSClipView {
+        override func menu(for event: NSEvent) -> NSMenu? {
+            guard let tableView = documentView as? ContextMenuTableView else {
+                return super.menu(for: event)
+            }
+            tableView.window?.makeFirstResponder(tableView)
+            tableView.menuProvider?.handleTableFocus()
+            return tableView.menu(for: event)
+        }
     }
 
     @MainActor

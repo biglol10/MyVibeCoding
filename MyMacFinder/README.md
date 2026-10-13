@@ -2,9 +2,9 @@
 
 ## 다운로드
 
-[최신 개인용 macOS 설치 ZIP](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacFinder/MyMacFinder-personal-mac.zip) · [VS Code 확장 0.1.1](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacFinder/mymacfinder-open-0.1.1.vsix) · [최신 변경 및 검증](../docs/releases/2026-10-01-mymacfinder-update.md)
+[최신 개인용 macOS 설치 ZIP](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacFinder/MyMacFinder-personal-mac.zip) · [VS Code 확장 0.1.1](https://github.com/biglol10/MyVibeCoding/raw/main/downloads/MyMacFinder/mymacfinder-open-0.1.1.vsix) · [최신 변경 및 검증](../docs/releases/2026-10-13-file-managers-update.md)
 
-2026-10-01 새 폴더 생성·이름 변경, 짧은 작업의 진행 표시, ZIP 시간 및 외부 앱에서 열기 변경을 반영한 개인 사용용 빌드입니다. Apple 공증을 받은 배포본은 아닙니다.
+2026-10-13 폴더 트리·SMB 서버 연결과 빈 폴더 배경의 우클릭 메뉴 수정을 반영한 Apple Silicon(arm64) 개인 사용용 빌드입니다. Apple 공증을 받은 배포본은 아닙니다. 기존 새 폴더 생성·이름 변경, 진행 표시, ZIP 시간 및 외부 앱 연동은 유지합니다.
 
 MyMacFinder는 macOS Finder를 Windows 파일 탐색기와 ForkLift에 가까운 사용감으로 보완하기 위한 로컬 우선 파일 관리자 앱입니다. SwiftUI와 AppKit을 함께 사용해서 Finder의 기본 파일 작업을 유지하면서 single/dual pane, inspector, 탭, 고급 검색, 압축 파일 탐색, Finder tags, 컨텍스트 메뉴, 단축키를 제공합니다.
 
@@ -15,6 +15,8 @@ MyMacFinder는 macOS Finder를 Windows 파일 탐색기와 ForkLift에 가까운
 - 탭 생성, 닫기, 이전/다음 탭 이동
 - 경로 입력, 뒤로/앞으로/상위 폴더 이동, 경로 입력창 명령(`cmd`, `terminal`, `code .`, `open .`)
 - Sidebar: 기본 Favorites, Recent Folders, Locations, 사용자 추가/삭제/정렬 가능한 Favorites
+- Favorites 아래의 Folder Tree: 기본 접힘, 펼침 상태 저장, 필요한 하위 폴더만 읽기
+- Locations / Go 메뉴의 Connect to Server…(⌘K): SMB 주소 검증, 로그인·마운트는 macOS에 위임
 - 파일/폴더 목록: 이름, 크기, 수정일, 종류, Finder Tags 열
 - 컨텍스트 메뉴 Open With, 폴더 Open in Terminal / Open in VS Code, 빈 영역/행 내부 여백 Open in Terminal
 - 정렬: 이름, 크기, 종류, 확장자, 생성일, 수정일, 접근일, hidden 여부, 폴더/파일 그룹 정렬
@@ -288,7 +290,7 @@ scripts/package_personal.sh
 - 공개 배포용 Developer ID 서명, notarization, auto-update는 아직 연결되어 있지 않습니다.
 - ZIP 내부 항목은 가상 항목이므로 이름 변경, 삭제, Finder Tags 편집 같은 직접 쓰기 작업은 제공하지 않습니다.
 - 텍스트 preview는 Inspector 반응성을 위해 기본 64KB까지만 읽으며, Settings에서 16KB/64KB/256KB/1MB 중 선택할 수 있습니다. Smart mode에서는 큰 visual 파일의 inline thumbnail 생성을 건너뜁니다. 전체 파일 확인은 Open 또는 Quick Look을 사용하세요.
-- 네트워크 볼륨은 mounted volume으로 탐색할 수 있지만, SMB/NFS 연결을 새로 생성하는 전용 UI는 없습니다.
+- Locations / Go 메뉴의 **Connect to Server…**(⌘K)에서 SMB 서버 연결을 요청합니다. 주소의 사용자 이름·비밀번호는 거절하며 인증과 마운트는 macOS가 담당합니다. 앱은 비밀번호를 저장하지 않습니다. 연결 후 Locations를 새로고침하세요. NFS 연결 전용 UI는 없습니다. 이번 배포에서는 실제 서버 인증·마운트를 새로 검증하지 않았습니다.
 - Finder Tags는 macOS resource value 기반이라 파일 시스템이나 볼륨에 따라 지원되지 않을 수 있습니다.
 - Redo, Spotlight index/content 검색, Windows식 접이형 Group By UI는 아직 제공하지 않습니다.
 - 실제 GUI에서 준비 중 tab/pane 전환, 느린 대용량 항목의 generator cancellation, Quick Look panel replacement, 주입된 default-open 실패 표시는 자동 회귀 테스트로 검증했지만 release 앱 수동 재현은 추가 확인 대상입니다. 실제 GUI로는 normal/ZIP Quick Look, panel close cleanup, PDF -> PNG -> text 최종 선택, ZIP default-open/retention, 만료 cleanup, Quick Look 도중 프로세스 종료 후 durable retry를 확인했습니다.

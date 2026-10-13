@@ -6,7 +6,9 @@ PaneHarbor는 두 창과 탭으로 파일을 정리하는 macOS 15 이상용 로
 
 - [Mac 개인 설치 ZIP](../downloads/PaneHarbor/PaneHarbor-personal-mac.zip) · [SHA-256](../downloads/PaneHarbor/PaneHarbor-personal-mac.zip.sha256)
 - [VS Code 확장 VSIX](../downloads/PaneHarbor/paneharbor-open-0.1.1.vsix) · [SHA-256](../downloads/PaneHarbor/paneharbor-open-0.1.1.vsix.sha256)
-- [최신 배포의 검증 범위와 주의사항](../docs/releases/2026-10-11-paneharbor-update.md)
+- [최신 배포의 검증 범위와 주의사항](../docs/releases/2026-10-13-file-managers-update.md)
+
+2026-10-13 갱신은 빈 폴더와 짧은 목록 아래 빈 영역의 우클릭 메뉴를 복구하고, 빈 폴더의 줄무늬 배경을 없앱니다. 메뉴를 열 때 해당 패널의 포커스와 기존 선택을 유지하도록 보완했습니다.
 
 개인 설치 ZIP은 Apple Silicon(arm64)용입니다. 압축을 풀어 `Install PaneHarbor.command`를 실행하면 표준 경로 `/Applications/PaneHarbor.app`에 복사합니다. 기존 동일 경로의 앱은 같은 폴더의 `.saved-bundle`로 백업합니다. 과거 이름인 `PaneHarbor Preview.app`은 설치 스크립트가 자동 제거하지 않습니다. 설치 앱은 ad-hoc 서명이며 Developer ID 공증본이 아닙니다. 설치 스크립트는 서명을 검사한 뒤 다운로드 격리 속성을 제거합니다. 출처를 신뢰하는 본인 Mac에서만 사용하세요.
 

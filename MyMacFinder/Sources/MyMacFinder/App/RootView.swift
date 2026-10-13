@@ -43,6 +43,7 @@ struct RootView: View {
                 }
             }
         }
+        .sheet(isPresented: $explorerStore.isServerConnectionPresented) { ServerConnectionView() }
         .alert("MyMacFinder", isPresented: explorerStore.hasVisibleError) {
             if let guidance = explorerStore.visibleErrorGuidance,
                let actionTitle = guidance.primaryActionTitle {

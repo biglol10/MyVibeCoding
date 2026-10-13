@@ -294,6 +294,134 @@ final class FileTableViewReuseTests: XCTestCase {
         XCTAssertEqual(commands, [.openInTerminal])
     }
 
+    func testMountedEmptyTableDisablesAlternatingRowsAndRestoresThemWhenPopulated() throws {
+        let harness = MountedContextMenuHarness(entries: [])
+        defer { harness.unmount() }
+        let tableView = try harness.tableView()
+
+        XCTAssertEqual(tableView.numberOfRows, 0)
+        XCTAssertFalse(tableView.usesAlternatingRowBackgroundColors)
+
+        harness.model.entries = [makeTableEntry(name: "Created Folder")]
+        harness.updateLayout()
+        XCTAssertEqual(tableView.numberOfRows, 1)
+        XCTAssertTrue(tableView.usesAlternatingRowBackgroundColors)
+
+        harness.model.entries = []
+        harness.updateLayout()
+        XCTAssertEqual(tableView.numberOfRows, 0)
+        XCTAssertFalse(tableView.usesAlternatingRowBackgroundColors)
+
+        harness.model.entries = [makeTableEntry(name: "Renamed Folder")]
+        harness.updateLayout()
+        XCTAssertEqual(tableView.numberOfRows, 1)
+        XCTAssertTrue(tableView.usesAlternatingRowBackgroundColors)
+    }
+
+    func testMountedEmptyClipBackgroundRoutesMenuCommandsAndFocusToTable() throws {
+        let harness = MountedContextMenuHarness(entries: [])
+        defer { harness.unmount() }
+        let tableView = try harness.tableView()
+        let clipView = try XCTUnwrap(tableView.enclosingScrollView?.contentView)
+        let hitView = try clipBackgroundHitView(clipView, below: tableView)
+        let point = NSPoint(x: clipView.bounds.midX, y: clipView.bounds.maxY - 8)
+        let event = rightClickEvent(at: point, in: clipView)
+        let menu = try XCTUnwrap(hitView.menu(for: event))
+
+        XCTAssertNil(menu.item(withTitle: "Open"))
+        for command in [ExplorerCommand.newFolder, .paste, .refresh] {
+            let item = try XCTUnwrap(menu.item(withTitle: command.title))
+            XCTAssertTrue(item.isEnabled, "\(command) should remain usable in an empty folder")
+            let action = try XCTUnwrap(item.action)
+            let target = try XCTUnwrap(item.target as? NSObject)
+            _ = target.perform(action, with: item)
+        }
+        XCTAssertEqual(harness.model.commands, [.newFolder, .paste, .refresh])
+        XCTAssertTrue(tableView.selectedRowIndexes.isEmpty)
+
+        // NSTableView may expand to fill its clip view. Exercise the clip fallback
+        // separately from the actual hit recipient, including its focus routing.
+        harness.window.makeFirstResponder(nil)
+        harness.model.focusCount = 0
+        let clipMenu = try XCTUnwrap(clipView.menu(for: event))
+        XCTAssertEqual(clipMenu.items.map(\.title), menu.items.map(\.title))
+        XCTAssertTrue(harness.window.firstResponder === tableView)
+        XCTAssertGreaterThan(harness.model.focusCount, 0)
+    }
+
+    func testMountedEmptyClipMenuPreservesDisabledPasteState() throws {
+        let harness = MountedContextMenuHarness(entries: [], canPaste: false)
+        defer { harness.unmount() }
+        let tableView = try harness.tableView()
+        let clipView = try XCTUnwrap(tableView.enclosingScrollView?.contentView)
+        let hitView = try clipBackgroundHitView(clipView, below: tableView)
+        let point = NSPoint(x: clipView.bounds.midX, y: clipView.bounds.maxY - 8)
+
+        let menu = try XCTUnwrap(hitView.menu(for: rightClickEvent(at: point, in: clipView)))
+
+        XCTAssertFalse(try XCTUnwrap(menu.item(withTitle: "Paste")).isEnabled)
+        XCTAssertTrue(try XCTUnwrap(menu.item(withTitle: "New Folder")).isEnabled)
+        XCTAssertTrue(try XCTUnwrap(menu.item(withTitle: "Refresh")).isEnabled)
+    }
+
+    func testMountedShortListClipBackgroundKeepsSelectionAndShowsEmptyMenu() throws {
+        let entry = makeTableEntry(name: "Projects")
+        let harness = MountedContextMenuHarness(entries: [entry], selectedURLs: [entry.url])
+        defer { harness.unmount() }
+        let tableView = try harness.tableView()
+        let clipView = try XCTUnwrap(tableView.enclosingScrollView?.contentView)
+        let hitView = try clipBackgroundHitView(clipView, below: tableView)
+        let point = NSPoint(x: clipView.bounds.midX, y: clipView.bounds.maxY - 8)
+        let event = rightClickEvent(at: point, in: clipView)
+        XCTAssertTrue(hitView === clipView || hitView === tableView || hitView.isDescendant(of: tableView))
+
+        // AppKit can hit a private row-background subview in unused table space.
+        // Its default rightMouseDown forwards to nextResponder when it has no menu.
+        var responder: NSResponder? = hitView
+        var visited: Set<ObjectIdentifier> = []
+        var responderMenu: NSMenu?
+        var menuTrace: [String] = []
+        while let current = responder, visited.insert(ObjectIdentifier(current)).inserted {
+            let menu = (current as? NSView)?.menu(for: event)
+            menuTrace.append("\(String(describing: type(of: current))): menu=\(menu != nil)")
+            if let menu {
+                responderMenu = menu
+                break
+            }
+            responder = current.nextResponder
+        }
+        let chain = menuTrace.joined(separator: " -> ")
+        print("Mounted short-list menu: clipBounds=\(clipView.bounds) tableBounds=\(tableView.bounds) clipPoint=\(point) tablePoint=\(tableView.convert(point, from: clipView)) hit=\(String(describing: type(of: hitView))) chain=\(chain)")
+        let menu = try XCTUnwrap(responderMenu)
+
+        XCTAssertNotNil(menu.item(withTitle: "New Folder"))
+        XCTAssertNotNil(menu.item(withTitle: "Paste"))
+        XCTAssertNil(menu.item(withTitle: "Open"))
+        XCTAssertEqual(tableView.selectedRowIndexes, [0])
+        XCTAssertEqual(harness.model.selectedURLs, [entry.url])
+
+        let clipMenu = try XCTUnwrap(clipView.menu(for: rightClickEvent(at: point, in: clipView)))
+        XCTAssertEqual(clipMenu.items.map(\.title), menu.items.map(\.title))
+        XCTAssertTrue(harness.window.firstResponder === tableView)
+    }
+
+    func testMountedClipForwardingPreservesFileContentMenuAndSelection() throws {
+        let entries = [makeTableEntry(name: "Alpha"), makeTableEntry(name: "Beta")]
+        let harness = MountedContextMenuHarness(entries: entries, selectedURLs: [entries[0].url])
+        defer { harness.unmount() }
+        let tableView = try harness.tableView()
+        let clipView = try XCTUnwrap(tableView.enclosingScrollView?.contentView)
+        let point = NSPoint(x: tableView.rect(ofColumn: 0).minX + 12, y: tableView.rect(ofRow: 1).midY)
+        let event = rightClickEvent(at: point, in: tableView)
+
+        let menu = try XCTUnwrap(clipView.menu(for: event))
+
+        XCTAssertNotNil(menu.item(withTitle: "Open"))
+        XCTAssertNil(menu.item(withTitle: "New Folder"))
+        XCTAssertEqual(tableView.selectedRowIndexes, [1])
+        XCTAssertEqual(harness.model.selectedURLs, [entries[1].url])
+    }
+
     func testRightClickingTrailingRowWhitespaceShowsEmptyAreaMenuWithoutChangingSelection() throws {
         let entries = [
             makeTableEntry(name: "Alpha"),
@@ -628,6 +756,24 @@ final class FileTableViewReuseTests: XCTestCase {
         XCTAssertNil(hostingView.inlineRenameEditor)
         XCTAssertEqual(model.renamedNames, ["renamed.txt"])
         XCTAssertTrue(window.firstResponder === tableView)
+        XCTAssertTrue(model.commands.isEmpty)
+
+        let openEvent = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 1,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: "\r",
+            charactersIgnoringModifiers: "\r",
+            isARepeat: false,
+            keyCode: 36
+        ))
+        tableView.keyDown(with: openEvent)
+
+        XCTAssertEqual(model.commands, [.open])
+        XCTAssertEqual(model.renamedNames, ["renamed.txt"])
     }
 
     func testMountedInlineRenameCommitsFocusLossDuringEditorPreparation() throws {
@@ -1929,11 +2075,110 @@ private func rightClickEvent(at point: NSPoint) -> NSEvent {
 }
 
 @MainActor
+private func rightClickEvent(at point: NSPoint, in view: NSView) -> NSEvent {
+    NSEvent.mouseEvent(
+        with: .rightMouseDown,
+        location: view.convert(point, to: nil),
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: view.window?.windowNumber ?? 0,
+        context: nil,
+        eventNumber: 0,
+        clickCount: 1,
+        pressure: 0
+    )!
+}
+
+@MainActor
+private func clipBackgroundHitView(_ clipView: NSClipView, below tableView: NSTableView) throws -> NSView {
+    let point = NSPoint(x: clipView.bounds.midX, y: clipView.bounds.maxY - 8)
+    let documentPoint = tableView.convert(point, from: clipView)
+    XCTAssertEqual(tableView.row(at: documentPoint), -1, "The click must reach blank space below the actual rows")
+    let pointInSuperview = clipView.convert(point, to: clipView.superview)
+    return try XCTUnwrap(clipView.hitTest(pointInSuperview))
+}
+
+@MainActor
+private final class MountedContextMenuModel: ObservableObject {
+    @Published var entries: [FileEntry]
+    @Published var selectedURLs: Set<URL>
+    let canPaste: Bool
+    var commands: [ExplorerCommand] = []
+    var focusCount = 0
+
+    init(entries: [FileEntry], selectedURLs: Set<URL>, canPaste: Bool) {
+        self.entries = entries
+        self.selectedURLs = selectedURLs
+        self.canPaste = canPaste
+    }
+}
+
+private struct MountedContextMenuView: View {
+    @ObservedObject var model: MountedContextMenuModel
+
+    var body: some View {
+        FileTableView(
+            entries: model.entries,
+            selectedURLs: model.selectedURLs,
+            canPaste: model.canPaste,
+            canUndo: false,
+            canCloseTab: false,
+            currentURL: URL(fileURLWithPath: "/tmp", isDirectory: true),
+            currentLocation: .fileSystem(URL(fileURLWithPath: "/tmp", isDirectory: true)),
+            currentSort: EntrySortDescriptor(),
+            showsPathColumn: false,
+            onFocus: { model.focusCount += 1 },
+            onSelectionChange: { model.selectedURLs = $0 },
+            onOpen: { _ in },
+            onCommand: { model.commands.append($0) },
+            onDropItems: { _, _, _ in },
+            onSortChange: { _ in }
+        )
+    }
+}
+
+@MainActor
+private final class MountedContextMenuHarness {
+    let model: MountedContextMenuModel
+    let hostingView: NSHostingView<MountedContextMenuView>
+    let window: NSWindow
+
+    init(entries: [FileEntry], selectedURLs: Set<URL> = [], canPaste: Bool = true) {
+        model = MountedContextMenuModel(entries: entries, selectedURLs: selectedURLs, canPaste: canPaste)
+        hostingView = NSHostingView(rootView: MountedContextMenuView(model: model))
+        window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 400),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        updateLayout()
+    }
+
+    func tableView() throws -> FileTableView.ContextMenuTableView {
+        try XCTUnwrap(hostingView.firstDescendant(ofType: FileTableView.ContextMenuTableView.self))
+    }
+
+    func updateLayout() {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        hostingView.layoutSubtreeIfNeeded()
+    }
+
+    func unmount() {
+        window.orderOut(nil)
+        window.contentView = nil
+    }
+}
+
+@MainActor
 private final class MountedInlineRenameModel: ObservableObject {
     let paneID = PaneID()
     let entry: FileEntry
     @Published var inlineRenameRequest: InlineRenameRequest?
     var renamedNames: [String] = []
+    var commands: [ExplorerCommand] = []
 
     init(entry: FileEntry) {
         self.entry = entry
@@ -1960,7 +2205,7 @@ private struct MountedInlineRenameView: View {
             onSelectionChange: { _ in },
             onOpen: { _ in },
             onRename: { _, _, newName in model.renamedNames.append(newName) },
-            onCommand: { _ in },
+            onCommand: { model.commands.append($0) },
             onDropItems: { _, _, _ in },
             onSortChange: { _ in }
         )

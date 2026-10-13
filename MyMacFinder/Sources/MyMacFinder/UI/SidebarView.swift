@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct SidebarView: View {
     @EnvironmentObject private var explorerStore: ExplorerStore
     @State private var draggingFavoriteID: SidebarFavorite.ID?
+    @AppStorage("MyMacFinder.folderTreeExpanded") private var isFolderTreeExpanded = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -49,12 +50,6 @@ struct SidebarView: View {
                             )
                             .frame(width: rowWidth, alignment: .leading)
                             .contentShape(Rectangle())
-                            .simultaneousGesture(TapGesture().onEnded {
-                                guard !item.isMissing else {
-                                    return
-                                }
-                                Task { await explorerStore.navigateFromSidebar(to: item.favorite.url) }
-                            })
                             .contextMenu {
                                 Button("Move Up") {
                                     explorerStore.moveFavoriteUp(id: item.id)
@@ -72,6 +67,13 @@ struct SidebarView: View {
                     favoriteEndDropTarget(rowWidth: rowWidth)
                     addCurrentFolderButton(rowWidth: rowWidth)
                 }
+
+                DisclosureGroup(isExpanded: $isFolderTreeExpanded) {
+                    FolderTreeView().foregroundStyle(.primary)
+                } label: {
+                    Text("Folder Tree").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 8)
 
                 if !explorerStore.recentFolders.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
@@ -94,6 +96,10 @@ struct SidebarView: View {
                         }
                         .buttonStyle(.plain)
                         .help("Refresh Locations")
+                    }
+
+                    sidebarButton("Connect to Server…", systemImage: "network", rowWidth: rowWidth) {
+                        explorerStore.isServerConnectionPresented = true
                     }
 
                     ForEach(explorerStore.mountedVolumes) { volume in

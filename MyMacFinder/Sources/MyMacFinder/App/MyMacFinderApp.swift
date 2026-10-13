@@ -38,6 +38,12 @@ struct MyMacFinderApp: App {
                 }
         }
         .commands {
+            CommandMenu("Go") {
+                Button("Connect to Server…") {
+                    explorerStore.isServerConnectionPresented = true
+                }
+                .keyboardShortcut("k", modifiers: [.command])
+            }
             CommandGroup(replacing: .newItem) {
                 Button("New Tab") {
                     perform(.newTab)

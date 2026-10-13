@@ -131,6 +131,8 @@ public final class ExplorerStore: ObservableObject {
     @Published private var isOperationProgressVisible: Bool
     @Published public private(set) var isToolbarTextInputFocused: Bool
     @Published public private(set) var grantedFolderSummaries: [FolderAccessGrantSummary]
+    @Published public var isServerConnectionPresented = false
+    @Published public private(set) var directoryListingRevision: UInt64 = 0
     @Published public private(set) var folderAccessPersistenceErrorMessage: String?
     @Published public private(set) var pendingPermissionRecoveryPath: String?
     @Published public private(set) var settingsPersistenceErrorMessage: String?
@@ -3519,6 +3521,7 @@ public final class ExplorerStore: ObservableObject {
         pane.error = nil
         pane.isLoading = false
         panes[targetPaneIndex] = pane
+        directoryListingRevision &+= 1
         restoredPaneIDsAwaitingInitialLoad.remove(targetPaneID)
 
         if targetPaneIndex == activePaneIndex {

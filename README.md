@@ -26,6 +26,8 @@ PaneHarbor는 2026-10-03 별도 로컬 베타로 추가했습니다. [설치 방
 
 PaneHarbor의 2026-10-11 갱신은 표준 설치 경로 `/Applications/PaneHarbor.app` 안내와 개발 빌드의 중복 앱 등록 방지 처리를 반영했습니다. [최신 배포 및 검증](docs/releases/2026-10-11-paneharbor-update.md)을 확인하세요.
 
+2026-10-13에는 PaneHarbor·MyMacFinder의 빈 폴더 우클릭 메뉴 수정을 반영하고 두 설치 ZIP을 갱신했습니다. MyMacFinder에는 접이식 폴더 트리와 SMB 서버 연결도 추가했습니다. [두 앱의 최신 변경 및 검증](docs/releases/2026-10-13-file-managers-update.md)을 확인하세요.
+
 ## 클론
 
 ```bash
